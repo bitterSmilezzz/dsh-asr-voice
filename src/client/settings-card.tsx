@@ -134,7 +134,7 @@ function HotkeyRecorder({ value, onChange, t }: { value: string; onChange: (v: s
       />
       <button
         type="button"
-        className="dshav-button dshav-button-ghost"
+        className="dshav-button dshav-button-outline dshav-button-sm"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => onChange('')}
       >

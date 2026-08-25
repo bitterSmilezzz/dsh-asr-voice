@@ -224,27 +224,45 @@ export const CSS = `
   gap: 8px;
 }
 .dshav-button {
-  border: 0;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 12.5px;
-  line-height: 1.4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: none;
+  border-radius: 18px;
   cursor: pointer;
-  transition: filter .15s ease, transform .15s ease;
-}
-.dshav-button:active { transform: scale(.97); }
-.dshav-button-ghost {
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  height: 36px;
+  padding: 0 14px;
+  color: var(--dsw-alias-label-primary);
   background: transparent;
-  color: var(--dshav-text-2);
-  border: 1px solid var(--dshav-border);
+  transition: background .15s ease, color .15s ease;
 }
-.dshav-button-ghost:hover { background: var(--dshav-bg-layer); }
+.dshav-button:disabled { cursor: not-allowed; opacity: .4; }
+.dshav-button-sm {
+  height: 28px;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 10px;
+  border-radius: 14px;
+}
 .dshav-button-primary {
-  background: var(--dshav-accent);
-  color: #fff;
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
 }
-.dshav-button-primary:hover { filter: brightness(1.06); }
+.dshav-button-primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }
+.dshav-button-outline {
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: transparent;
+}
+.dshav-button-outline:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.dshav-button-ghost:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.dshav-button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
 
 /* ── 设置卡片（对齐官方 PluginCard：折叠 + hover/cardOpen/focus） ── */
 .dshav-card {
@@ -300,13 +318,14 @@ export const CSS = `
   padding-bottom: 8px;
 }
 .dshav-group { display: flex; flex-direction: column; }
+/* 分组之间用与字段一致的分割线（官方 border-l2）。 */
+.dshav-group + .dshav-group { border-top: 1px solid var(--dsw-alias-border-l2); }
 .dshav-groupTitle {
-  margin: 14px 0 0;
-  font-size: 12px;
+  margin: 14px 0 2px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--dsw-alias-label-tertiary);
-  text-transform: uppercase;
-  letter-spacing: .04em;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
 }
 /* 字段：垂直布局（label / control / hint），字段间 border-top —— 对齐官方 fields */
 .dshav-field-item {
@@ -325,10 +344,11 @@ export const CSS = `
   line-height: 1.5;
   color: var(--dsw-alias-label-primary);
 }
-.dshav-field-control { display: flex; }
+.dshav-field-control { display: flex; width: 100%; min-width: 0; }
 .dshav-field-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
 .dshav-stack { display: flex; flex-direction: column; }
-.dshav-field { display: flex; align-items: center; gap: 8px; flex: none; }
+.dshav-field { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.dshav-field:has(input[type='checkbox']) { flex: 0 0 auto; }
 /* ── 原生控件：跟随 DSH 主题（--dsw-alias-*），与官方设置页一致 ── */
 .dshav-field select,
 .dshav-field input[type='text'],
@@ -365,8 +385,7 @@ export const CSS = `
   background-size: 12px 12px;
 }
 .dshav-field input[type='text'],
-.dshav-field input[type='password'] { width: 240px; }
-.dshav-field input.dshav-wide { width: 320px; }
+.dshav-field input[type='password'] { width: 100%; }
 /* checkbox：原生 + 主题品牌色（与官方一致） */
 .dshav-field input[type='checkbox'] {
   flex: none;

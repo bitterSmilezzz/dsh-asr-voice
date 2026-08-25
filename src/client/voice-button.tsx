@@ -290,8 +290,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             <p className="dshav-preview-text" data-role="optimized">{preview.optimized}</p>
           </div>
           <div className="dshav-preview-actions">
-            <button type="button" className="dshav-button dshav-button-ghost" onClick={() => setPreview(null)}>{t('previewCancel')}</button>
-            <button type="button" className="dshav-button dshav-button-primary" onClick={onConfirm}>{t('previewConfirm')}</button>
+            <button type="button" className="dshav-button dshav-button-outline dshav-button-sm" onClick={() => setPreview(null)}>{t('previewCancel')}</button>
+            <button type="button" className="dshav-button dshav-button-primary dshav-button-sm" onClick={onConfirm}>{t('previewConfirm')}</button>
           </div>
         </div>
       )}
