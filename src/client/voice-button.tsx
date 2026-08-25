@@ -1,0 +1,273 @@
+/**
+ * dsh-asr-voice — client 录音按钮（conversation.input.right 工具行）。
+ *
+ * 流程：点击/快捷键 → 录音（浏览器 Web Speech 实时 / 云端 MediaRecorder）
+ *   → 停止 → 转写文本 → 提示词优化（heuristic 即时 / llm 预览卡）
+ *   → 填入草稿（inputActions.setDraft），可选自动发送（inputActions.submit）。
+ *
+ * 独立契约：本组件只依赖官方 slot 标准 kit（inputActions / session / input），
+ * 不依赖任何第三方插件；样式 data 标签与命名空间唯一。
+ */
+import * as react from 'react'
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+// Type-only: pulls the ui-conversation SlotMap merge (input seats + standard kit).
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { config } from './config.ts'
+import { heuristicOptimize, llmOptimize } from './optimize.ts'
+import { createVoiceRecorder, isWebSpeechSupported, type VoiceRecorder } from './recorder.ts'
+import { fromTo } from './animate.ts'
+import type { LocaleT } from './locales.ts'
+
+/** 输入动作最小面（来自官方 standard kit 的 inputActions prop）。 */
+interface InputActionsLike {
+  setDraft(text: string): void
+  submit(): void
+}
+
+/** 组件收到的 owner share + standard kit 最小面（结构类型，参照官方契约）。 */
+export interface VoiceButtonProps {
+  sessionId?: string
+  input?: { draft?: string; phase?: string }
+  session?: { blank?: boolean; composerPhase?: string }
+  inputActions?: InputActionsLike
+  /** 本地化翻译函数（由 slot inject 注入）。 */
+  t: LocaleT
+}
+
+/** 组件内部状态机。 */
+type VoiceState = 'idle' | 'recording' | 'transcribing' | 'optimizing'
+
+/** 全局录音控制器：只驱动「最后挂载」的实例（当前可见会话）。 */
+export const voiceController = {
+  toggle: (): void => { current?.toggle() },
+  isRecording: (): boolean => current?.isRecording() ?? false,
+  mount(instance: { toggle(): void; isRecording(): boolean }): () => void {
+    current = instance
+    return () => { if (current === instance) current = undefined }
+  },
+}
+let current: { toggle(): void; isRecording(): boolean } | undefined
+
+/** 麦克风图标。 */
+function MicIcon(): react.ReactElement {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="2.5" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3.5" />
+    </svg>
+  )
+}
+
+/** 录音状态图标（实心圆点）。 */
+function RecDot(): react.ReactElement {
+  return <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'currentColor', display: 'block' }} />
+}
+
+/**
+ * 录音按钮 + 预览卡。
+ * @param props - slot 注入的 owner share + 标准 kit + 翻译函数。
+ */
+export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
+  const { inputActions, t } = props
+  const disabled = !inputActions || props.session?.blank === true
+  const [state, setState] = react.useState<VoiceState>('idle')
+  const [error, setError] = react.useState<string | null>(null)
+  const [interim, setInterim] = react.useState<string>('')
+  const [preview, setPreview] = react.useState<{ original: string; optimized: string } | null>(null)
+
+  const wrapRef = react.useRef<HTMLSpanElement | null>(null)
+  const recorderRef = react.useRef<VoiceRecorder | null>(null)
+  const stateRef = react.useRef<VoiceState>('idle')
+  stateRef.current = state
+
+  // 挂载/卸载：注册到全局控制器（快捷键驱动当前实例）。
+  const instance = react.useMemo(() => ({
+    toggle: () => {
+      if (stateRef.current === 'idle') { void begin() } else if (stateRef.current === 'recording') { void finish() }
+    },
+    isRecording: () => stateRef.current === 'recording',
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [])
+  react.useEffect(() => voiceController.mount(instance), [instance])
+
+  const setPhase = (next: VoiceState): void => {
+    stateRef.current = next
+    setState(next)
+  }
+
+  const showError = (code: string, detail?: string): void => {
+    const msg = code === 'mic-denied' || code === 'no-mic'
+      ? t('errNoMic')
+      : code === 'no-speech-support'
+        ? t('errNoSpeechSupport')
+        : code === 'cloud-not-configured'
+          ? t('errCloudNotConfigured')
+          : code === 'optimize'
+            ? `${t('errOptimize')}${detail ? `: ${detail}` : ''}`
+            : `${t('errTranscribe')}${detail ? `: ${detail}` : ''}`
+    setError(msg)
+    setPhase('idle')
+  }
+
+  const begin = async (): Promise<void> => {
+    setError(null)
+    setInterim('')
+    const engine = config.asr.provider === 'cloud' ? 'cloud' : 'browser'
+    if (engine === 'browser' && !isWebSpeechSupported()) {
+      showError('no-speech-support')
+      return
+    }
+    let recorder: VoiceRecorder
+    try {
+      recorder = createVoiceRecorder(engine, config.language, (code) => showError(code))
+    } catch {
+      showError('no-speech-support')
+      return
+    }
+    recorderRef.current = recorder
+    recorder.onInterim = (text) => setInterim(text)
+    recorder.onState = (s) => { if (s === 'transcribing') setPhase('transcribing') }
+    setPhase('recording')
+    startWave()
+    recorder.start()
+  }
+
+  const finish = async (): Promise<void> => {
+    const recorder = recorderRef.current
+    if (!recorder) { setPhase('idle'); return }
+    stopWave()
+    setPhase('transcribing')
+    let text = ''
+    try {
+      text = (await recorder.stop()).trim()
+    } catch (error) {
+      showError('transcribe', String(error instanceof Error ? error.message : error))
+      return
+    }
+    recorderRef.current = null
+    if (text === '') { setPhase('idle'); return }
+
+    const mode = config.optimize.mode
+    if (mode === 'llm') {
+      setPhase('optimizing')
+      try {
+        const optimized = await llmOptimize(text)
+        setPreview({ original: text, optimized })
+        setPhase('idle')
+      } catch (error) {
+        showError('optimize', String(error instanceof Error ? error.message : error))
+      }
+      return
+    }
+    finalize(heuristicOptimize(text))
+  }
+
+  const finalize = (text: string): void => {
+    if (text === '') { setPhase('idle'); return }
+    if (inputActions) {
+      inputActions.setDraft(text)
+      if (config.behavior.autoSend) inputActions.submit()
+    }
+    setPhase('idle')
+  }
+
+  const onConfirm = (): void => {
+    if (preview) finalize(preview.optimized)
+    setPreview(null)
+  }
+
+  // ── GSAP 波纹动画（fromTo 无限重复） ────────────────────────────
+  const startWave = (): void => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    wrap.querySelectorAll<HTMLElement>('.dshav-wave-ring').forEach((ring, i) => {
+      ring.style.opacity = '0.55'
+      fromTo(ring, { scale: 0.75, opacity: 0.55 }, { scale: 2.2, opacity: 0, duration: 1.25, delay: i * 0.38, repeat: Infinity })
+    })
+  }
+  const stopWave = (): void => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    wrap.querySelectorAll<HTMLElement>('.dshav-wave-ring').forEach((ring) => {
+      ring.style.opacity = '0'
+      ring.style.transform = ''
+    })
+  }
+
+  // 卸载清理：停止录音 + 停止波纹。
+  react.useEffect(() => () => {
+    stopWave()
+    recorderRef.current?.abort()
+  }, [])
+
+  const busy = state !== 'idle'
+  const title = busy
+    ? state === 'recording' ? t('recordingTitle') : state === 'transcribing' ? t('transcribingTitle') : t('optimizingTitle')
+    : t('micTitle')
+
+  return (
+    <react.Fragment>
+      <span className="dshav-mic-wrap" ref={wrapRef}>
+        <button
+          type="button"
+          className="dshav-mic-button"
+          data-state={state}
+          title={title}
+          aria-label={title}
+          aria-pressed={state === 'recording'}
+          disabled={disabled}
+          onClick={() => { if (state === 'idle') { void begin() } else if (state === 'recording') { void finish() } }}
+        >
+          {state === 'recording' ? <RecDot /> : <MicIcon />}
+          <span className="dshav-wave" aria-hidden="true">
+            <span className="dshav-wave-ring" data-ring="1" />
+            <span className="dshav-wave-ring" data-ring="2" />
+            <span className="dshav-wave-ring" data-ring="3" />
+          </span>
+        </button>
+        {error !== null && (
+          <span className="dshav-hotkey-hint" data-kind="err" role="status">
+            <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
+            {error}
+          </span>
+        )}
+        {interim !== '' && state === 'recording' && (
+          <span className="dshav-hotkey-hint" role="status">{interim}</span>
+        )}
+      </span>
+      {preview !== null && (
+        <div className="dshav-preview" role="dialog" aria-label={t('previewTitle')}>
+          <div className="dshav-preview-title">
+            <MicIcon />
+            <span>{t('previewTitle')}</span>
+          </div>
+          <div className="dshav-preview-col">
+            <span className="dshav-preview-label">{t('previewOriginal')}</span>
+            <p className="dshav-preview-text" data-role="original">{preview.original}</p>
+          </div>
+          <div className="dshav-preview-col">
+            <span className="dshav-preview-label">{t('previewOptimized')}</span>
+            <p className="dshav-preview-text" data-role="optimized">{preview.optimized}</p>
+          </div>
+          <div className="dshav-preview-actions">
+            <button type="button" className="dshav-button dshav-button-ghost" onClick={() => setPreview(null)}>{t('previewCancel')}</button>
+            <button type="button" className="dshav-button dshav-button-primary" onClick={onConfirm}>{t('previewConfirm')}</button>
+          </div>
+        </div>
+      )}
+    </react.Fragment>
+  )
+}
+
+/** 供 index.ts 注册槽位：把翻译函数注入组件（owner share 只补 sessionId）。 */
+export function registerVoiceButton(ctx: ClientContext, t: LocaleT): void {
+  ctx.inject(['slots'], (scope) => {
+    scope.slots.inject('conversation.input.right', () => scope.slots.register({
+      name: 'conversation.input.right',
+      id: 'dsh-asr-voice-button',
+      order: 10,
+      inject: (sessionId: string) => ({ sessionId, t }),
+    }, VoiceButton))
+  })
+}

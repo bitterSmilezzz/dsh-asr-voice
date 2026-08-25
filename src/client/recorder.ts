@@ -1,0 +1,351 @@
+/**
+ * dsh-asr-voice — client 录音引擎。
+ *
+ * 两种引擎，统一 `VoiceRecorder` 接口：
+ *   - browser：Web Speech API（webkitSpeechRecognition），实时转写、浏览器本地、
+ *     免 key；Chrome/Edge 双平台支持。
+ *   - cloud：getUserMedia + MediaRecorder 采集音频，停止后把原始字节 POST 到
+ *     host /api/asr-voice/transcribe，由服务端转发云端 ASR（key 不进浏览器）。
+ *
+ * 两者都带：静音自动停止（可配）、最长录音上限、interim 文本回调、状态回调。
+ */
+
+/** 录音最长时长（毫秒）。 */
+export const MAX_RECORD_MS = 120_000
+
+/** 静音判定阈值（RMS，0~1）。 */
+const SILENCE_RMS = 0.02
+
+/** 静音持续多久自动停止（毫秒）。 */
+const SILENCE_MS = 2500
+
+/** 录音状态。 */
+export type RecordState = 'recording' | 'transcribing'
+
+/** 浏览器语音识别的最小接口面（webkitSpeechRecognition）。 */
+interface SpeechRecognitionLike {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  maxAlternatives: number
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onerror: ((event: { error: string }) => void) | null
+  onresult: ((event: {
+    resultIndex: number
+    results: {
+      length: number
+      item(index: number): {
+        isFinal: boolean
+        length: number
+        item(j: number): { transcript: string }
+      }
+    }
+  }) => void) | null
+  start(): void
+  stop(): void
+  abort(): void
+}
+
+/** 浏览器是否可用 Web Speech API。 */
+export function isWebSpeechSupported(): boolean {
+  return typeof window !== 'undefined' && 'webkitSpeechRecognition' in window
+}
+
+/** 麦克风是否可用（权限 + 设备）。 */
+export async function hasMicrophone(): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return false
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    for (const track of stream.getTracks()) track.stop()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 统一录音控制器。 */
+export interface VoiceRecorder {
+  /** 开始录音（幂等）。 */
+  start(): void
+  /** 手动停止；resolve 原始转写文本（cloud 引擎会先上传识别）。 */
+  stop(): Promise<string>
+  /** 放弃本次录音（不 resolve / 丢弃）。 */
+  abort(): void
+  /** 实时 interim 文本回调（浏览器引擎实时；云端引擎为空）。 */
+  onInterim: ((text: string) => void) | null
+  /** 状态回调（recording → transcribing）。 */
+  onState: ((state: RecordState) => void) | null
+}
+
+/** 语言参数：auto → 返回 undefined（交给浏览器/服务端默认）。 */
+function resolveLang(language: string): string | undefined {
+  if (!language || language === 'auto') return undefined
+  return language
+}
+
+/** 浏览器引擎：Web Speech API。 */
+function createBrowserRecorder(language: string, onError: (msg: string) => void): VoiceRecorder {
+  const Ctor = (window as unknown as { webkitSpeechRecognition: new () => SpeechRecognitionLike }).webkitSpeechRecognition
+  if (!Ctor) {
+    throw new Error('browser: webkitSpeechRecognition unavailable')
+  }
+  const recognition = new Ctor()
+  const lang = resolveLang(language)
+  if (lang) recognition.lang = lang
+  recognition.continuous = true
+  recognition.interimResults = true
+  recognition.maxAlternatives = 1
+
+  let finalText = ''
+  let interim = ''
+  let stopped = false
+  let endResolve: ((text: string) => void) | null = null
+  let maxTimer: ReturnType<typeof setTimeout> | null = null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recorder: VoiceRecorder = { onInterim: null, onState: null } as any
+
+  const emitInterim = (): void => {
+    const text = `${finalText}${finalText && interim ? ' ' : ''}${interim}`.trim()
+    recorder.onInterim?.(text)
+  }
+
+  const settle = (): void => {
+    if (stopped) return
+    stopped = true
+    if (maxTimer) clearTimeout(maxTimer)
+    if (endResolve) {
+      endResolve(finalText.trim())
+      endResolve = null
+    }
+  }
+
+  recognition.onstart = () => { recorder.onState?.('recording') }
+
+  recognition.onresult = (event) => {
+    let finalChunk = ''
+    let interimChunk = ''
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results.item(i)
+      const transcript = result.item(0)?.transcript ?? ''
+      if (result.isFinal) finalChunk += transcript
+      else interimChunk += transcript
+    }
+    if (finalChunk) finalText = `${finalText}${finalText && finalChunk ? ' ' : ''}${finalChunk}`
+    if (interimChunk) interim = interimChunk
+    else if (!finalChunk) interim = ''
+    emitInterim()
+  }
+
+  recognition.onerror = (event) => {
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      onError('mic-denied')
+    } else if (event.error === 'no-speech') {
+      // 静音结束：当作正常结束
+    } else if (event.error === 'aborted') {
+      // 主动 abort
+    } else {
+      onError(event.error)
+    }
+  }
+
+  recognition.onend = () => settle()
+
+  recorder.start = () => {
+    if (stopped) return
+    maxTimer = setTimeout(() => { try { recognition.stop() } catch { /* noop */ } }, MAX_RECORD_MS)
+    try {
+      recognition.start()
+    } catch {
+      // already started
+    }
+  }
+
+  recorder.stop = () => {
+    if (stopped) {
+      return Promise.resolve(finalText.trim())
+    }
+    return new Promise<string>((resolve) => {
+      endResolve = (text) => resolve(text)
+      try {
+        recognition.stop()
+      } catch {
+        settle()
+      }
+    })
+  }
+
+  recorder.abort = () => {
+    try {
+      recognition.abort()
+    } catch {
+      /* noop */
+    }
+    settle()
+  }
+
+  return recorder
+}
+
+/** 云端引擎：MediaRecorder 采集 → host 代理转写。 */
+function createCloudRecorder(language: string, onError: (msg: string) => void): VoiceRecorder {
+  const recorder: VoiceRecorder = { onInterim: null, onState: null, start: () => {}, stop: () => Promise.resolve(''), abort: () => {} }
+  let stream: MediaStream | null = null
+  let mediaRecorder: MediaRecorder | null = null
+  let chunks: Blob[] = []
+  let maxTimer: ReturnType<typeof setTimeout> | null = null
+  let stopPromise: Promise<string> | null = null
+  let active = false
+
+  const pickMime = (): string => {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+    for (const m of candidates) {
+      if (MediaRecorder.isTypeSupported(m)) return m
+    }
+    return ''
+  }
+
+  const startSilenceDetection = (): void => {
+    try {
+      const audioCtx = new AudioContext()
+      const source = audioCtx.createMediaStreamSource(stream!)
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 1024
+      source.connect(analyser)
+      const data = new Uint8Array(analyser.fftSize)
+      let silentSince: number | null = null
+      const loop = (): void => {
+        if (!active) { void audioCtx.close().catch(() => {}) ; return }
+        analyser.getByteTimeDomainData(data)
+        let sum = 0
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i]! - 128) / 128
+          sum += v * v
+        }
+        const rms = Math.sqrt(sum / data.length)
+        if (rms < SILENCE_RMS) {
+          if (silentSince === null) silentSince = performance.now()
+          else if (performance.now() - silentSince > SILENCE_MS) {
+            void recorder.stop().catch(() => {})
+            return
+          }
+        } else {
+          silentSince = null
+        }
+        requestAnimationFrame(loop)
+      }
+      requestAnimationFrame(loop)
+    } catch {
+      // 音频分析不可用：静音自动停止降级为仅靠时长上限
+    }
+  }
+
+  recorder.start = async () => {
+    if (active) return
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      onError('no-mic')
+      return
+    }
+    let s: MediaStream
+    try {
+      s = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      onError('mic-denied')
+      return
+    }
+    stream = s
+    chunks = []
+    active = true
+    const mime = pickMime()
+    try {
+      mediaRecorder = mime ? new MediaRecorder(s, { mimeType: mime }) : new MediaRecorder(s)
+    } catch {
+      onError('recorder-unsupported')
+      active = false
+      for (const t of s.getTracks()) t.stop()
+      return
+    }
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data)
+    }
+    stopPromise = new Promise<string>((resolve, reject) => {
+      mediaRecorder!.onstop = async () => {
+        const type = mediaRecorder?.mimeType?.split(';')[0]?.trim() || 'audio/webm'
+        const blob = new Blob(chunks, { type })
+        recorder.onState?.('transcribing')
+        try {
+          const text = await transcribeViaHost(blob, language)
+          active = false
+          for (const t of stream!.getTracks()) t.stop()
+          resolve(text)
+        } catch (error) {
+          active = false
+          for (const t of stream!.getTracks()) t.stop()
+          reject(error instanceof Error ? error : new Error(String(error)))
+        }
+      }
+      mediaRecorder!.onerror = () => {
+        active = false
+        reject(new Error('recorder-error'))
+      }
+    })
+    mediaRecorder.start(250)
+    recorder.onState?.('recording')
+    startSilenceDetection()
+    maxTimer = setTimeout(() => { void recorder.stop().catch(() => {}) }, MAX_RECORD_MS)
+  }
+
+  recorder.stop = () => {
+    if (!active || !mediaRecorder || !stopPromise) return Promise.resolve('')
+    active = false
+    if (maxTimer) clearTimeout(maxTimer)
+    if (mediaRecorder.state !== 'inactive') {
+      try { mediaRecorder.stop() } catch { /* noop */ }
+    }
+    return stopPromise
+  }
+
+  recorder.abort = () => {
+    active = false
+    if (maxTimer) clearTimeout(maxTimer)
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      try { mediaRecorder.stop() } catch { /* noop */ }
+    }
+    if (stream) for (const t of stream.getTracks()) t.stop()
+    stopPromise = null
+  }
+
+  return recorder
+}
+
+/** 上传音频到 host 转写代理。 */
+async function transcribeViaHost(blob: Blob, language: string): Promise<string> {
+  const lang = resolveLang(language)
+  const query = lang ? `?language=${encodeURIComponent(lang)}` : ''
+  const res = await fetch(`/api/asr-voice/transcribe${query}`, {
+    method: 'POST',
+    headers: { 'content-type': blob.type || 'audio/webm' },
+    body: blob,
+  })
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; text?: string; reason?: string }
+  if (!res.ok || data.ok !== true || typeof data.text !== 'string') {
+    throw new Error(data.reason || 'transcribe failed')
+  }
+  return data.text
+}
+
+/**
+ * 创建统一录音控制器。
+ * @param engine - browser | cloud。
+ * @param language - auto / zh-CN / en-US 等。
+ * @param onError - 错误回调（错误码字符串）。
+ */
+export function createVoiceRecorder(
+  engine: 'browser' | 'cloud',
+  language: string,
+  onError: (code: string) => void,
+): VoiceRecorder {
+  if (engine === 'cloud') return createCloudRecorder(language, onError)
+  return createBrowserRecorder(language, onError)
+}

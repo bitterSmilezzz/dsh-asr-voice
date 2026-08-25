@@ -1,0 +1,18 @@
+# deps
+node_modules/
+lib/
+*.tsbuildinfo
+*.tgz
+
+# tooling
+.pnpm-store/
+npm-debug.log*
+
+# os
+.DS_Store
+Thumbs.db
+
+# editor
+.idea/
+.vscode/
+*.swp
