@@ -5,14 +5,14 @@ DeepSeek Harness（DSH）语音输入插件：**说话 → 识别 → 提示词�
 
 - 默认**浏览器 Web Speech API**（免费、免 key、Chrome/Edge macOS + Windows 双平台可用）
 - 可选**云端 OpenAI-compatible ASR**（OpenAI / Groq / 硅基流动 / 通义 Qwen-ASR，可自定义 baseUrl + model）
-- **提示词优化**：本地启发式（免费离线）默认；可选 LLM 重写（走本机服务端代理）
+- **提示词优化**：默认用**当前所选 LLM** 重写（走官方 LLM 通道，无需单独配 key）；可选本地启发式（免费离线）
 - **API key 只存本机服务端**（host settings），浏览器只经 `/api/asr-voice/*` 私有 JSON 代理，key 不进前端
 
 ## 功能
 
 - 输入框工具行**麦克风按钮**（`conversation.input.right`）：点击开始/结束，静音自动停止，可选按住说话
 - 默认快捷键 **Ctrl+Shift+Space**（可配置，支持 macOS 的 Cmd 兼容）
-- 识别后**提示词优化**：清洗语气词/口误、补标点、分段（本地）；或 LLM 重写（预览 原始→优化 后确认）
+- 识别后**提示词优化**：默认用当前所选 LLM 重写（识别耗时较长时预览 原始→优化 后确认）；可切换本地启发式（清洗语气词/补标点/分段，即时填入）
 - 识别后**填入草稿**待确认；可选「识别后自动发送」（push-to-talk 风格）
 - 设置卡片：「设置 → 插件 → 配置 → 语音输入」
 
@@ -33,8 +33,8 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 云端 | `asr.cloud.baseUrl` | 预置自动填 | 任意 OpenAI-compatible base URL |
 | 云端 | `asr.cloud.apiKey` | 空 | 仅存本机服务端 |
 | 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `qwen3-asr-flash` |
-| 优化 | `optimize.mode` | `heuristic` | `heuristic`（本地）/ `llm`（LLM 重写） |
-| 优化 | `optimize.llm.*` | 空 | LLM 的 baseUrl / apiKey / model（OpenAI-compatible chat completions） |
+| 优化 | `optimize.mode` | `llm` | `llm`（默认，用当前所选 LLM 重写）/ `heuristic`（本地启发式） |
+| 优化 | `optimize.llm.*` | 空 | 可选：指定特定 LLM（OpenAI-compatible）；留空则用当前所选 LLM |
 | 语言 | `language` | `auto` | `auto` / `zh-CN` / `en-US` |
 | 行为 | `behavior.autoSend` | `false` | 识别后自动发送 |
 | 行为 | `behavior.holdToTalk` | `false` | 按住快捷键说话、松开结束 |

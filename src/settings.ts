@@ -37,9 +37,9 @@ export const AsrVoiceSettingsSchema = z.object({
     provider: z.string().default('browser'),
     cloud: CloudSchema,
   }),
-  /** 提示词优化：heuristic（本地启发式，默认）/ llm（走 host 代理重写）。 */
+  /** 提示词优化：llm（默认，用当前所选 LLM 重写）/ heuristic（本地启发式，可选）。 */
   optimize: z.object({
-    mode: z.string().default('heuristic'),
+    mode: z.string().default('llm'),
     llm: LlmSchema,
   }),
   /** 识别语言：auto（跟随浏览器/系统）/ zh-CN / en-US / …。 */
@@ -60,7 +60,7 @@ export type AsrVoiceSettings = Schemastery.TypeT<typeof AsrVoiceSettingsSchema>
 /** 设置默认值（与 schema default 一致；client 侧也用同一份，避免双源漂移）。 */
 export const DEFAULT_SETTINGS: AsrVoiceSettings = {
   asr: { provider: 'browser', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '' } },
-  optimize: { mode: 'heuristic', llm: { baseUrl: '', apiKey: '', model: '' } },
+  optimize: { mode: 'llm', llm: { baseUrl: '', apiKey: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
 }

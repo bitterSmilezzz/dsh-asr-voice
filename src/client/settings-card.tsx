@@ -283,6 +283,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
         />
         {config.optimize.mode === 'llm' && (
           <div className="dshav-stack">
+            <p className="dshav-field-hint">{t('llmDefaultHint')}</p>
             <TextRow title={t('llmBaseUrlLabel')} value={config.optimize.llm.baseUrl} onChange={setLlmBase} />
             <TextRow title={t('llmApiKeyLabel')} value={config.optimize.llm.apiKey} onChange={setLlmKey} type="password" />
             <TextRow title={t('llmModelLabel')} value={config.optimize.llm.model} onChange={setLlmModel} />

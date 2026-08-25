@@ -21,3 +21,5 @@
       inject:
         - webServer
         - settings
+        - llm
+        - agentDefaultModel

@@ -20,6 +20,7 @@ export type LocaleKey =
   | 'optimizeModeLabel'
   | 'optimizeHeuristic'
   | 'optimizeLlm'
+  | 'llmDefaultHint'
   | 'llmBaseUrlLabel'
   | 'llmApiKeyLabel'
   | 'llmModelLabel'
@@ -75,7 +76,8 @@ export const zh: LocaleDict = {
   groupOptimize: '提示词优化',
   optimizeModeLabel: '优化方式',
   optimizeHeuristic: '本地启发式（免费、离线）',
-  optimizeLlm: 'LLM 重写（需配置）',
+  optimizeLlm: 'LLM 重写（默认用当前所选模型）',
+  llmDefaultHint: '默认使用 DSH 当前所选 LLM，无需配置；如需指定特定模型，可填写下方独立配置。',
   llmBaseUrlLabel: 'LLM Base URL',
   llmApiKeyLabel: 'LLM API Key（仅存本机服务端）',
   llmModelLabel: 'LLM 模型',
@@ -126,7 +128,8 @@ export const en: LocaleDict = {
   groupOptimize: 'Prompt optimization',
   optimizeModeLabel: 'Optimization mode',
   optimizeHeuristic: 'Local heuristic (free, offline)',
-  optimizeLlm: 'LLM rewrite (requires config)',
+  optimizeLlm: 'LLM rewrite (uses current model by default)',
+  llmDefaultHint: 'Uses the DSH current model by default — no config needed. Fill the standalone config below only to target a specific model.',
   llmBaseUrlLabel: 'LLM base URL',
   llmApiKeyLabel: 'LLM API key (stored on this machine, server-side)',
   llmModelLabel: 'LLM model',
