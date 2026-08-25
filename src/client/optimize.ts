@@ -106,12 +106,23 @@ export function heuristicOptimize(raw: string): string {
   return text
 }
 
-/** 调用 host /api/asr-voice/optimize（LLM 重写）。 */
-export async function llmOptimize(text: string): Promise<string> {
+/** DSH 已配置模型的 provider/model（可选；空 = 用当前所选 LLM）。 */
+export interface OptimizeTarget {
+  provider: string
+  model: string
+}
+
+/** 调用 host /api/asr-voice/optimize（用 DSH 已配置模型重写）。 */
+export async function llmOptimize(text: string, target?: OptimizeTarget): Promise<string> {
+  const body: { text: string; provider?: string; model?: string } = { text }
+  if (target !== undefined && target.provider !== '' && target.model !== '') {
+    body.provider = target.provider
+    body.model = target.model
+  }
   const res = await fetch('/api/asr-voice/optimize', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(body),
   })
   const data = (await res.json().catch(() => ({}))) as { ok?: boolean; text?: string; reason?: string }
   if (!res.ok || data.ok !== true || typeof data.text !== 'string') {
@@ -120,8 +131,8 @@ export async function llmOptimize(text: string): Promise<string> {
   return data.text
 }
 
-/** 按当前模式优化（heuristic 即时返回；llm 异步）。 */
-export function optimizeText(text: string, mode: 'heuristic' | 'llm'): Promise<string> {
-  if (mode === 'llm') return llmOptimize(text)
+/** 按当前模式优化（heuristic 即时返回；llm 异步，带可选模型目标）。 */
+export function optimizeText(text: string, mode: 'heuristic' | 'llm', target?: OptimizeTarget): Promise<string> {
+  if (mode === 'llm') return llmOptimize(text, target)
   return Promise.resolve(heuristicOptimize(text))
 }

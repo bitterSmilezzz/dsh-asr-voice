@@ -23,10 +23,9 @@ export const CloudSchema = z.object({
   model: z.string().default(''),
 })
 
-/** LLM 提示词优化配置（独立 OpenAI-compatible chat completions）。 */
+/** LLM 提示词优化目标（DSH 已配置模型的 provider/model；空 = 用当前所选 LLM）。 */
 export const LlmSchema = z.object({
-  baseUrl: z.string().default(''),
-  apiKey: z.string().default(''),
+  provider: z.string().default(''),
   model: z.string().default(''),
 })
 
@@ -60,7 +59,7 @@ export type AsrVoiceSettings = Schemastery.TypeT<typeof AsrVoiceSettingsSchema>
 /** 设置默认值（与 schema default 一致；client 侧也用同一份，避免双源漂移）。 */
 export const DEFAULT_SETTINGS: AsrVoiceSettings = {
   asr: { provider: 'browser', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '' } },
-  optimize: { mode: 'llm', llm: { baseUrl: '', apiKey: '', model: '' } },
+  optimize: { mode: 'llm', llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
 }

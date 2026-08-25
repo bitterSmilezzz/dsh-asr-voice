@@ -1,11 +1,13 @@
 /**
  * dsh-asr-voice — host 半区：LLM 提示词优化。
  *
- * 浏览器 POST { text } 到 /api/asr-voice/optimize，host 用 LLM 重写为清晰
- * prompt，返回 { ok, text }。两条后端路径，按优先级：
- *   1. 插件独立配置（settings.optimize.llm 的 baseUrl/apiKey/model，OpenAI-compatible）
- *   2. 当前所选 LLM（ctx.agentDefaultModel.currentSelection() + ctx.llm.stream）
- * API key 全程在服务端；纯 Node + 官方 LLM 通道，跨平台。
+ * 提示词优化只使用 **DSH 已配置好的模型**（ctx.llm 通道）：
+ *   - 请求可指定 { provider, model }（必须是 DSH 模型列表里已配置的）
+ *   - 未指定 → 用当前所选 LLM（ctx.agentDefaultModel.currentSelection()）
+ * 要自定义模型，须先到 DSH 原生模型列表添加（本插件不做独立 baseUrl/apiKey）。
+ *
+ * /api/asr-voice/models 枚举 DSH 已配置模型（供设置页选择器）。
+ * API key 由 DSH provider 管理，全程在服务端；跨平台。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -16,13 +18,6 @@ import { isTrusted, readJsonBody, sendJson } from './http.ts';
 /** 最小当前模型选择面（由 DSH 的 agentDefaultModel 服务提供，peer 不 import）。 */
 interface AgentDefaultModelLike {
   currentSelection(): { provider: string; model: string; reasoningEffort?: string }
-}
-
-/** LLM 优化配置面（来自 settings scope 的独立配置）。 */
-export interface LlmOptimizeConfig {
-  baseUrl: string
-  apiKey: string
-  model: string
 }
 
 /** 提示词优化 system prompt（中英双语指令，要求保留语义、去掉口语、结构化）。 */
@@ -36,53 +31,57 @@ const OPTIMIZE_SYSTEM = [
   '- 只输出整理后的文本，不要解释、不要加引号或前后缀。',
 ].join('\n')
 
-/** 调用上游 OpenAI-compatible chat completions 重写文本（独立配置后端）。 */
-async function upstreamOptimize(cfg: LlmOptimizeConfig, text: string): Promise<string> {
-  if (!cfg.baseUrl || !cfg.apiKey) {
-    throw new Error('LLM optimize not configured: set baseUrl + apiKey in plugin settings');
-  }
-  const base = cfg.baseUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      Authorization: `Bearer ${cfg.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: cfg.model || 'gpt-4o-mini',
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: OPTIMIZE_SYSTEM },
-        { role: 'user', content: text },
-      ],
-    }),
-  });
-  const data = (await res.json().catch(() => ({}))) as {
-    choices?: { message?: { content?: unknown } }[];
-    error?: unknown;
-  };
-  if (!res.ok) {
-    const reason = typeof data.error === 'string'
-      ? data.error
-      : typeof data.error === 'object' && data.error && typeof (data.error as { message?: unknown }).message === 'string'
-        ? String((data.error as { message?: string }).message)
-        : `upstream LLM failed (HTTP ${res.status})`;
-    throw new Error(reason);
-  }
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || content.trim() === '') {
-    throw new Error('upstream LLM returned empty result');
-  }
-  return content.trim();
+/** 一个 DSH 已配置模型的条目（给设置页选择器用）。 */
+export interface DshModelEntry {
+  id: string
+  name: string
 }
 
-/** 用 DSH 当前所选 LLM 重写文本（ctx.llm 通道，无需插件单独配 key）。 */
-async function optimizeWithCurrentLlm(ctx: Context, text: string): Promise<string> {
-  const agentDefaultModel = ctx.get('agentDefaultModel') as AgentDefaultModelLike | undefined;
-  if (agentDefaultModel === undefined) {
-    throw new Error('LLM optimize unavailable: agentDefaultModel service not present');
+/** 一个 DSH 已配置 provider 及其模型。 */
+export interface DshProviderEntry {
+  provider: string
+  name: string
+  models: DshModelEntry[]
+}
+
+/** 模型选择目标（来自设置页选择的 DSH 模型，或当前所选）。 */
+export interface OptimizeTarget {
+  provider: string
+  model: string
+}
+
+/**
+ * 枚举 DSH 已配置模型（ctx.llm.listProviders + listModels）。
+ * 枚举失败/不可用的 provider 给空模型列表（不阻断整体）。
+ */
+export async function enumerateModels(ctx: Context): Promise<DshProviderEntry[]> {
+  const out: DshProviderEntry[] = [];
+  for (const p of ctx.llm.listProviders()) {
+    let models: DshModelEntry[] = [];
+    try {
+      const listed = await ctx.llm.listModels(p.id);
+      models = listed.map((m) => ({ id: m.id, name: m.name }));
+    } catch {
+      // 该 provider 不可枚举：跳过模型（仍保留 provider 行，便于提示）。
+    }
+    out.push({ provider: p.id, name: p.name, models });
   }
-  const selection = agentDefaultModel.currentSelection();
+  return out;
+}
+
+/** 用 DSH 的 LLM 通道重写文本（target 缺省 = 当前所选模型）。 */
+async function optimizeWithLlm(ctx: Context, text: string, target?: OptimizeTarget): Promise<string> {
+  let selection: OptimizeTarget;
+  if (target !== undefined && target.provider !== '' && target.model !== '') {
+    selection = target;
+  } else {
+    const agentDefaultModel = ctx.get('agentDefaultModel') as AgentDefaultModelLike | undefined;
+    if (agentDefaultModel === undefined) {
+      throw new Error('LLM optimize unavailable: agentDefaultModel service not present');
+    }
+    const current = agentDefaultModel.currentSelection();
+    selection = { provider: current.provider, model: current.model };
+  }
   const options = {
     provider: selection.provider,
     model: selection.model,
@@ -102,37 +101,19 @@ async function optimizeWithCurrentLlm(ctx: Context, text: string): Promise<strin
     if (chunk.type === 'finish' && chunk.reason !== undefined && chunk.reason.kind === 'error') failed = true;
   }
   if (failed || output.trim() === '') {
-    throw new Error('LLM optimize failed: current model returned no text');
+    throw new Error('LLM optimize failed: model returned no text');
   }
   return output.trim();
 }
 
-/** 优化执行器：独立配置优先，否则用当前所选 LLM。 */
-export type OptimizeRunner = (text: string) => Promise<string>
-
-/** 组装优化执行器。 */
-export function buildOptimizeRunner(
-  ctx: Context,
-  getLlmConfig: () => LlmOptimizeConfig,
-): OptimizeRunner {
-  return async (text: string): Promise<string> => {
-    const cfg = getLlmConfig();
-    if (cfg.baseUrl && cfg.apiKey) {
-      return upstreamOptimize(cfg, text);
-    }
-    return optimizeWithCurrentLlm(ctx, text);
-  };
-}
-
 /**
  * 注册 /api/asr-voice/optimize 路由。
- * @param register - webserver 的 register 方法。
- * @param optimize - 优化执行器（buildOptimizeRunner 组装）。
- * @returns 路由 disposer（由 ctx.effect 挂载/回收）。
+ * 请求体：{ text, provider?, model? }——provider/model 须为 DSH 已配置模型；
+ * 缺省用当前所选 LLM。
  */
 export function registerOptimizeRoute(
   register: (def: { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void,
-  optimize: OptimizeRunner,
+  ctx: Context,
 ): () => void {
   return register({
     kind: 'exact',
@@ -141,12 +122,39 @@ export function registerOptimizeRoute(
       if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
       if (req.method !== 'POST') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
       try {
-        const body = (await readJsonBody(req)) as { text?: unknown };
+        const body = (await readJsonBody(req)) as { text?: unknown; provider?: unknown; model?: unknown };
         if (typeof body.text !== 'string' || body.text.trim() === '') {
           return sendJson(res, 400, { ok: false, reason: 'missing text' });
         }
-        const optimized = await optimize(body.text);
+        const target = typeof body.provider === 'string' && typeof body.model === 'string'
+          ? { provider: body.provider, model: body.model }
+          : undefined;
+        const optimized = await optimizeWithLlm(ctx, body.text, target);
         return sendJson(res, 200, { ok: true, text: optimized });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return sendJson(res, 502, { ok: false, reason });
+      }
+    },
+  });
+}
+
+/**
+ * 注册 /api/asr-voice/models 路由：枚举 DSH 已配置模型（设置页选择器用）。
+ */
+export function registerModelsRoute(
+  register: (def: { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void,
+  ctx: Context,
+): () => void {
+  return register({
+    kind: 'exact',
+    path: '/api/asr-voice/models',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
+      if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+      try {
+        const providers = await enumerateModels(ctx);
+        return sendJson(res, 200, { ok: true, providers });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         return sendJson(res, 502, { ok: false, reason });

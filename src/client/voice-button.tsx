@@ -172,7 +172,11 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     if (mode === 'llm') {
       setPhase('optimizing')
       try {
-        const optimized = await llmOptimize(text)
+        const target = {
+          provider: config.optimize.llm.provider,
+          model: config.optimize.llm.model,
+        }
+        const optimized = await llmOptimize(text, target)
         setPreview({ original: text, optimized })
         setPhase('idle')
       } catch (error) {

@@ -154,6 +154,71 @@ function keyCombo(e: react.KeyboardEvent): string {
   return parts.join('+')
 }
 
+/** DSH 已配置模型条目（来自 /api/asr-voice/models）。 */
+interface DshModelEntry { id: string; name: string }
+interface DshProviderEntry { provider: string; name: string; models: DshModelEntry[] }
+
+/** 优化模型选择器：从 DSH 已配置模型列表选择（留空 = 当前所选 LLM）。 */
+function ModelPicker({ t, provider, model, onProvider, onModel }: {
+  t: LocaleT
+  provider: string
+  model: string
+  onProvider: (v: string) => void
+  onModel: (v: string) => void
+}): react.ReactElement {
+  const [providers, setProviders] = react.useState<DshProviderEntry[] | null>(null)
+  const [status, setStatus] = react.useState<'loading' | 'ok' | 'err'>('loading')
+  const load = react.useCallback(async () => {
+    setStatus('loading')
+    try {
+      const res = await fetch('/api/asr-voice/models', { cache: 'no-store' })
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; providers?: DshProviderEntry[]; reason?: string }
+      if (!res.ok || data.ok !== true || data.providers === undefined) throw new Error(data.reason || 'load failed')
+      setProviders(data.providers)
+      setStatus('ok')
+    } catch {
+      setStatus('err')
+    }
+  }, [])
+  react.useEffect(() => { void load() }, [load])
+
+  const currentProvider = providers?.find((p) => p.provider === provider)
+  const modelOptions = currentProvider?.models ?? []
+
+  return (
+    <>
+      <Field
+        title={t('llmProviderLabel')}
+        control={
+          <div className="dshav-field">
+            <select value={provider} onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onProvider(e.target.value)}>
+              <option value="">{t('llmCurrentDefault')}</option>
+              {(providers ?? []).map((p) => <option key={p.provider} value={p.provider}>{p.name}</option>)}
+            </select>
+          </div>
+        }
+      />
+      <Field
+        title={t('llmModelLabel')}
+        control={
+          <div className="dshav-field">
+            <select
+              value={model}
+              disabled={provider === ''}
+              onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onModel(e.target.value)}
+            >
+              <option value="">{t('llmCurrentDefault')}</option>
+              {modelOptions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+        }
+      />
+      {status === 'err' ? <p className="dshav-field-hint">{t('loadFailed')}</p> : null}
+      {status === 'ok' && provider !== '' && modelOptions.length === 0 ? <p className="dshav-field-hint">{t('llmModelsEmpty')}</p> : null}
+    </>
+  )
+}
+
 /** 主键规范化（忽略纯修饰键，统一 Space / 字母大写）。 */
 function normalizeKey(key: string): string {
   if (key === 'Control' || key === 'Alt' || key === 'Shift' || key === 'Meta' || key === 'Escape') return ''
@@ -195,11 +260,8 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   const setOptimizeMode = (v: string): void => {
     setConfig('optimize', () => { config.optimize.mode = v === 'llm' ? 'llm' : 'heuristic' })
   }
-  const setLlmBase = (v: string): void => {
-    setConfig('optimize', () => { config.optimize.llm.baseUrl = v })
-  }
-  const setLlmKey = (v: string): void => {
-    setConfig('optimize', () => { config.optimize.llm.apiKey = v })
+  const setLlmProvider = (v: string): void => {
+    setConfig('optimize', () => { config.optimize.llm.provider = v; config.optimize.llm.model = '' })
   }
   const setLlmModel = (v: string): void => {
     setConfig('optimize', () => { config.optimize.llm.model = v })
@@ -284,9 +346,14 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
         {config.optimize.mode === 'llm' && (
           <div className="dshav-stack">
             <p className="dshav-field-hint">{t('llmDefaultHint')}</p>
-            <TextRow title={t('llmBaseUrlLabel')} value={config.optimize.llm.baseUrl} onChange={setLlmBase} />
-            <TextRow title={t('llmApiKeyLabel')} value={config.optimize.llm.apiKey} onChange={setLlmKey} type="password" />
-            <TextRow title={t('llmModelLabel')} value={config.optimize.llm.model} onChange={setLlmModel} />
+            <ModelPicker
+              t={t}
+              provider={config.optimize.llm.provider}
+              model={config.optimize.llm.model}
+              onProvider={setLlmProvider}
+              onModel={setLlmModel}
+            />
+            <p className="dshav-field-hint">{t('llmCustomHint')}</p>
           </div>
         )}
       </div>

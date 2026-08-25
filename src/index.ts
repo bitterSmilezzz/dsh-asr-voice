@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver';
 import type {} from '@deepseek-ai/dsh-llm';
 import { ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema, type AsrVoiceSettings } from './settings.ts';
 import { registerTranscribeRoute, type CloudAsrConfig } from './transcribe.ts';
-import { buildOptimizeRunner, registerOptimizeRoute, type LlmOptimizeConfig } from './optimize.ts';
+import { registerOptimizeRoute, registerModelsRoute } from './optimize.ts';
 
 /** 最小 settings 面（本插件只用 register + scope.get）。 */
 interface SettingsLike {
@@ -56,19 +56,8 @@ export function apply(ctx: AsrVoiceHostContext): void {
     };
   };
 
-  const getLlmConfig = (): LlmOptimizeConfig => {
-    const v = scope.get();
-    return {
-      baseUrl: v.optimize.llm.baseUrl,
-      apiKey: v.optimize.llm.apiKey,
-      model: v.optimize.llm.model,
-    };
-  };
-
-  // 优化执行器：独立配置优先，否则用当前所选 LLM。
-  const optimize = buildOptimizeRunner(ctx, getLlmConfig);
-
   // 路由随 fiber 生命周期注册/回收。
   ctx.effect(() => registerTranscribeRoute((def) => ctx.webServer.register(def), getCloudConfig), 'asr-voice: transcribe route');
-  ctx.effect(() => registerOptimizeRoute((def) => ctx.webServer.register(def), optimize), 'asr-voice: optimize route');
+  ctx.effect(() => registerOptimizeRoute((def) => ctx.webServer.register(def), ctx), 'asr-voice: optimize route');
+  ctx.effect(() => registerModelsRoute((def) => ctx.webServer.register(def), ctx), 'asr-voice: models route');
 }

@@ -23,8 +23,7 @@ export interface AsrVoiceConfig {
   optimize: {
     mode: 'heuristic' | 'llm'
     llm: {
-      baseUrl: string
-      apiKey: string
+      provider: string
       model: string
     }
   }
@@ -39,7 +38,7 @@ export interface AsrVoiceConfig {
 /** 配置默认值（与 host schema 的 default 一致）。 */
 export const DEFAULTS: AsrVoiceConfig = {
   asr: { provider: 'browser', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '' } },
-  optimize: { mode: 'llm', llm: { baseUrl: '', apiKey: '', model: '' } },
+  optimize: { mode: 'llm', llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
 }

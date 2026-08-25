@@ -34,7 +34,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 云端 | `asr.cloud.apiKey` | 空 | 仅存本机服务端 |
 | 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `qwen3-asr-flash` |
 | 优化 | `optimize.mode` | `llm` | `llm`（默认，用当前所选 LLM 重写）/ `heuristic`（本地启发式） |
-| 优化 | `optimize.llm.*` | 空 | 可选：指定特定 LLM（OpenAI-compatible）；留空则用当前所选 LLM |
+| 优化 | `optimize.llm.provider` / `.model` | 空 | 可选：从 **DSH 已配置模型列表**指定；留空则用当前所选 LLM。自定义须先到 DSH 模型列表添加 |
 | 语言 | `language` | `auto` | `auto` / `zh-CN` / `en-US` |
 | 行为 | `behavior.autoSend` | `false` | 识别后自动发送 |
 | 行为 | `behavior.holdToTalk` | `false` | 按住快捷键说话、松开结束 |
