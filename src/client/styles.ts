@@ -256,21 +256,52 @@ export const CSS = `
 .dshav-rowTitle { font-size: 13.5px; line-height: 20px; font-weight: 500; }
 .dshav-rowDesc { margin: 0; font-size: 12px; line-height: 18px; color: var(--dshav-text-3); }
 .dshav-field { display: flex; align-items: center; gap: 8px; flex: none; }
+/* ── 原生控件：跟随 DSH 主题（--dsw-alias-*），与官方设置页一致 ── */
 .dshav-field select,
-.dshav-field input[type='text'] {
+.dshav-field input[type='text'],
+.dshav-field input[type='password'] {
   box-sizing: border-box;
-  height: 30px;
-  border: 1px solid var(--dshav-border);
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
-  background: var(--dshav-bg-layer);
-  color: var(--dshav-text);
+  background: var(--dsw-alias-bg-layer-3);
   font: inherit;
-  font-size: 12.5px;
-  padding: 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
 }
-.dshav-field select { min-width: 180px; cursor: pointer; }
-.dshav-field input[type='text'] { width: 240px; }
-.dshav-field input[type='text'].dshav-wide { width: 320px; }
+.dshav-field select:focus-visible,
+.dshav-field input:focus-visible {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary);
+}
+.dshav-field input::placeholder { color: var(--dsw-alias-label-dimmed); }
+.dshav-field input:disabled,
+.dshav-field select:disabled { opacity: .6; cursor: default; }
+/* select：原生外观 + 主题 chevron（与官方 selectInput 一致） */
+.dshav-field select {
+  appearance: none;
+  max-width: 240px;
+  min-width: 180px;
+  padding-right: 32px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+}
+.dshav-field input[type='text'],
+.dshav-field input[type='password'] { width: 240px; }
+.dshav-field input.dshav-wide { width: 320px; }
+/* checkbox：原生 + 主题品牌色（与官方一致） */
+.dshav-field input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+}
 .dshav-stack { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .dshav-stack .dshav-row { align-items: center; }
 .dshav-status { font-size: 12px; color: var(--dshav-text-2); min-height: 16px; }
