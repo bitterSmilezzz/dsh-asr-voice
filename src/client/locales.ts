@@ -61,7 +61,7 @@ export type LocaleT = (key: LocaleKey, vars?: Record<string, string | number>) =
 
 export const zh: LocaleDict = {
   cardTitle: '语音输入',
-  cardCopy: '语音识别 + 提示词优化：点击输入框麦克风按钮说话，识别并整理后填入草稿。默认浏览器识别（免费免 key），可切换云端 ASR 并配置模型。',
+  cardCopy: '点输入框麦克风说话，识别并优化后填入草稿。默认浏览器识别（免费免 key），可切云端 ASR。',
   groupAsr: '识别引擎',
   asrProviderLabel: 'ASR 引擎',
   asrProviderBrowser: '浏览器（Web Speech，免费免 key）',
@@ -112,7 +112,7 @@ export const zh: LocaleDict = {
 
 export const en: LocaleDict = {
   cardTitle: 'Voice Input',
-  cardCopy: 'Speech-to-text + prompt optimization: click the mic button in the composer, speak, and the optimized prompt is filled in. Browser recognition by default (free, no key); switch to cloud ASR and configure models as needed.',
+  cardCopy: 'Click the mic in the composer, speak, and the optimized transcript is filled in. Browser recognition by default; cloud ASR optional.',
   groupAsr: 'Recognition engine',
   asrProviderLabel: 'ASR engine',
   asrProviderBrowser: 'Browser (Web Speech, free, no key)',
