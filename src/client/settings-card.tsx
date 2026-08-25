@@ -152,9 +152,10 @@ function normalizeKey(key: string): string {
   return map[key] ?? key
 }
 
-/** 设置卡片。 */
+/** 设置卡片（折叠交互与其他插件一致：可点击 header + chevron 旋转 + 条件 body）。 */
 export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement {
   useConfigVersion()
+  const [open, setOpen] = react.useState(false)
   const preset = presetById(config.asr.cloud.preset) ?? presetById(DEFAULT_PRESET_ID)
 
   const setProvider = (v: string): void => {
@@ -212,15 +213,33 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   ]
 
   return (
-    <div className="dshav-card">
-      <div className="dshav-head">
-        <span className="dshav-title">{t('cardTitle')}</span>
-        <p className="dshav-copy">{t('cardCopy')}</p>
-      </div>
-
-      <div className="dshav-group">
-        <span className="dshav-groupTitle">{t('groupAsr')}</span>
-        <SelectRow
+    <li className="dshav-card">
+      <button
+        type="button"
+        className="dshav-header"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="dshav-headtext">
+          <span className="dshav-name">{t('cardTitle')}</span>
+          <p className="dshav-desc">{t('cardCopy')}</p>
+        </span>
+        <svg
+          className={'dshav-chevron' + (open ? ' dshav-open' : '')}
+          width={16}
+          height={16}
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path d="M3.5 5.75 8 10.25l4.5-4.5" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open ? (
+        <div className="dshav-body">
+          <div className="dshav-group">
+            <span className="dshav-groupTitle">{t('groupAsr')}</span>
+            <SelectRow
           title={t('asrProviderLabel')}
           value={config.asr.provider}
           options={[
@@ -286,6 +305,8 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
           <HotkeyRecorder value={config.behavior.hotkey} onChange={setHotkey} t={t} />
         </div>
       </div>
-    </div>
+        </div>
+      ) : null}
+    </li>
   )
 }

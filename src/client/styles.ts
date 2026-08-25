@@ -185,18 +185,59 @@ export const CSS = `
 }
 .dshav-button-primary:hover { filter: brightness(1.06); }
 
-/* ── 设置卡片 ─────────────────────────────────────────────────────── */
+/* ── 设置卡片（折叠交互，与其它插件配置卡片一致） ─────────────── */
 .dshav-card {
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2, var(--dshav-border));
+  background: var(--dsw-alias-bg-layer-3, var(--dshav-bg-layer));
+  border-radius: 12px;
+  overflow: hidden;
+  list-style: none;
+}
+.dshav-header {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-primary, var(--dshav-text));
+  font: inherit;
+  text-align: left;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+.dshav-header:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,.05)); }
+.dshav-headtext {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  color: var(--dshav-text);
+  gap: 4px;
 }
-.dshav-head { display: flex; flex-direction: column; gap: 5px; }
-.dshav-title { font-size: 17px; line-height: 24px; font-weight: 600; }
-.dshav-copy { max-width: 640px; color: var(--dshav-text-2); font-size: 13px; line-height: 20px; }
-.dshav-group { display: flex; flex-direction: column; gap: 12px; }
+.dshav-name { font-size: 15px; line-height: 1.4; font-weight: 600; }
+.dshav-desc { margin: 0; color: var(--dsw-alias-label-tertiary, var(--dshav-text-3)); font-size: 13px; line-height: 1.5; }
+.dshav-chevron {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-tertiary, var(--dshav-text-3));
+  transform: rotate(0deg);
+  transition: transform .15s ease;
+}
+.dshav-chevron.dshav-open { transform: rotate(180deg); }
+.dshav-body {
+  box-sizing: border-box;
+  border-top: 1px solid var(--dsw-alias-border-l2, var(--dshav-border));
+  padding: 4px 16px 14px;
+  display: grid;
+  gap: 4px;
+}
+.dshav-group { display: flex; flex-direction: column; gap: 12px; padding-top: 10px; }
 .dshav-groupTitle {
   font-size: 12px;
   font-weight: 600;
