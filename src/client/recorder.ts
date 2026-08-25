@@ -76,6 +76,8 @@ export interface VoiceRecorder {
   onInterim: ((text: string) => void) | null
   /** 状态回调（recording → transcribing）。 */
   onState: ((state: RecordState) => void) | null
+  /** 实时音量回调（0~1 RMS；cloud 为真实音量，browser 为模拟能量）。 */
+  onLevel: ((rms: number) => void) | null
 }
 
 /** 语言参数：auto → 返回 undefined（交给浏览器/服务端默认）。 */
@@ -102,9 +104,31 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   let stopped = false
   let endResolve: ((text: string) => void) | null = null
   let maxTimer: ReturnType<typeof setTimeout> | null = null
+  let levelRaf = 0
+  let simLevel = 0.05
+  let levelPhase = Math.random() * Math.PI * 2
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recorder: VoiceRecorder = { onInterim: null, onState: null } as any
+  const recorder: VoiceRecorder = { onInterim: null, onState: null, onLevel: null } as any
+
+  /** 浏览器引擎无音频流，用平滑的模拟能量驱动频谱（装饰性，视觉近似语音起伏）。 */
+  const startLevelSim = (): void => {
+    const loop = (): void => {
+      if (stopped) { levelRaf = 0; return }
+      levelPhase += 0.16 + Math.random() * 0.12
+      const base = 0.24 + 0.16 * Math.sin(levelPhase)
+      const burst = Math.random() < 0.07 ? Math.random() * 0.45 : 0
+      const next = Math.min(1, Math.max(0.02, base + burst + Math.random() * 0.12))
+      simLevel += (next - simLevel) * 0.32
+      recorder.onLevel?.(simLevel)
+      levelRaf = requestAnimationFrame(loop)
+    }
+    levelRaf = requestAnimationFrame(loop)
+  }
+  const stopLevelSim = (): void => {
+    if (levelRaf) cancelAnimationFrame(levelRaf)
+    levelRaf = 0
+  }
 
   const emitInterim = (): void => {
     const text = `${finalText}${finalText && interim ? ' ' : ''}${interim}`.trim()
@@ -114,6 +138,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   const settle = (): void => {
     if (stopped) return
     stopped = true
+    stopLevelSim()
     if (maxTimer) clearTimeout(maxTimer)
     if (endResolve) {
       endResolve(finalText.trim())
@@ -154,6 +179,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
 
   recorder.start = () => {
     if (stopped) return
+    startLevelSim()
     maxTimer = setTimeout(() => { try { recognition.stop() } catch { /* noop */ } }, MAX_RECORD_MS)
     try {
       recognition.start()
@@ -190,7 +216,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
 
 /** 云端引擎：MediaRecorder 采集 → host 代理转写。 */
 function createCloudRecorder(language: string, onError: (msg: string) => void): VoiceRecorder {
-  const recorder: VoiceRecorder = { onInterim: null, onState: null, start: () => {}, stop: () => Promise.resolve(''), abort: () => {} }
+  const recorder: VoiceRecorder = { onInterim: null, onState: null, onLevel: null, start: () => {}, stop: () => Promise.resolve(''), abort: () => {} }
   let stream: MediaStream | null = null
   let mediaRecorder: MediaRecorder | null = null
   let chunks: Blob[] = []
@@ -224,6 +250,8 @@ function createCloudRecorder(language: string, onError: (msg: string) => void): 
           sum += v * v
         }
         const rms = Math.sqrt(sum / data.length)
+        // 实时音量（0~1，放大到可视范围）
+        recorder.onLevel?.(Math.min(1, rms * 4))
         if (rms < SILENCE_RMS) {
           if (silentSince === null) silentSince = performance.now()
           else if (performance.now() - silentSince > SILENCE_MS) {

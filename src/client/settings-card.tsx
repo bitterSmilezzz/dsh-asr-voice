@@ -23,22 +23,35 @@ function useConfigVersion(): number {
   return v
 }
 
-/** 一行开关。 */
-function ToggleRow({ title, desc, checked, onChange }: { title: string; desc?: string; checked: boolean; onChange: () => void }): react.ReactElement {
+/** 统一字段容器（垂直布局：label / control / hint，与官方 fields 一致）。 */
+function Field({ title, desc, control }: { title: string; desc?: string | undefined; control: react.ReactNode }): react.ReactElement {
   return (
-    <div className="dshav-row">
-      <div className="dshav-rowText">
-        <span className="dshav-rowTitle">{title}</span>
-        {desc ? <p className="dshav-rowDesc">{desc}</p> : null}
+    <div className="dshav-field-item">
+      <div className="dshav-field-head">
+        <span className="dshav-field-label">{title}</span>
       </div>
-      <label className="dshav-field">
-        <input type="checkbox" checked={checked} onChange={onChange} />
-      </label>
+      <div className="dshav-field-control">{control}</div>
+      {desc ? <p className="dshav-field-hint">{desc}</p> : null}
     </div>
   )
 }
 
-/** 文本输入行（立即写回 host settings）。 */
+/** 开关字段。 */
+function ToggleRow({ title, desc, checked, onChange }: { title: string; desc?: string; checked: boolean; onChange: () => void }): react.ReactElement {
+  return (
+    <Field
+      title={title}
+      desc={desc}
+      control={
+        <label className="dshav-field">
+          <input type="checkbox" checked={checked} onChange={onChange} />
+        </label>
+      }
+    />
+  )
+}
+
+/** 文本输入字段（立即写回 host settings）。 */
 function TextRow({ title, desc, value, onChange, wide, type = 'text' }: {
   title: string
   desc?: string
@@ -48,25 +61,25 @@ function TextRow({ title, desc, value, onChange, wide, type = 'text' }: {
   type?: 'text' | 'password'
 }): react.ReactElement {
   return (
-    <div className="dshav-row">
-      <div className="dshav-rowText">
-        <span className="dshav-rowTitle">{title}</span>
-        {desc ? <p className="dshav-rowDesc">{desc}</p> : null}
-      </div>
-      <div className="dshav-field">
-        <input
-          className={wide ? 'dshav-wide' : undefined}
-          type={type}
-          value={value}
-          spellCheck={false}
-          onChange={(e: react.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-        />
-      </div>
-    </div>
+    <Field
+      title={title}
+      desc={desc}
+      control={
+        <div className="dshav-field">
+          <input
+            className={wide ? 'dshav-wide' : undefined}
+            type={type}
+            value={value}
+            spellCheck={false}
+            onChange={(e: react.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+          />
+        </div>
+      }
+    />
   )
 }
 
-/** 选择行。 */
+/** 选择字段。 */
 function SelectRow({ title, desc, value, options, onChange }: {
   title: string
   desc?: string
@@ -75,17 +88,17 @@ function SelectRow({ title, desc, value, options, onChange }: {
   onChange: (v: string) => void
 }): react.ReactElement {
   return (
-    <div className="dshav-row">
-      <div className="dshav-rowText">
-        <span className="dshav-rowTitle">{title}</span>
-        {desc ? <p className="dshav-rowDesc">{desc}</p> : null}
-      </div>
-      <div className="dshav-field">
-        <select value={value} onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}>
-          {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      </div>
-    </div>
+    <Field
+      title={title}
+      desc={desc}
+      control={
+        <div className="dshav-field">
+          <select value={value} onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}>
+            {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      }
+    />
   )
 }
 
@@ -213,7 +226,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   ]
 
   return (
-    <li className="dshav-card">
+    <li className={'dshav-card' + (open ? ' dshav-card-open' : '')}>
       <button
         type="button"
         className="dshav-header"
@@ -254,7 +267,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
             <TextRow title={t('cloudBaseUrlLabel')} value={config.asr.cloud.baseUrl} onChange={setCloudBase} />
             <TextRow title={t('cloudApiKeyLabel')} value={config.asr.cloud.apiKey} onChange={setCloudKey} type="password" />
             <TextRow title={t('cloudModelLabel')} desc={t('cloudModelHint')} value={config.asr.cloud.model} onChange={setCloudModel} wide />
-            {preset && <p className="dshav-rowDesc">{preset.hint}</p>}
+            {preset && <p className="dshav-field-hint">{preset.hint}</p>}
           </div>
         )}
       </div>
@@ -297,13 +310,11 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
         <span className="dshav-groupTitle">{t('groupBehavior')}</span>
         <ToggleRow title={t('autoSendLabel')} desc={t('autoSendDesc')} checked={config.behavior.autoSend} onChange={() => setAutoSend(!config.behavior.autoSend)} />
         <ToggleRow title={t('holdToTalkLabel')} desc={t('holdToTalkDesc')} checked={config.behavior.holdToTalk} onChange={() => setHoldToTalk(!config.behavior.holdToTalk)} />
-        <div className="dshav-row">
-          <div className="dshav-rowText">
-            <span className="dshav-rowTitle">{t('hotkeyLabel')}</span>
-            <p className="dshav-rowDesc">{t('hotkeyDesc')}</p>
-          </div>
-          <HotkeyRecorder value={config.behavior.hotkey} onChange={setHotkey} t={t} />
-        </div>
+        <Field
+          title={t('hotkeyLabel')}
+          desc={t('hotkeyDesc')}
+          control={<HotkeyRecorder value={config.behavior.hotkey} onChange={setHotkey} t={t} />}
+        />
       </div>
         </div>
       ) : null}

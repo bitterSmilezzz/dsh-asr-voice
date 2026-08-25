@@ -5,6 +5,12 @@
  *   → 停止 → 转写文本 → 提示词优化（heuristic 即时 / llm 预览卡）
  *   → 填入草稿（inputActions.setDraft），可选自动发送（inputActions.submit）。
  *
+ * 动效（microanimations 原则：反馈/定向/愉悦，克制）：
+ *   - 录音：多层呼吸光环（back.out 缓动、错开延迟、非机械）+ 实时频谱条
+ *     （cloud 真实 RMS / browser 模拟能量，CSS 变量驱动）
+ *   - 状态提示条：滑入 + 呼吸点（recording）/ 转圈（transcribing/optimizing）
+ *   - 按钮：hover 微缩放、active 按压缩放
+ *
  * 独立契约：本组件只依赖官方 slot 标准 kit（inputActions / session / input），
  * 不依赖任何第三方插件；样式 data 标签与命名空间唯一。
  */
@@ -37,6 +43,9 @@ export interface VoiceButtonProps {
 /** 组件内部状态机。 */
 type VoiceState = 'idle' | 'recording' | 'transcribing' | 'optimizing'
 
+/** 频谱条柱数。 */
+const SPECTRUM_BARS = 12
+
 /** 全局录音控制器：只驱动「最后挂载」的实例（当前可见会话）。 */
 export const voiceController = {
   toggle: (): void => { current?.toggle() },
@@ -59,13 +68,18 @@ function MicIcon(): react.ReactElement {
   )
 }
 
-/** 录音状态图标（实心圆点）。 */
+/** 录音状态图标（实心圆点，带呼吸）。 */
 function RecDot(): react.ReactElement {
-  return <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'currentColor', display: 'block' }} />
+  return <span className="dshav-rec-dot" />
+}
+
+/** 转圈（transcribing / optimizing）。 */
+function Spinner(): react.ReactElement {
+  return <span className="dshav-spinner" aria-hidden="true" />
 }
 
 /**
- * 录音按钮 + 预览卡。
+ * 录音按钮 + 状态提示条 + 预览卡。
  * @param props - slot 注入的 owner share + 标准 kit + 翻译函数。
  */
 export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
@@ -77,6 +91,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const [preview, setPreview] = react.useState<{ original: string; optimized: string } | null>(null)
 
   const wrapRef = react.useRef<HTMLSpanElement | null>(null)
+  const hintRef = react.useRef<HTMLSpanElement | null>(null)
+  const spectrumRef = react.useRef<HTMLSpanElement | null>(null)
   const recorderRef = react.useRef<VoiceRecorder | null>(null)
   const stateRef = react.useRef<VoiceState>('idle')
   stateRef.current = state
@@ -128,6 +144,10 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     recorderRef.current = recorder
     recorder.onInterim = (text) => setInterim(text)
     recorder.onState = (s) => { if (s === 'transcribing') setPhase('transcribing') }
+    recorder.onLevel = (rms) => {
+      // 频谱条：CSS 变量驱动柱高（避免每帧 React 渲染）
+      if (spectrumRef.current) spectrumRef.current.style.setProperty('--level', rms.toFixed(3))
+    }
     setPhase('recording')
     startWave()
     recorder.start()
@@ -177,13 +197,22 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setPreview(null)
   }
 
-  // ── GSAP 波纹动画（fromTo 无限重复） ────────────────────────────
+  // ── 呼吸光环（back.out 缓动 + 错开延迟 + 变化幅度，非机械同步） ──
   const startWave = (): void => {
     const wrap = wrapRef.current
     if (!wrap) return
     wrap.querySelectorAll<HTMLElement>('.dshav-wave-ring').forEach((ring, i) => {
-      ring.style.opacity = '0.55'
-      fromTo(ring, { scale: 0.75, opacity: 0.55 }, { scale: 2.2, opacity: 0, duration: 1.25, delay: i * 0.38, repeat: Infinity })
+      ring.style.opacity = '0.5'
+      const spread = 1.9 + (i % 2) * 0.35
+      const duration = 1.35 + (i % 2) * 0.2
+      fromTo(ring, { scale: 0.72, opacity: 0.5 }, {
+        scale: spread,
+        opacity: 0,
+        duration,
+        delay: i * 0.24,
+        ease: 'back.out',
+        repeat: Infinity,
+      })
     })
   }
   const stopWave = (): void => {
@@ -232,8 +261,18 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             {error}
           </span>
         )}
-        {interim !== '' && state === 'recording' && (
-          <span className="dshav-hotkey-hint" role="status">{interim}</span>
+        {busy && (
+          <span className="dshav-hotkey-hint" data-state={state} ref={hintRef} role="status">
+            {state === 'recording' ? <span className="dshav-dot" /> : <Spinner />}
+            {state === 'recording' && interim !== '' ? <span className="dshav-hint-text">{interim}</span> : null}
+            {state === 'recording' && (
+              <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
+                {Array.from({ length: SPECTRUM_BARS }, (_, i) => (
+                  <span key={i} className="dshav-bar" style={{ '--bar': String(0.35 + (i / (SPECTRUM_BARS - 1)) * 0.65) } as react.CSSProperties} />
+                ))}
+              </span>
+            )}
+          </span>
         )}
       </span>
       {preview !== null && (
