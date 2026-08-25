@@ -36,18 +36,16 @@ function Field({ title, desc, control }: { title: string; desc?: string | undefi
   )
 }
 
-/** 开关字段。 */
+/** 开关字段：checkbox 与标题同行左对齐（官方 checkbox 行排布），desc 作 hint。 */
 function ToggleRow({ title, desc, checked, onChange }: { title: string; desc?: string; checked: boolean; onChange: () => void }): react.ReactElement {
   return (
-    <Field
-      title={title}
-      desc={desc}
-      control={
-        <label className="dshav-field">
-          <input type="checkbox" checked={checked} onChange={onChange} />
-        </label>
-      }
-    />
+    <div className="dshav-field-item">
+      <label className="dshav-toggle">
+        <input type="checkbox" checked={checked} onChange={onChange} />
+        <span>{title}</span>
+      </label>
+      {desc ? <p className="dshav-field-hint">{desc}</p> : null}
+    </div>
   )
 }
 

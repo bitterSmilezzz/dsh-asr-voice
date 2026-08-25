@@ -115,6 +115,8 @@ export const CSS = `
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
+  max-width: min(420px, calc(100vw - 120px));
+  overflow: hidden;
   border: 1px solid var(--dsw-alias-border-l2, var(--dshav-border));
   border-radius: 10px;
   background: var(--dsw-alias-bg-layer-3, var(--dshav-bg-layer));
@@ -236,6 +238,10 @@ export const CSS = `
   line-height: 22px;
   height: 36px;
   padding: 0 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
   color: var(--dsw-alias-label-primary);
   background: transparent;
   transition: background .15s ease, color .15s ease;
@@ -348,7 +354,24 @@ export const CSS = `
 .dshav-field-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
 .dshav-stack { display: flex; flex-direction: column; }
 .dshav-field { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.dshav-field:has(input[type='checkbox']) { flex: 0 0 auto; }
+/* checkbox 行：checkbox 与文本同行左对齐（官方 ModelListEditor 排布） */
+.dshav-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+.dshav-toggle input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+}
 /* ── 原生控件：跟随 DSH 主题（--dsw-alias-*），与官方设置页一致 ── */
 .dshav-field select,
 .dshav-field input[type='text'],
@@ -385,15 +408,7 @@ export const CSS = `
   background-size: 12px 12px;
 }
 .dshav-field input[type='text'],
-.dshav-field input[type='password'] { width: 100%; }
-/* checkbox：原生 + 主题品牌色（与官方一致） */
-.dshav-field input[type='checkbox'] {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--dsw-alias-brand-primary);
-  cursor: pointer;
-}
+.dshav-field input[type='password'] { flex: 1; min-width: 0; width: auto; }
 .dshav-status { font-size: 12px; color: var(--dshav-text-2); min-height: 16px; }
 .dshav-status[data-kind='err'] { color: var(--dshav-danger); }
 .dshav-status[data-kind='ok'] { color: var(--dshav-accent); }
