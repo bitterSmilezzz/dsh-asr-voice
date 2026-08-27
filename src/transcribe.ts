@@ -20,6 +20,9 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { CHAT_COMPLETIONS_PATH, MAX_AUDIO_BYTES, TRANSCRIBE_PATH, resolveAsrMode } from './presets.ts';
 import { isTrusted, readRawBody, sendJson } from './http.ts';
 
@@ -52,6 +55,24 @@ function errorReason(data: { error?: unknown; message?: unknown }, status: numbe
   }
   if (typeof data.message === 'string' && data.message !== '') return data.message
   return `upstream ASR failed (HTTP ${status})`
+}
+
+/** 调试落盘目录：失败时保存浏览器发来的原始音频，便于重放定位（仅诊断用）。 */
+function debugDir(): string {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.DSH_ASR_DEBUG_DIR
+  return env && env !== '' ? env : join(homedir(), '.dsh', 'asr-voice-debug')
+}
+
+/** 转写失败时把原始音频落盘（fire-and-forget，绝不阻断路由）。 */
+async function saveDebugAudio(audio: Buffer, mime: string, reason: string): Promise<void> {
+  try {
+    await mkdir(debugDir(), { recursive: true })
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const safeReason = reason.replace(/[^a-z0-9]+/gi, '-').slice(0, 40) || 'unknown'
+    await writeFile(join(debugDir(), `${stamp}-${audio.length}B-${safeReason}.${extForMime(mime)}`), audio)
+  } catch {
+    // 诊断落盘失败不影响主流程
+  }
 }
 
 /** whisper 式 multipart /audio/transcriptions。 */
@@ -108,13 +129,20 @@ async function upstreamTranscribeChat(cfg: CloudAsrConfig, audio: Buffer, mime: 
   if (!res.ok) {
     throw new Error(errorReason(data, res.status));
   }
-  const content = data.choices?.[0]?.message?.content;
+  // 兼容 content 为字符串或多模态数组（[{type:'text',text:'…'}]）两种形状。
+  let content = data.choices?.[0]?.message?.content;
+  if (Array.isArray(content)) {
+    content = content.map((p) => {
+      const t = (p as { text?: unknown }).text
+      return typeof t === 'string' ? t : ''
+    }).join('')
+  }
   if (typeof content !== 'string' || content.trim() === '') {
-    throw new Error('upstream ASR returned no text');
+    throw new Error(`upstream ASR returned no text (${audio.length}B ${mime})`);
   }
   // auto 语言模式会带 <chinese>/<english> 等标签，去掉。
   const text = content.replace(/<[^>]+>/g, '').trim();
-  if (text === '') throw new Error('upstream ASR returned no text');
+  if (text === '') throw new Error(`upstream ASR returned no text (${audio.length}B ${mime})`);
   return { text };
 }
 
@@ -176,10 +204,12 @@ export function registerTranscribeRoute(
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
       if (req.method !== 'POST') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+      let audio: Buffer = Buffer.alloc(0)
+      let mime = 'audio/webm'
       try {
-        const audio = await readRawBody(req, MAX_AUDIO_BYTES);
+        audio = await readRawBody(req, MAX_AUDIO_BYTES);
         if (audio.length === 0) return sendJson(res, 400, { ok: false, reason: 'empty audio body' });
-        const mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0]?.trim() || 'audio/webm';
+        mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0]?.trim() || 'audio/webm';
         const url = new URL(req.url ?? '/', 'http://localhost');
         const language = url.searchParams.get('language') ?? undefined;
         const cfg = getCloudConfig();
@@ -193,7 +223,10 @@ export function registerTranscribeRoute(
         const { text } = await upstreamTranscribe(cfg, audio, mime, language, apiKey);
         return sendJson(res, 200, { ok: true, text });
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
+        const base = error instanceof Error ? error.message : String(error);
+        const reason = audio.length > 0 ? `${base} (audio ${audio.length}B, ${mime})` : base;
+        // 失败时把原始音频落盘到 ~/.dsh/asr-voice-debug/（重放定位用，不影响主流程）。
+        if (audio.length > 0) void saveDebugAudio(audio, mime, base);
         return sendJson(res, 502, { ok: false, reason });
       }
     },
