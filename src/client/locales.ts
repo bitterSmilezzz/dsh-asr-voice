@@ -21,6 +21,17 @@ export type LocaleKey =
   | 'cloudModeAuto'
   | 'cloudModeTranscriptions'
   | 'cloudModeChat'
+  | 'addProvider'
+  | 'removeProvider'
+  | 'providersEmpty'
+  | 'activeProvider'
+  | 'providerInactive'
+  | 'fetchModels'
+  | 'fetchModelsLoading'
+  | 'fetchModelsPick'
+  | 'fetchModelsCurrent'
+  | 'fetchModelsEmpty'
+  | 'fetchModelsFail'
   | 'groupOptimize'
   | 'optimizeModeLabel'
   | 'optimizeHeuristic'
@@ -38,6 +49,12 @@ export type LocaleKey =
   | 'autoSendDesc'
   | 'holdToTalkLabel'
   | 'holdToTalkDesc'
+  | 'textModeLabel'
+  | 'textModeDesc'
+  | 'textModeReplace'
+  | 'textModeAppend'
+  | 'copyToClipboardLabel'
+  | 'copyToClipboardDesc'
   | 'hotkeyLabel'
   | 'hotkeyDesc'
   | 'hotkeyPlaceholder'
@@ -63,6 +80,12 @@ export type LocaleKey =
   | 'previewConfirm'
   | 'previewCancel'
   | 'autoSendHint'
+  | 'groupStats'
+  | 'statsTitle'
+  | 'statsCount'
+  | 'statsChars'
+  | 'statsLastAt'
+  | 'statsEmpty'
 
 /** 词典值（支持 {x} 插值）。 */
 export type LocaleDict = Record<LocaleKey, string>
@@ -88,6 +111,17 @@ export const zh: LocaleDict = {
   cloudModeAuto: '自动（按模型名判定）',
   cloudModeTranscriptions: 'whisper 式 /audio/transcriptions',
   cloudModeChat: 'chat + input_audio（MiMo/Qwen-ASR）',
+  addProvider: '＋ 添加供应商',
+  removeProvider: '删除',
+  providersEmpty: '尚未配置云端供应商，点「添加供应商」开始。',
+  activeProvider: '当前使用',
+  providerInactive: '备选',
+  fetchModels: '获取模型',
+  fetchModelsLoading: '获取中…',
+  fetchModelsPick: '选择模型',
+  fetchModelsCurrent: '当前模型',
+  fetchModelsEmpty: '该供应商暂无 ASR 模型',
+  fetchModelsFail: '获取模型失败',
   groupOptimize: '提示词优化',
   optimizeModeLabel: '优化方式',
   optimizeHeuristic: '本地启发式（免费、离线）',
@@ -105,6 +139,12 @@ export const zh: LocaleDict = {
   autoSendDesc: '开启后说完即发（push-to-talk 风格），关闭则填入草稿待确认。',
   holdToTalkLabel: '按住说话',
   holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击开始/点击或静音自动结束。',
+  textModeLabel: '文本输入',
+  textModeDesc: '完整替换：清空草稿后填入；末尾追加：在已有文字后插入。',
+  textModeReplace: '完整替换（默认）',
+  textModeAppend: '在已有文字后追加',
+  copyToClipboardLabel: '自动复制到剪贴板',
+  copyToClipboardDesc: '识别优化后自动把结果复制到系统剪贴板，方便粘贴到其它地方。',
   hotkeyLabel: '快捷键',
   hotkeyDesc: '点击后按新组合键（如 Ctrl+Shift+Space）；留空关闭。',
   hotkeyPlaceholder: '点击录制快捷键',
@@ -130,6 +170,12 @@ export const zh: LocaleDict = {
   previewConfirm: '填入并发送',
   previewCancel: '取消',
   autoSendHint: '识别后将自动发送',
+  groupStats: '用量统计',
+  statsTitle: 'ASR 用量',
+  statsCount: '已识别 {n} 次',
+  statsChars: '累计 {n} 字符',
+  statsLastAt: '最近 {time}',
+  statsEmpty: '暂无用量数据',
 }
 
 export const en: LocaleDict = {
@@ -150,6 +196,17 @@ export const en: LocaleDict = {
   cloudModeAuto: 'Auto (by model name)',
   cloudModeTranscriptions: 'Whisper-style /audio/transcriptions',
   cloudModeChat: 'Chat + input_audio (MiMo/Qwen-ASR)',
+  addProvider: '+ Add provider',
+  removeProvider: 'Remove',
+  providersEmpty: 'No cloud provider configured — click “Add provider” to begin.',
+  activeProvider: 'Active',
+  providerInactive: 'Standby',
+  fetchModels: 'Fetch models',
+  fetchModelsLoading: 'Fetching…',
+  fetchModelsPick: 'Pick a model',
+  fetchModelsCurrent: 'Current model',
+  fetchModelsEmpty: 'No ASR models from this provider',
+  fetchModelsFail: 'Failed to fetch models',
   groupOptimize: 'Prompt optimization',
   optimizeModeLabel: 'Optimization mode',
   optimizeHeuristic: 'Local heuristic (free, offline)',
@@ -167,6 +224,12 @@ export const en: LocaleDict = {
   autoSendDesc: 'When on, the prompt is submitted right after recognition (push-to-talk style). When off, it fills the draft for confirmation.',
   holdToTalkLabel: 'Hold to talk',
   holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off, click to start and click again (or silence) to stop.',
+  textModeLabel: 'Text insertion',
+  textModeDesc: 'Replace: clear the draft then fill. Append: insert after existing text.',
+  textModeReplace: 'Replace draft (default)',
+  textModeAppend: 'Append to existing text',
+  copyToClipboardLabel: 'Auto-copy to clipboard',
+  copyToClipboardDesc: 'Copy the recognized/optimized result to the system clipboard automatically.',
   hotkeyLabel: 'Hotkey',
   hotkeyDesc: 'Click, then press a new combo (e.g. Ctrl+Shift+Space). Clear to disable.',
   hotkeyPlaceholder: 'Click to record hotkey',
@@ -192,6 +255,12 @@ export const en: LocaleDict = {
   previewConfirm: 'Fill & send',
   previewCancel: 'Cancel',
   autoSendHint: 'Will auto-send after recognition',
+  groupStats: 'Usage stats',
+  statsTitle: 'ASR usage',
+  statsCount: '{n} transcriptions',
+  statsChars: '{n} chars total',
+  statsLastAt: 'last at {time}',
+  statsEmpty: 'No usage data yet',
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {

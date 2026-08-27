@@ -112,6 +112,9 @@ export interface OptimizeTarget {
   model: string
 }
 
+/** LLM 优化请求超时（毫秒）：模型卡住/过慢时不把 UI 永远钉在「优化中」。 */
+const OPTIMIZE_TIMEOUT_MS = 30_000
+
 /** 调用 host /api/asr-voice/optimize（用 DSH 已配置模型重写）。 */
 export async function llmOptimize(text: string, target?: OptimizeTarget): Promise<string> {
   const body: { text: string; provider?: string; model?: string } = { text }
@@ -119,16 +122,28 @@ export async function llmOptimize(text: string, target?: OptimizeTarget): Promis
     body.provider = target.provider
     body.model = target.model
   }
-  const res = await fetch('/api/asr-voice/optimize', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; text?: string; reason?: string }
-  if (!res.ok || data.ok !== true || typeof data.text !== 'string') {
-    throw new Error(data.reason || 'optimize failed')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), OPTIMIZE_TIMEOUT_MS)
+  try {
+    const res = await fetch('/api/asr-voice/optimize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; text?: string; reason?: string }
+    if (!res.ok || data.ok !== true || typeof data.text !== 'string') {
+      throw new Error(data.reason || 'optimize failed')
+    }
+    return data.text
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('optimize timeout')
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
   }
-  return data.text
 }
 
 /** 按当前模式优化（heuristic 即时返回；llm 异步，带可选模型目标）。 */

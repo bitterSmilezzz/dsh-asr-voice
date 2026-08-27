@@ -17,9 +17,9 @@
 import * as react from 'react'
 // Type-only: pulls the ui-conversation SlotMap merge (input seats + standard kit).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { config } from './config.ts'
+import { cloudConfigured, config } from './config.ts'
 import { heuristicOptimize, llmOptimize } from './optimize.ts'
-import { createVoiceRecorder, isWebSpeechSupported, isCloudConfigured, type VoiceRecorder } from './recorder.ts'
+import { createVoiceRecorder, isWebSpeechSupported, type VoiceRecorder } from './recorder.ts'
 import { fromTo } from './animate.ts'
 import type { LocaleT } from './locales.ts'
 
@@ -135,7 +135,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     if (provider === 'cloud') return 'cloud'
     if (provider === 'browser') return 'browser'
     // auto
-    if (!isWebSpeechSupported()) return isCloudConfigured(config.asr.cloud) ? 'cloud' : 'browser'
+    if (!isWebSpeechSupported()) return cloudConfigured() ? 'cloud' : 'browser'
     return 'browser'
   }
 
@@ -153,7 +153,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         }
         // auto 兜底：浏览器不可用（网络/权限被浏览器 Web Speech 拒）且云端已配置 → 重试云端。
         const recoverable = code === 'network' || code === 'not-allowed' || code === 'service-not-allowed' || code === 'no-speech-support'
-        if (engine === 'browser' && config.asr.provider === 'auto' && recoverable && isCloudConfigured(config.asr.cloud)) {
+        if (engine === 'browser' && config.asr.provider === 'auto' && recoverable && cloudConfigured()) {
           setNotice(t('fallbackToCloud'))
           startWithEngine('cloud')
           return
@@ -161,7 +161,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         showError(code)
       })
     } catch {
-      if (engine === 'browser' && config.asr.provider === 'auto' && isCloudConfigured(config.asr.cloud)) {
+      if (engine === 'browser' && config.asr.provider === 'auto' && cloudConfigured()) {
         setNotice(t('fallbackToCloud'))
         startWithEngine('cloud')
         return
@@ -186,7 +186,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setNotice(null)
     setInterim('')
     const engine = resolveEngine()
-    if (engine === 'cloud' && !isCloudConfigured(config.asr.cloud)) {
+    if (engine === 'cloud' && !cloudConfigured()) {
       showError('cloud-not-configured')
       return
     }
@@ -215,6 +215,13 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
 
     const mode = config.optimize.mode
     if (mode === 'llm') {
+      // 快速路径：启发式清洗后与原文一致（本就干净、无语气词/标点问题）→ 跳过 LLM
+      // 优化直接填入，省一次模型调用（插件自身速度优化）。
+      const clean = heuristicOptimize(text)
+      if (clean === text) {
+        finalize(text)
+        return
+      }
       setPhase('optimizing')
       try {
         const target = {
@@ -232,11 +239,23 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     finalize(heuristicOptimize(text))
   }
 
+  /** 把最终文本填入草稿（完整替换 / 末尾追加）+ 可选剪贴板。 */
   const finalize = (text: string): void => {
     if (text === '') { setPhase('idle'); return }
     if (inputActions) {
-      inputActions.setDraft(text)
+      if (config.behavior.textMode === 'append') {
+        const existing = props.input?.draft ?? ''
+        const sep = existing !== '' && !/[ \n]$/.test(existing) ? ' ' : ''
+        inputActions.setDraft(existing + sep + text)
+      } else {
+        inputActions.setDraft(text)
+      }
       if (config.behavior.autoSend) inputActions.submit()
+    }
+    if (config.behavior.copyToClipboard) {
+      try {
+        void navigator.clipboard?.writeText(text).catch(() => { /* 剪贴板不可用：静默 */ })
+      } catch { /* noop */ }
     }
     setPhase('idle')
   }

@@ -23,8 +23,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { CHAT_COMPLETIONS_PATH, MAX_AUDIO_BYTES, TRANSCRIBE_PATH, resolveAsrMode } from './presets.ts';
 import { isTrusted, readRawBody, sendJson } from './http.ts';
 
-/** 云端 ASR 配置面（来自 settings scope）。 */
+/** 云端 ASR 配置面（来自 settings scope 解析出的当前生效供应商）。 */
 export interface CloudAsrConfig {
+  /** 供应商 id（用于统计；旧单配置为 'legacy'）。 */
+  id: string
   baseUrl: string
   apiKey: string
   model: string
@@ -126,7 +128,7 @@ async function upstreamTranscribe(cfg: CloudAsrConfig, audio: Buffer, mime: stri
 }
 
 /** 解析最终 API key：设置值优先；MiMo 端点留空时复用 DSH 凭据 MIMO_API_KEY。 */
-async function resolveApiKey(ctx: Context, cfg: CloudAsrConfig): Promise<string> {
+export async function resolveApiKey(ctx: Context, cfg: CloudAsrConfig): Promise<string> {
   if (cfg.apiKey.trim() !== '') return cfg.apiKey.trim();
   if (!/xiaomimimo/i.test(cfg.baseUrl)) return '';
   const credentials = ctx.get('credentials') as CredentialsLike | undefined;
@@ -161,14 +163,16 @@ function extForMime(mime: string): string {
 /**
  * 注册 /api/asr-voice/transcribe 路由。
  * @param register - webserver 的 register 方法（由调用方从 ctx 传入）。
- * @param getCloudConfig - 读取当前云端 ASR 配置的 thunk。
+ * @param getCloudConfig - 读取当前生效云端 ASR 配置的 thunk。
  * @param ctx - host context（供 MiMo key 兜底走 credentials 服务）。
+ * @param recordStats - 成功转写后回调（记录用量；可选）。
  * @returns 路由 disposer（由 ctx.effect 挂载/回收）。
  */
 export function registerTranscribeRoute(
   register: (def: { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void,
   getCloudConfig: () => CloudAsrConfig,
   ctx: Context,
+  recordStats?: (text: string, providerId: string) => void,
 ): () => void {
   return register({
     kind: 'exact',
@@ -191,6 +195,7 @@ export function registerTranscribeRoute(
           return sendJson(res, 400, { ok: false, reason: 'cloud ASR not configured: set API key in plugin settings' });
         }
         const { text } = await upstreamTranscribe(cfg, audio, mime, language, apiKey);
+        recordStats?.(text, cfg.id);
         return sendJson(res, 200, { ok: true, text });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);

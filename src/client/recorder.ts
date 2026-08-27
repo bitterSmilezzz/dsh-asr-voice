@@ -16,11 +16,6 @@ export const MAX_RECORD_MS = 120_000
 /** 云端转写请求超时（毫秒）：上游不可达/卡住时不把 UI 永远钉在「识别中」。 */
 const TRANSCRIBE_TIMEOUT_MS = 60_000
 
-/** 云端 ASR 是否已配置（baseUrl + apiKey 均非空）。 */
-export function isCloudConfigured(cfg: { baseUrl: string; apiKey: string }): boolean {
-  return cfg.baseUrl.trim() !== '' && cfg.apiKey.trim() !== ''
-}
-
 /** 静音判定阈值（RMS，0~1）。 */
 const SILENCE_RMS = 0.02
 
@@ -380,15 +375,23 @@ function createCloudRecorder(language: string, onError: (msg: string) => void): 
  * MiMo-V2.5-ASR 只接受 wav/mp3（实测 webm/m4a 报 Param Incorrect）；whisper 式
  * 通道也兼容 wav，故统一走 WAV。纯浏览器 Web Audio API，无外部依赖。
  */
-async function blobToWav16k(blob: Blob): Promise<Blob> {
+/** 懒加载复用的 AudioContext（避免每次录音新建/关闭，提升转码流畅性）。 */
+let sharedAudioCtx: AudioContext | null = null
+function getAudioContext(): AudioContext {
+  if (sharedAudioCtx !== null) return sharedAudioCtx
   const windowLike = window as unknown as {
     AudioContext?: typeof AudioContext
     webkitAudioContext?: typeof AudioContext
   }
   const AudioCtor = windowLike.AudioContext ?? windowLike.webkitAudioContext
   if (!AudioCtor) throw new Error('audio decode unavailable')
+  sharedAudioCtx = new AudioCtor()
+  return sharedAudioCtx
+}
+
+async function blobToWav16k(blob: Blob): Promise<Blob> {
+  const ctx = getAudioContext()
   const arrayBuffer = await blob.arrayBuffer()
-  const ctx = new AudioCtor()
   try {
     const audio = await ctx.decodeAudioData(arrayBuffer)
     const channels = audio.numberOfChannels
@@ -432,8 +435,17 @@ async function blobToWav16k(blob: Blob): Promise<Blob> {
       view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
     }
     return new Blob([wav], { type: 'audio/wav' })
-  } finally {
-    void ctx.close().catch(() => {})
+  } catch (error) {
+    // 共享 context 解码失败（可能被用户手动关闭）：重建一个再试一次。
+    if (sharedAudioCtx !== null) {
+      sharedAudioCtx = null
+      try {
+        return await blobToWav16k(blob)
+      } catch {
+        sharedAudioCtx = null
+      }
+    }
+    throw error
   }
 }
 
