@@ -9,12 +9,29 @@
  * 拿到 binder 后传入 bindConfigScope，而不是把它列为插件级硬依赖（避免 settings
  * 界面未挂载时阻塞整个插件）。
  */
+// Type-only: pulls the settings domain's Context merge (ctx.settingsScope).
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+
+/** 单个云端 ASR 供应商配置。 */
+export interface CloudProviderConfig {
+  id: string
+  preset: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  mode: string
+}
 
 /** 统一配置对象：与 host settings schema 结构一致。 */
 export interface AsrVoiceConfig {
   asr: {
     provider: 'auto' | 'browser' | 'cloud'
     cloud: {
+      /** 多供应商列表（v0.2）。 */
+      providers: CloudProviderConfig[]
+      /** 当前使用的供应商 id（空 = 取第一个）。 */
+      active: string
+      /** ── 兼容旧单配置（v0.1 遗留，读取回退用） ── */
       preset: string
       baseUrl: string
       apiKey: string
@@ -38,15 +55,17 @@ export interface AsrVoiceConfig {
     silenceStop: boolean
     holdToTalk: boolean
     hotkey: string
+    textMode: 'replace' | 'append'
+    copyToClipboard: boolean
   }
 }
 
 /** 配置默认值（与 host schema 的 default 一致）。 */
 export const DEFAULTS: AsrVoiceConfig = {
-  asr: { provider: 'auto', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '', mode: 'auto' } },
+  asr: { provider: 'auto', cloud: { providers: [], active: '', preset: 'openai', baseUrl: '', apiKey: '', model: '', mode: 'auto' } },
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
-  behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
+  behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与 setConfig 共同维护。 */
@@ -90,6 +109,11 @@ export function mergeHostValue(value: Partial<AsrVoiceConfig>): void {
     for (const key of Object.keys(target)) {
       const next = (src as Record<string, unknown>)[key]
       if (next === undefined) continue
+      if (key === 'providers' && Array.isArray(next)) {
+        // 多供应商列表整表覆盖（避免合并残留已删除的供应商）
+        target[key] = next
+        continue
+      }
       if (target[key] !== null && typeof target[key] === 'object' && !Array.isArray(target[key])) {
         assign(target[key] as Record<string, unknown>, next)
       } else {
@@ -135,4 +159,20 @@ export function setConfig(field: keyof AsrVoiceConfig, mutator: () => void): voi
       window.dispatchEvent(new CustomEvent('dsh-asr-voice:config-error', { detail: { field } }))
     })
   }
+}
+
+/** 解析当前生效的云端供应商配置（多供应商 active/首个，或旧单配置）。 */
+export function activeCloudProvider(): CloudProviderConfig {
+  const cloud = config.asr.cloud
+  if (cloud.providers.length > 0) {
+    return cloud.providers.find((p) => p.id === cloud.active) ?? cloud.providers[0]!
+  }
+  // 旧单配置（v0.1 遗留）合成一个
+  return { id: 'legacy', preset: cloud.preset, baseUrl: cloud.baseUrl, apiKey: cloud.apiKey, model: cloud.model, mode: cloud.mode }
+}
+
+/** 当前生效云端供应商是否已配置（baseUrl + apiKey 均非空）。 */
+export function cloudConfigured(): boolean {
+  const p = activeCloudProvider()
+  return p.baseUrl.trim() !== '' && p.apiKey.trim() !== ''
 }

@@ -1,13 +1,14 @@
 /**
  * dsh-asr-voice — client 设置卡片（settings.plugin.item, key: 'asr-voice'）。
  *
- * 「设置 → 插件 → 配置」下的折叠卡片：识别引擎 / 提示词优化 / 语言 / 交互行为。
+ * 「设置 → 插件 → 配置」下的折叠卡片：识别引擎（含多供应商云端）/ 提示词优化 /
+ * 语言 / 交互行为（含文本模式、剪贴板）/ 用量统计。
  * 所有控件读写 config 快照（host settings 为权威源），文本输入立即写回。
  */
 import * as react from 'react'
 // Type-only: pulls the ui-settings-plugins SlotMap merge (the settings.plugin.item card seat).
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import { config, setConfig, subscribeConfig } from './config.ts'
+import { config, setConfig, subscribeConfig, type CloudProviderConfig } from './config.ts'
 import { CLOUD_PRESETS, presetById, DEFAULT_PRESET_ID } from '../presets.ts'
 import type { LocaleT } from './locales.ts'
 
@@ -219,6 +220,144 @@ function ModelPicker({ t, provider, model, onProvider, onModel }: {
   )
 }
 
+/** 供应商 ASR 模型拉取：点击「获取模型」→ /api/asr-voice/asr-models 动态拉取最新 ASR 模型并可选。 */
+function AsrModelFetch({ t, providerId, model, onModel }: {
+  t: LocaleT
+  providerId: string
+  model: string
+  onModel: (v: string) => void
+}): react.ReactElement {
+  const [models, setModels] = react.useState<DshModelEntry[] | null>(null)
+  const [status, setStatus] = react.useState<'idle' | 'loading' | 'ok' | 'err'>('idle')
+  const [errMsg, setErrMsg] = react.useState('')
+
+  const fetchModels = async (): Promise<void> => {
+    setStatus('loading')
+    setErrMsg('')
+    try {
+      const res = await fetch(`/api/asr-voice/asr-models?providerId=${encodeURIComponent(providerId)}`, { cache: 'no-store' })
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; models?: DshModelEntry[]; reason?: string }
+      if (!res.ok || data.ok !== true || !Array.isArray(data.models)) throw new Error(data.reason || 'fetch failed')
+      setModels(data.models)
+      setStatus('ok')
+    } catch (error) {
+      setStatus('err')
+      setErrMsg(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  return (
+    <div className="dshav-field" style={{ flexWrap: 'wrap' }}>
+      <button
+        type="button"
+        className="dshav-button dshav-button-outline dshav-button-sm"
+        onClick={() => { void fetchModels() }}
+        disabled={status === 'loading'}
+      >
+        {status === 'loading' ? t('fetchModelsLoading') : t('fetchModels')}
+      </button>
+      {status === 'ok' && models !== null && (
+        <select
+          value={model}
+          onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onModel(e.target.value)}
+          title={t('fetchModelsPick')}
+        >
+          <option value="">{model === '' ? t('fetchModelsPick') : t('fetchModelsCurrent')}</option>
+          {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      )}
+      {status === 'ok' && models !== null && models.length === 0 ? <span className="dshav-field-hint">{t('fetchModelsEmpty')}</span> : null}
+      {status === 'err' ? <span className="dshav-field-hint">{t('fetchModelsFail')}{errMsg ? `：${errMsg}` : ''}</span> : null}
+    </div>
+  )
+}
+
+/** 单个云端供应商编辑器（预置 / baseUrl / key / 模型+拉取 / 通道 / 删除）。 */
+function CloudProviderEditor({ t, provider, active, onUpdate, onRemove, onSetActive, removable }: {
+  t: LocaleT
+  provider: CloudProviderConfig
+  active: boolean
+  onUpdate: (id: string, mutator: (p: CloudProviderConfig) => void) => void
+  onRemove: (id: string) => void
+  onSetActive: (id: string) => void
+  removable: boolean
+}): react.ReactElement {
+  const preset = presetById(provider.preset) ?? presetById(DEFAULT_PRESET_ID)
+  const presetOptions = [
+    ...CLOUD_PRESETS.map((p) => ({ value: p.id, label: p.label })),
+    { value: 'custom', label: t('cloudPresetCustom') },
+  ]
+  return (
+    <div className="dshav-stack" style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 10, padding: '0 10px', marginBottom: 6 }}>
+      <div className="dshav-field-head" style={{ padding: '10px 0 2px' }}>
+        <label className="dshav-toggle">
+          <input type="radio" name="dshav-active-provider" checked={active} onChange={() => onSetActive(provider.id)} />
+          <span>{active ? t('activeProvider') : t('providerInactive')}</span>
+        </label>
+        <span style={{ flex: 1 }} />
+        {removable && (
+          <button type="button" className="dshav-button dshav-button-outline dshav-button-sm" onClick={() => onRemove(provider.id)}>
+            {t('removeProvider')}
+          </button>
+        )}
+      </div>
+      <SelectRow title={t('cloudPresetLabel')} value={provider.preset} options={presetOptions} onChange={(v) => onUpdate(provider.id, (p) => {
+        p.preset = v
+        const pr = presetById(v)
+        if (pr) { p.baseUrl = pr.baseUrl; p.model = pr.defaultModel; p.mode = pr.mode }
+      })} />
+      <TextRow title={t('cloudBaseUrlLabel')} value={provider.baseUrl} onChange={(v) => onUpdate(provider.id, (p) => { p.baseUrl = v; p.preset = 'custom' })} />
+      <TextRow title={t('cloudApiKeyLabel')} value={provider.apiKey} onChange={(v) => onUpdate(provider.id, (p) => { p.apiKey = v })} type="password" />
+      <Field
+        title={t('cloudModelLabel')}
+        desc={t('cloudModelHint')}
+        control={<AsrModelFetch t={t} providerId={provider.id} model={provider.model} onModel={(v) => onUpdate(provider.id, (p) => { p.model = v })} />}
+      />
+      <SelectRow
+        title={t('cloudModeLabel')}
+        value={provider.mode}
+        options={[
+          { value: 'auto', label: t('cloudModeAuto') },
+          { value: 'transcriptions', label: t('cloudModeTranscriptions') },
+          { value: 'chat', label: t('cloudModeChat') },
+        ]}
+        onChange={(v) => onUpdate(provider.id, (p) => { p.mode = v })}
+      />
+      {preset ? <p className="dshav-field-hint">{preset.hint}</p> : null}
+    </div>
+  )
+}
+
+/** 用量统计展示（/api/asr-voice/stats，低优先级）。 */
+function UsageStats({ t }: { t: LocaleT }): react.ReactElement {
+  const [stats, setStats] = react.useState<{ count: number; chars: number; lastAt: number | null; lastProvider: string } | null>(null)
+  react.useEffect(() => {
+    let live = true
+    const load = async (): Promise<void> => {
+      try {
+        const res = await fetch('/api/asr-voice/stats', { cache: 'no-store' })
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; stats?: typeof stats }
+        if (live && res.ok && data.ok === true && data.stats) setStats(data.stats)
+      } catch { /* ignore */ }
+    }
+    void load()
+    const timer = window.setInterval(() => { void load() }, 5000)
+    return () => { live = false; window.clearInterval(timer) }
+  }, [])
+  if (stats === null) return <p className="dshav-field-hint">{t('statsEmpty')}</p>
+  const lastAt = stats.lastAt ? new Date(stats.lastAt).toLocaleTimeString() : null
+  return (
+    <div className="dshav-field-item">
+      <div className="dshav-field-head"><span className="dshav-field-label">{t('statsTitle')}</span></div>
+      <p className="dshav-field-hint">
+        {t('statsCount', { n: stats.count })} · {t('statsChars', { n: stats.chars })}
+        {stats.count > 0 && lastAt ? ` · ${t('statsLastAt', { time: lastAt })}` : ''}
+        {stats.lastProvider ? ` · ${stats.lastProvider}` : ''}
+      </p>
+    </div>
+  )
+}
+
 /** 主键规范化（忽略纯修饰键，统一 Space / 字母大写）。 */
 function normalizeKey(key: string): string {
   if (key === 'Control' || key === 'Alt' || key === 'Shift' || key === 'Meta' || key === 'Escape') return ''
@@ -228,37 +367,59 @@ function normalizeKey(key: string): string {
   return map[key] ?? key
 }
 
+/** 生成供应商唯一 id。 */
+function providerId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+  if (c?.randomUUID) return c.randomUUID()
+  return `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 /** 设置卡片（折叠交互与其他插件一致：可点击 header + chevron 旋转 + 条件 body）。 */
 export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement {
   useConfigVersion()
   const [open, setOpen] = react.useState(false)
-  const preset = presetById(config.asr.cloud.preset) ?? presetById(DEFAULT_PRESET_ID)
+
+  // 旧单配置 → 多供应商一次迁移（providers 空且 legacy baseUrl 有值）。
+  react.useEffect(() => {
+    const cloud = config.asr.cloud
+    if (cloud.providers.length === 0 && cloud.baseUrl.trim() !== '') {
+      setConfig('asr', () => {
+        config.asr.cloud.providers = [{
+          id: 'legacy', preset: cloud.preset || 'custom', baseUrl: cloud.baseUrl,
+          apiKey: cloud.apiKey, model: cloud.model, mode: cloud.mode,
+        }]
+        config.asr.cloud.active = 'legacy'
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const setProvider = (v: string): void => {
     setConfig('asr', () => { config.asr.provider = v === 'cloud' ? 'cloud' : v === 'browser' ? 'browser' : 'auto' })
   }
-  const setPreset = (id: string): void => {
+  const updateProvider = (id: string, mutator: (p: CloudProviderConfig) => void): void => {
     setConfig('asr', () => {
-      config.asr.cloud.preset = id
-      const p = presetById(id)
-      if (p) {
-        config.asr.cloud.baseUrl = p.baseUrl
-        config.asr.cloud.model = p.defaultModel
-        config.asr.cloud.mode = p.mode
-      }
+      const p = config.asr.cloud.providers.find((x) => x.id === id)
+      if (p) mutator(p)
     })
   }
-  const setCloudBase = (v: string): void => {
-    setConfig('asr', () => { config.asr.cloud.baseUrl = v; config.asr.cloud.preset = 'custom' })
+  const addProvider = (): void => {
+    setConfig('asr', () => {
+      const p = presetById(DEFAULT_PRESET_ID)!
+      config.asr.cloud.providers.push({
+        id: providerId(), preset: p.id, baseUrl: p.baseUrl, apiKey: '', model: p.defaultModel, mode: p.mode,
+      })
+      if (config.asr.cloud.active === '') config.asr.cloud.active = config.asr.cloud.providers[config.asr.cloud.providers.length - 1]!.id
+    })
   }
-  const setCloudKey = (v: string): void => {
-    setConfig('asr', () => { config.asr.cloud.apiKey = v })
+  const removeProvider = (id: string): void => {
+    setConfig('asr', () => {
+      config.asr.cloud.providers = config.asr.cloud.providers.filter((p) => p.id !== id)
+      if (config.asr.cloud.active === id) config.asr.cloud.active = config.asr.cloud.providers[0]?.id ?? ''
+    })
   }
-  const setCloudModel = (v: string): void => {
-    setConfig('asr', () => { config.asr.cloud.model = v })
-  }
-  const setCloudMode = (v: string): void => {
-    setConfig('asr', () => { config.asr.cloud.mode = v })
+  const setActive = (id: string): void => {
+    setConfig('asr', () => { config.asr.cloud.active = id })
   }
 
   const setOptimizeMode = (v: string): void => {
@@ -289,11 +450,14 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   const setHotkey = (v: string): void => {
     setConfig('behavior', () => { config.behavior.hotkey = v })
   }
+  const setTextMode = (v: string): void => {
+    setConfig('behavior', () => { config.behavior.textMode = v === 'append' ? 'append' : 'replace' })
+  }
+  const setCopyToClipboard = (v: boolean): void => {
+    setConfig('behavior', () => { config.behavior.copyToClipboard = v })
+  }
 
-  const presetOptions = [
-    ...CLOUD_PRESETS.map((p) => ({ value: p.id, label: p.label })),
-    { value: 'custom', label: t('cloudPresetCustom') },
-  ]
+  const providers = config.asr.cloud.providers
 
   return (
     <li className={'dshav-card' + (open ? ' dshav-card-open' : '')}>
@@ -323,93 +487,115 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
           <div className="dshav-group">
             <span className="dshav-groupTitle">{t('groupAsr')}</span>
             <SelectRow
-          title={t('asrProviderLabel')}
-          value={config.asr.provider}
-          options={[
-            { value: 'auto', label: t('asrProviderAuto') },
-            { value: 'browser', label: t('asrProviderBrowser') },
-            { value: 'cloud', label: t('asrProviderCloud') },
-          ]}
-          onChange={setProvider}
-        />
-        {config.asr.provider === 'cloud' && (
-          <div className="dshav-stack">
-            <SelectRow title={t('cloudPresetLabel')} value={config.asr.cloud.preset} options={presetOptions} onChange={setPreset} />
-            <TextRow title={t('cloudBaseUrlLabel')} value={config.asr.cloud.baseUrl} onChange={setCloudBase} />
-            <TextRow title={t('cloudApiKeyLabel')} value={config.asr.cloud.apiKey} onChange={setCloudKey} type="password" />
-            <TextRow title={t('cloudModelLabel')} desc={t('cloudModelHint')} value={config.asr.cloud.model} onChange={setCloudModel} wide />
-            <SelectRow
-              title={t('cloudModeLabel')}
-              value={config.asr.cloud.mode}
+              title={t('asrProviderLabel')}
+              value={config.asr.provider}
               options={[
-                { value: 'auto', label: t('cloudModeAuto') },
-                { value: 'transcriptions', label: t('cloudModeTranscriptions') },
-                { value: 'chat', label: t('cloudModeChat') },
+                { value: 'auto', label: t('asrProviderAuto') },
+                { value: 'browser', label: t('asrProviderBrowser') },
+                { value: 'cloud', label: t('asrProviderCloud') },
               ]}
-              onChange={setCloudMode}
+              onChange={setProvider}
             />
-            {preset && <p className="dshav-field-hint">{preset.hint}</p>}
+            {config.asr.provider === 'cloud' && (
+              <div className="dshav-stack">
+                {providers.length === 0 ? (
+                  <p className="dshav-field-hint">{t('providersEmpty')}</p>
+                ) : (
+                  providers.map((p) => (
+                    <CloudProviderEditor
+                      key={p.id}
+                      t={t}
+                      provider={p}
+                      active={p.id === config.asr.cloud.active}
+                      onUpdate={updateProvider}
+                      onRemove={removeProvider}
+                      onSetActive={setActive}
+                      removable={providers.length > 1}
+                    />
+                  ))
+                )}
+                <div className="dshav-field">
+                  <button type="button" className="dshav-button dshav-button-outline dshav-button-sm" onClick={addProvider}>
+                    {t('addProvider')}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      <div className="dshav-group">
-        <span className="dshav-groupTitle">{t('groupOptimize')}</span>
-        <SelectRow
-          title={t('optimizeModeLabel')}
-          value={config.optimize.mode}
-          options={[
-            { value: 'heuristic', label: t('optimizeHeuristic') },
-            { value: 'llm', label: t('optimizeLlm') },
-          ]}
-          onChange={setOptimizeMode}
-        />
-        {config.optimize.mode === 'llm' && (
-          <div className="dshav-stack">
-            <p className="dshav-field-hint">{t('llmDefaultHint')}</p>
-            <ModelPicker
-              t={t}
-              provider={config.optimize.llm.provider}
-              model={config.optimize.llm.model}
-              onProvider={setLlmProvider}
-              onModel={setLlmModel}
+          <div className="dshav-group">
+            <span className="dshav-groupTitle">{t('groupOptimize')}</span>
+            <SelectRow
+              title={t('optimizeModeLabel')}
+              value={config.optimize.mode}
+              options={[
+                { value: 'heuristic', label: t('optimizeHeuristic') },
+                { value: 'llm', label: t('optimizeLlm') },
+              ]}
+              onChange={setOptimizeMode}
             />
-            <p className="dshav-field-hint">{t('llmCustomHint')}</p>
-            <ToggleRow
-              title={t('optimizePreviewLabel')}
-              desc={t('optimizePreviewDesc')}
-              checked={config.optimize.preview}
-              onChange={() => setOptimizePreview(!config.optimize.preview)}
+{config.optimize.mode === 'llm' && (
+              <div className="dshav-stack">
+                <p className="dshav-field-hint">{t('llmDefaultHint')}</p>
+                <ModelPicker
+                  t={t}
+                  provider={config.optimize.llm.provider}
+                  model={config.optimize.llm.model}
+                  onProvider={setLlmProvider}
+                  onModel={setLlmModel}
+                />
+                <p className="dshav-field-hint">{t('llmCustomHint')}</p>
+                <ToggleRow
+                  title={t('optimizePreviewLabel')}
+                  desc={t('optimizePreviewDesc')}
+                  checked={config.optimize.preview}
+                  onChange={() => setOptimizePreview(!config.optimize.preview)}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="dshav-group">
+            <span className="dshav-groupTitle">{t('languageLabel')}</span>
+            <SelectRow
+              title={t('languageLabel')}
+              value={config.language}
+              options={[
+                { value: 'auto', label: t('languageAuto') },
+                { value: 'zh-CN', label: '中文（简体）' },
+                { value: 'en-US', label: 'English (US)' },
+              ]}
+              onChange={setLanguage}
             />
           </div>
-        )}
-      </div>
 
-      <div className="dshav-group">
-        <span className="dshav-groupTitle">{t('languageLabel')}</span>
-        <SelectRow
-          title={t('languageLabel')}
-          value={config.language}
-          options={[
-            { value: 'auto', label: t('languageAuto') },
-            { value: 'zh-CN', label: '中文（简体）' },
-            { value: 'en-US', label: 'English (US)' },
-          ]}
-          onChange={setLanguage}
-        />
-      </div>
+<div className="dshav-group">
+            <span className="dshav-groupTitle">{t('groupBehavior')}</span>
+            <ToggleRow title={t('autoSendLabel')} desc={t('autoSendDesc')} checked={config.behavior.autoSend} onChange={() => setAutoSend(!config.behavior.autoSend)} />
+            <ToggleRow title={t('silenceStopLabel')} desc={t('silenceStopDesc')} checked={config.behavior.silenceStop} onChange={() => setSilenceStop(!config.behavior.silenceStop)} />
+            <ToggleRow title={t('holdToTalkLabel')} desc={t('holdToTalkDesc')} checked={config.behavior.holdToTalk} onChange={() => setHoldToTalk(!config.behavior.holdToTalk)} />
+            <SelectRow
+              title={t('textModeLabel')}
+              desc={t('textModeDesc')}
+              value={config.behavior.textMode}
+              options={[
+                { value: 'replace', label: t('textModeReplace') },
+                { value: 'append', label: t('textModeAppend') },
+              ]}
+              onChange={setTextMode}
+            />
+            <ToggleRow title={t('copyToClipboardLabel')} desc={t('copyToClipboardDesc')} checked={config.behavior.copyToClipboard} onChange={() => setCopyToClipboard(!config.behavior.copyToClipboard)} />
+            <Field
+              title={t('hotkeyLabel')}
+              desc={t('hotkeyDesc')}
+              control={<HotkeyRecorder value={config.behavior.hotkey} onChange={setHotkey} t={t} />}
+            />
+          </div>
 
-      <div className="dshav-group">
-        <span className="dshav-groupTitle">{t('groupBehavior')}</span>
-        <ToggleRow title={t('autoSendLabel')} desc={t('autoSendDesc')} checked={config.behavior.autoSend} onChange={() => setAutoSend(!config.behavior.autoSend)} />
-        <ToggleRow title={t('silenceStopLabel')} desc={t('silenceStopDesc')} checked={config.behavior.silenceStop} onChange={() => setSilenceStop(!config.behavior.silenceStop)} />
-        <ToggleRow title={t('holdToTalkLabel')} desc={t('holdToTalkDesc')} checked={config.behavior.holdToTalk} onChange={() => setHoldToTalk(!config.behavior.holdToTalk)} />
-        <Field
-          title={t('hotkeyLabel')}
-          desc={t('hotkeyDesc')}
-          control={<HotkeyRecorder value={config.behavior.hotkey} onChange={setHotkey} t={t} />}
-        />
-      </div>
+          <div className="dshav-group">
+            <span className="dshav-groupTitle">{t('groupStats')}</span>
+            <UsageStats t={t} />
+          </div>
         </div>
       ) : null}
     </li>

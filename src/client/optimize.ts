@@ -112,7 +112,7 @@ export interface OptimizeTarget {
   model: string
 }
 
-/** LLM 优化请求超时（毫秒）：后台优化挂住时不把按钮永远钉在「优化中」；超时按失败处理，保留草稿里的清洗版。 */
+/** LLM 优化请求超时（毫秒）：模型卡住/过慢时不把 UI 永远钉在「优化中」；超时按失败处理，保留草稿里的清洗版。 */
 const OPTIMIZE_TIMEOUT_MS = 60_000
 
 /** 调用 host /api/asr-voice/optimize（用 DSH 已配置模型重写）。 */
