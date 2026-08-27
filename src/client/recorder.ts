@@ -257,8 +257,11 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
 
   /**
    * 实时音量电平（驱动频谱条）。始终启用（能直观看出麦克风是否采到声）；
-   * 仅当 silenceStop 开启时附带静音自动停止逻辑。
+   * 仅当 silenceStop 开启时附带静音自动停止逻辑。同时记录峰值电平，
+   * 供 onstop 的「静音守卫」判断整段录音是否静音（采到静音就别发 ASR）。
    */
+  let peakLevel = 0
+  let levelMeterActive = false
   const startLevelMeter = (withSilenceStop: boolean): void => {
     try {
       const audioCtx = new AudioContext()
@@ -268,6 +271,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       source.connect(analyser)
       const data = new Uint8Array(analyser.fftSize)
       let silentSince: number | null = null
+      levelMeterActive = true
       const loop = (): void => {
         if (!active) { void audioCtx.close().catch(() => {}) ; return }
         analyser.getByteTimeDomainData(data)
@@ -277,6 +281,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
           sum += v * v
         }
         const rms = Math.sqrt(sum / data.length)
+        if (rms > peakLevel) peakLevel = rms
         // 实时音量（0~1，放大到可视范围）
         recorder.onLevel?.(Math.min(1, rms * 4))
         if (withSilenceStop) {
@@ -294,7 +299,16 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       }
       requestAnimationFrame(loop)
     } catch {
-      // 音频分析不可用：频谱静默，录音仍正常
+      // 音频分析不可用：频谱静默（静音守卫随之失效，录音仍正常）
+    }
+  }
+
+  /** 当前输入设备的 Chrome 标签（诊断信息，如 "MacBook Pro 麦克风"）。 */
+  const currentInputLabel = (): string => {
+    try {
+      return stream?.getAudioTracks()[0]?.label ?? ''
+    } catch {
+      return ''
     }
   }
 
@@ -332,6 +346,15 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
         const blob = new Blob(chunks, { type })
         recorder.onState?.('transcribing')
         try {
+          // 静音守卫：电平表可用且整段峰值趋近零 → 麦克风没采到声，
+          // 不浪费一次上游 ASR（避免对静音幻觉出 "yeah"/"no text"），直接报错带设备名。
+          if (levelMeterActive && peakLevel < 0.01) {
+            active = false
+            for (const t of stream!.getTracks()) t.stop()
+            const label = currentInputLabel()
+            reject(new Error(label === '' ? 'no-sound' : `no-sound:${label}`))
+            return
+          }
           // MiMo/Qwen-ASR 等 chat 通道只收 wav/mp3，whisper 式也兼容 wav →
           // 统一把浏览器录音（webm/m4a/ogg）解码重编码成 16kHz 单声道 WAV 再上传。
           let audio = blob

@@ -134,6 +134,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   }
 
   const showError = (code: string, detail?: string): void => {
+    // 静音守卫：录音整段静音（麦克风未采到声）→ 明确提示 + 输入设备名，误打误撞的 ASR 报错。
+    if (code === 'transcribe' && detail?.startsWith('no-sound')) {
+      const label = detail.slice('no-sound'.length).replace(/^:/, '')
+      setError(`${t('errNoSound')}${label ? `（${label}）` : ''}`)
+      setNotice(null)
+      setPhase('idle')
+      return
+    }
     const msg = code === 'mic-denied' || code === 'no-mic'
       ? t('errNoMic')
       : code === 'no-speech-support'

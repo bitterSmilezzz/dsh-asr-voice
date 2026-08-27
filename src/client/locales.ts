@@ -57,6 +57,7 @@ export type LocaleKey =
   | 'transcribingTitle'
   | 'optimizingTitle'
   | 'errNoMic'
+  | 'errNoSound'
   | 'errNoSpeechSupport'
   | 'errWebSpeechNetwork'
   | 'errCloudNotConfigured'
@@ -131,6 +132,7 @@ export const zh: LocaleDict = {
   transcribingTitle: '识别中…',
   optimizingTitle: '优化中…',
   errNoMic: '未检测到麦克风',
+  errNoSound: '未检测到声音：录音为静音，未发送识别。请检查系统输入音量与麦克风设备',
   errNoSpeechSupport: '当前浏览器不支持 Web Speech，请改用云端 ASR（Chrome/Edge 均支持）。',
   errWebSpeechNetwork: '浏览器语音识别网络不可用（服务可能被网络屏蔽），已请改用云端 ASR。',
   errCloudNotConfigured: '云端 ASR 未配置：请到设置填写 Base URL 与 API Key。',
@@ -200,6 +202,7 @@ export const en: LocaleDict = {
   transcribingTitle: 'Transcribing…',
   optimizingTitle: 'Optimizing…',
   errNoMic: 'No microphone detected',
+  errNoSound: 'No sound detected: the recording was silent and was not sent. Check system input volume and the microphone device',
   errNoSpeechSupport: 'Web Speech is not supported by this browser; switch to cloud ASR (Chrome/Edge support it).',
   errWebSpeechNetwork: 'Browser speech recognition network is unavailable (the service may be blocked); switch to cloud ASR.',
   errCloudNotConfigured: 'Cloud ASR is not configured: set Base URL and API key in settings.',
