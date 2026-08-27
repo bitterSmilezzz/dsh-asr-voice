@@ -244,9 +244,11 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
   let active = false
 
   const pickMime = (): string => {
-    // mp4(m4a/AAC) 优先：OpenAI Whisper / Groq / 硅基流动 / 通义 Qwen-ASR 普遍接受，
-    // webm/opus 部分国产服务（如 DashScope compatible-mode）不接收。
-    const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
+    // webm/opus 优先：Chrome 对 MediaRecorder 产出的 mp4(AAC) 解码不稳定（decodeAudioData
+    // 可能解出错误/静音数据 → 上游收到垃圾音频返回空或幻觉文本）。上游统一收
+    // blobToWav16k 转换后的 WAV，中间格式只影响解码可靠性——webm 在 Chromium 最稳，
+    // mp4 留给不产 webm 的浏览器（Safari）。
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
     for (const m of candidates) {
       if (MediaRecorder.isTypeSupported(m)) return m
     }

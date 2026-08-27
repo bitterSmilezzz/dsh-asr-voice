@@ -48,6 +48,7 @@ export type LocaleKey =
   | 'hotkeyDesc'
   | 'hotkeyPlaceholder'
   | 'hotkeyClear'
+  | 'dismiss'
   | 'save'
   | 'saveFailed'
   | 'loadFailed'
@@ -121,6 +122,7 @@ export const zh: LocaleDict = {
   hotkeyDesc: '点击后按新组合键（如 Ctrl+Shift+Space）；留空关闭。',
   hotkeyPlaceholder: '点击录制快捷键',
   hotkeyClear: '清除',
+  dismiss: '关闭',
   save: '保存',
   saveFailed: '保存失败',
   loadFailed: '加载失败',
@@ -189,6 +191,7 @@ export const en: LocaleDict = {
   hotkeyDesc: 'Click, then press a new combo (e.g. Ctrl+Shift+Space). Clear to disable.',
   hotkeyPlaceholder: 'Click to record hotkey',
   hotkeyClear: 'Clear',
+  dismiss: 'Dismiss',
   save: 'Save',
   saveFailed: 'Save failed',
   loadFailed: 'Load failed',

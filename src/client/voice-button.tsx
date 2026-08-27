@@ -104,6 +104,19 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   react.useEffect(() => {
     draftRef.current = props.input?.draft ?? ''
   }, [props.input?.draft])
+  // 错误/提示自动消散（6s），避免状态条永久悬挂；也可点 × 手动关闭。
+  react.useEffect(() => {
+    if (error === null && notice === null) return
+    const timer = setTimeout(() => {
+      setError(null)
+      setNotice(null)
+    }, 6000)
+    return () => clearTimeout(timer)
+  }, [error, notice])
+  const dismissHint = (): void => {
+    setError(null)
+    setNotice(null)
+  }
 
   // 挂载/卸载：注册到全局控制器（快捷键驱动当前实例）。
   const instance = react.useMemo(() => ({
@@ -222,8 +235,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         inputActions.setDraft(optimized)
       }
     } catch {
-      // 后台优化失败不打断用户：草稿已可用，仅轻提示。
-      setNotice(`${t('errOptimize')} · ${t('optimizeFailedKeep')}`)
+      // 后台优化失败不打断用户：草稿已可用，仅轻提示（6s 后自动消散，可点 × 关闭）。
+      setNotice(t('optimizeFailedKeep'))
     } finally {
       insertedRef.current = null
       setOptimizingDraft(false)
@@ -366,12 +379,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           <span className="dshav-hotkey-hint" data-kind="err" role="status">
             <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
             {error}
+            <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={dismissHint}>×</button>
           </span>
         )}
         {notice !== null && (
           <span className="dshav-hotkey-hint" data-kind="notice" role="status">
             <span className="dshav-dot" />
             {notice}
+            <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={dismissHint}>×</button>
           </span>
         )}
         {busy && (

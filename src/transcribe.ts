@@ -20,7 +20,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CHAT_COMPLETIONS_PATH, MAX_AUDIO_BYTES, TRANSCRIBE_PATH, resolveAsrMode } from './presets.ts';
@@ -57,19 +57,35 @@ function errorReason(data: { error?: unknown; message?: unknown }, status: numbe
   return `upstream ASR failed (HTTP ${status})`
 }
 
-/** 调试落盘目录：失败时保存浏览器发来的原始音频，便于重放定位（仅诊断用）。 */
+/** 调试落盘目录：保存浏览器发来的原始音频，便于重放定位（仅诊断用）。 */
 function debugDir(): string {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.DSH_ASR_DEBUG_DIR
   return env && env !== '' ? env : join(homedir(), '.dsh', 'asr-voice-debug')
 }
 
-/** 转写失败时把原始音频落盘（fire-and-forget，绝不阻断路由）。 */
-async function saveDebugAudio(audio: Buffer, mime: string, reason: string): Promise<void> {
+/** 成功转写是否也落盘（诊断期用 DSH_ASR_DEBUG_KEEP_WAVS=1 dsh web 开启；默认只存失败样本）。 */
+function keepAllWavs(): boolean {
+  const v = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.DSH_ASR_DEBUG_KEEP_WAVS
+  return v === '1' || v === 'true' || v === 'yes'
+}
+
+/** 目录里最多保留的音频个数（超出删最旧，防长期诊断撑爆磁盘）。 */
+const MAX_KEPT_FILES = 100
+
+/** 把原始音频落盘（fire-and-forget，绝不阻断路由）。 */
+async function saveDebugAudio(audio: Buffer, mime: string, tag: string): Promise<void> {
   try {
-    await mkdir(debugDir(), { recursive: true })
+    const dir = debugDir()
+    await mkdir(dir, { recursive: true })
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const safeReason = reason.replace(/[^a-z0-9]+/gi, '-').slice(0, 40) || 'unknown'
-    await writeFile(join(debugDir(), `${stamp}-${audio.length}B-${safeReason}.${extForMime(mime)}`), audio)
+    const safeTag = tag.replace(/[^a-z0-9]+/gi, '-').slice(0, 40) || 'unknown'
+    await writeFile(join(dir, `${stamp}-${audio.length}B-${safeTag}.${extForMime(mime)}`), audio)
+    const entries = await readdir(dir).catch(() => [] as string[])
+    if (entries.length > MAX_KEPT_FILES) {
+      for (const name of entries.sort().slice(0, entries.length - MAX_KEPT_FILES)) {
+        await unlink(join(dir, name)).catch(() => {})
+      }
+    }
   } catch {
     // 诊断落盘失败不影响主流程
   }
@@ -221,6 +237,7 @@ export function registerTranscribeRoute(
           return sendJson(res, 400, { ok: false, reason: 'cloud ASR not configured: set API key in plugin settings' });
         }
         const { text } = await upstreamTranscribe(cfg, audio, mime, language, apiKey);
+        if (keepAllWavs()) void saveDebugAudio(audio, mime, `ok-${text.slice(0, 20)}`);
         return sendJson(res, 200, { ok: true, text });
       } catch (error) {
         const base = error instanceof Error ? error.message : String(error);

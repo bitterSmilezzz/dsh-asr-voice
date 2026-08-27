@@ -131,6 +131,20 @@ export const CSS = `
   animation: dshav-hint-in .22s var(--dshav-ease-exit, cubic-bezier(.3,0,.8,.15));
 }
 .dshav-hotkey-hint[data-kind='err'] { color: var(--dshav-danger); }
+.dshav-hint-dismiss {
+  flex: none;
+  margin-left: 2px;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  opacity: .55;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.dshav-hint-dismiss:hover { opacity: 1; background: var(--dsw-alias-fill-2, rgba(128,128,128,.18)); }
 .dshav-hotkey-hint .dshav-dot {
   flex: none;
   width: 8px;
