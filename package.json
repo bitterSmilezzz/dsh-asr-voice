@@ -1,6 +1,6 @@
 {
   "name": "dsh-asr-voice",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness 语音输入插件：浏览器/云端 ASR 识别 + 提示词优化，设置页可配置模型与快捷键（跨平台 macOS / Windows）。",
   "type": "module",
   "main": "lib/index.js",
