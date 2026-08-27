@@ -255,7 +255,11 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
     return ''
   }
 
-  const startSilenceDetection = (): void => {
+  /**
+   * 实时音量电平（驱动频谱条）。始终启用（能直观看出麦克风是否采到声）；
+   * 仅当 silenceStop 开启时附带静音自动停止逻辑。
+   */
+  const startLevelMeter = (withSilenceStop: boolean): void => {
     try {
       const audioCtx = new AudioContext()
       const source = audioCtx.createMediaStreamSource(stream!)
@@ -275,20 +279,22 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
         const rms = Math.sqrt(sum / data.length)
         // 实时音量（0~1，放大到可视范围）
         recorder.onLevel?.(Math.min(1, rms * 4))
-        if (rms < SILENCE_RMS) {
-          if (silentSince === null) silentSince = performance.now()
-          else if (performance.now() - silentSince > SILENCE_MS) {
-            void recorder.stop().catch(() => {})
-            return
+        if (withSilenceStop) {
+          if (rms < SILENCE_RMS) {
+            if (silentSince === null) silentSince = performance.now()
+            else if (performance.now() - silentSince > SILENCE_MS) {
+              void recorder.stop().catch(() => {})
+              return
+            }
+          } else {
+            silentSince = null
           }
-        } else {
-          silentSince = null
         }
         requestAnimationFrame(loop)
       }
       requestAnimationFrame(loop)
     } catch {
-      // 音频分析不可用：静音自动停止降级为仅靠时长上限
+      // 音频分析不可用：频谱静默，录音仍正常
     }
   }
 
@@ -335,6 +341,15 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
             // 解码失败：退回原始 blob，让上游报错（避免转换本身卡死录音）。
           }
           const text = await transcribeViaHost(audio, language)
+          // 异常短结果（疑似静音/听错）：把转换前的原始录音也抓一份到 host，
+          // 与转换后的 WAV（host 侧 ≤8 字规则已存）对比定位是采集还是转码问题。
+          if (text.trim().length <= 8 && blob.size > 0) {
+            void fetch('/api/asr-voice/transcribe?capture=1', {
+              method: 'POST',
+              headers: { 'content-type': blob.type || 'audio/webm' },
+              body: blob,
+            }).catch(() => {})
+          }
           active = false
           for (const t of stream!.getTracks()) t.stop()
           resolve(text)
@@ -351,8 +366,8 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
     })
     mediaRecorder.start(250)
     recorder.onState?.('recording')
-    // 静音自动停止：仅在配置开启时启用（默认关 = 手动关麦，点停止才整段去 ASR）。
-    if (silenceStop) startSilenceDetection()
+    // 电平表始终启用（频谱反馈 + 可选静音自动停止）。
+    startLevelMeter(silenceStop)
     maxTimer = setTimeout(() => { void recorder.stop().catch(() => {}) }, MAX_RECORD_MS)
   }
 

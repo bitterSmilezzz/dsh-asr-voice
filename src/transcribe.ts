@@ -227,6 +227,11 @@ export function registerTranscribeRoute(
         if (audio.length === 0) return sendJson(res, 400, { ok: false, reason: 'empty audio body' });
         mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0]?.trim() || 'audio/webm';
         const url = new URL(req.url ?? '/', 'http://localhost');
+        // 纯抓取请求（诊断）：保存转换前的原始录音后直接返回，不调用上游。
+        if (url.searchParams.get('capture') === '1') {
+          void saveDebugAudio(audio, mime, 'raw');
+          return sendJson(res, 200, { ok: true, saved: true });
+        }
         const language = url.searchParams.get('language') ?? undefined;
         const cfg = getCloudConfig();
         if (!cfg.baseUrl.trim()) {
