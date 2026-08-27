@@ -416,6 +416,17 @@ async function blobToWav16k(blob: Blob): Promise<Blob> {
       const frac = pos - i0
       out[i] = mono[i0]! * (1 - frac) + mono[i1]! * frac
     }
+    // 峰值归一化：麦克风录音幅度普遍偏低，先放大到接近满幅再写 WAV，
+    // 避免上游把轻声/远距离录音当作噪音忽略（增益上限 4x，防噪声底被过度放大）。
+    let peak = 0
+    for (let i = 0; i < outLen; i++) {
+      const a = Math.abs(out[i]!)
+      if (a > peak) peak = a
+    }
+    const gain = peak > 0.0001 ? Math.min(4, 0.9 / peak) : 1
+    if (gain !== 1) {
+      for (let i = 0; i < outLen; i++) out[i] = out[i]! * gain
+    }
     // 16-bit PCM WAV
     const dataLen = outLen * 2
     const wav = new ArrayBuffer(44 + dataLen)

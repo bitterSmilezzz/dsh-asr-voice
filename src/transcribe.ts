@@ -237,7 +237,9 @@ export function registerTranscribeRoute(
           return sendJson(res, 400, { ok: false, reason: 'cloud ASR not configured: set API key in plugin settings' });
         }
         const { text } = await upstreamTranscribe(cfg, audio, mime, language, apiKey);
-        if (keepAllWavs()) void saveDebugAudio(audio, mime, `ok-${text.slice(0, 20)}`);
+        // 诊断抓取：成功音频在 DSH_ASR_DEBUG_KEEP_WAVS=1 时全存；识别结果过短（≤2 字，
+        // 疑似听错/幻觉）时总是落盘，便于重放定位。
+        if (keepAllWavs() || text.trim().length <= 2) void saveDebugAudio(audio, mime, `ok-${text.slice(0, 20)}`);
         return sendJson(res, 200, { ok: true, text });
       } catch (error) {
         const base = error instanceof Error ? error.message : String(error);
