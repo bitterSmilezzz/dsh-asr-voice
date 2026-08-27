@@ -21,8 +21,13 @@ export interface CloudProviderLike {
   mode: string
 }
 
-/** 模型名/ID 判定为 ASR 相关的正则。 */
-const ASR_MODEL_RE = /(^|[/_.-])(asr|audio|omni|whisper|sensevoice)([/_.-]|$)|(^|[^a-z])(voice|transcri)/i
+/**
+ * 模型名/ID 判定为 ASR 相关的正则。
+ * 只匹配真正的语音识别模型：词边界处的 asr/audio/omni/whisper/transcri，
+ * 以及裸 sensevoice（SenseVoiceSmall 中段）。刻意排除 tts/voice（会误抓
+ * tts-voiceclone/voicedesign 等语音合成模型）。
+ */
+const ASR_MODEL_RE = /(^|[/_.-])(asr|audio|omni|whisper|transcri)([/_.-]|$)|sensevoice/i
 
 /** 从上游 /models 响应里提取 ASR 模型条目。 */
 function pickAsrModels(raw: unknown): Array<{ id: string; name: string }> {
