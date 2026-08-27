@@ -323,7 +323,15 @@ function createCloudRecorder(language: string, onError: (msg: string) => void): 
         const blob = new Blob(chunks, { type })
         recorder.onState?.('transcribing')
         try {
-          const text = await transcribeViaHost(blob, language)
+          // MiMo/Qwen-ASR 等 chat 通道只收 wav/mp3，whisper 式也兼容 wav →
+          // 统一把浏览器录音（webm/m4a/ogg）解码重编码成 16kHz 单声道 WAV 再上传。
+          let audio = blob
+          try {
+            audio = await blobToWav16k(blob)
+          } catch {
+            // 解码失败：退回原始 blob，让上游报错（避免转换本身卡死录音）。
+          }
+          const text = await transcribeViaHost(audio, language)
           active = false
           for (const t of stream!.getTracks()) t.stop()
           resolve(text)
@@ -365,6 +373,68 @@ function createCloudRecorder(language: string, onError: (msg: string) => void): 
   }
 
   return recorder
+}
+
+/**
+ * 把浏览器录音 blob（webm/m4a/ogg…）解码重编码成 16kHz 单声道 16-bit PCM WAV。
+ * MiMo-V2.5-ASR 只接受 wav/mp3（实测 webm/m4a 报 Param Incorrect）；whisper 式
+ * 通道也兼容 wav，故统一走 WAV。纯浏览器 Web Audio API，无外部依赖。
+ */
+async function blobToWav16k(blob: Blob): Promise<Blob> {
+  const windowLike = window as unknown as {
+    AudioContext?: typeof AudioContext
+    webkitAudioContext?: typeof AudioContext
+  }
+  const AudioCtor = windowLike.AudioContext ?? windowLike.webkitAudioContext
+  if (!AudioCtor) throw new Error('audio decode unavailable')
+  const arrayBuffer = await blob.arrayBuffer()
+  const ctx = new AudioCtor()
+  try {
+    const audio = await ctx.decodeAudioData(arrayBuffer)
+    const channels = audio.numberOfChannels
+    const srcLen = audio.length
+    // 多声道混成单声道
+    const mono = new Float32Array(srcLen)
+    for (let ch = 0; ch < channels; ch++) {
+      const data = audio.getChannelData(ch)
+      for (let i = 0; i < srcLen; i++) mono[i] = (mono[i] ?? 0) + data[i]! / channels
+    }
+    // 线性插值重采样到 16kHz
+    const targetRate = 16000
+    const sourceRate = audio.sampleRate
+    const outLen = Math.max(1, Math.round(srcLen * targetRate / sourceRate))
+    const out = new Float32Array(outLen)
+    const ratio = sourceRate / targetRate
+    for (let i = 0; i < outLen; i++) {
+      const pos = i * ratio
+      const i0 = Math.floor(pos)
+      const i1 = Math.min(i0 + 1, srcLen - 1)
+      const frac = pos - i0
+      out[i] = mono[i0]! * (1 - frac) + mono[i1]! * frac
+    }
+    // 16-bit PCM WAV
+    const dataLen = outLen * 2
+    const wav = new ArrayBuffer(44 + dataLen)
+    const view = new DataView(wav)
+    const writeStr = (off: number, s: string): void => {
+      for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i))
+    }
+    writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataLen, true); writeStr(8, 'WAVE')
+    writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, targetRate, true)
+    view.setUint32(28, targetRate * 2, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    writeStr(36, 'data'); view.setUint32(40, dataLen, true)
+    for (let i = 0; i < outLen; i++) {
+      const s = Math.max(-1, Math.min(1, out[i]!))
+      view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+    }
+    return new Blob([wav], { type: 'audio/wav' })
+  } finally {
+    void ctx.close().catch(() => {})
+  }
 }
 
 /** 上传音频到 host 转写代理（带超时，防上游卡死钉住 UI）。 */
