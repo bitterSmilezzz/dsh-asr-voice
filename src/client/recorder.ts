@@ -361,7 +361,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
             active = false
             for (const t of stream!.getTracks()) t.stop()
             const label = currentInputLabel()
-            // 附上 Chrome 可见的全部输入设备，一眼看出是否选错/只见到虚拟设备。
+            // 附上 Chrome 可见的全部输入设备 + 浏览器标识，一眼看出是否选错/非主流内核。
             let devices = ''
             try {
               const list = await navigator.mediaDevices.enumerateDevices()
@@ -371,7 +371,9 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
                 .slice(0, 5)
                 .join('、')
             } catch { /* 枚举失败不影响主错误 */ }
-            const extra = [label, devices].filter(Boolean).join(' | ')
+            const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+            const br = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : '未知内核'
+            const extra = [label, devices, `浏览器:${br}`].filter(Boolean).join(' | ')
             reject(new Error(extra === '' ? 'no-sound' : `no-sound:${extra}`))
             return
           }
