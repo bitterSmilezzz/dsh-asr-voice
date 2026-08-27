@@ -8,7 +8,10 @@
  */
 
 export const CSS = `
-[dsh-asr-voice] {
+/* 主题变量挂 :root（页面没有 [dsh-asr-voice] 属性的容器元素——那是 <style> 标签的
+   data 属性，不作用于渲染树；挂错选择器会让 --dshav-* 全部未定义 → 背景透明）。
+   --dshav-* 前缀唯一，挂全局不影响其它插件（独立性契约）。 */
+:root {
   --dshav-accent: var(--dsw-alias-state-business-primary, #4f8cff);
   --dshav-accent-soft: color-mix(in srgb, var(--dshav-accent) 18%, transparent);
   --dshav-danger: var(--dsw-alias-state-error-primary, #e5484d);
@@ -176,47 +179,47 @@ export const CSS = `
 .dshav-preview {
   position: fixed;
   left: 50%;
-  bottom: 88px;
+  bottom: 84px;
   transform: translateX(-50%);
   z-index: 1200;
-  width: min(600px, calc(100vw - 32px));
+  width: min(460px, calc(100vw - 32px));
   box-sizing: border-box;
-  padding: 16px 16px 14px;
+  padding: 12px 12px 10px;
   border: 1px solid var(--dshav-border);
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--dshav-bg);
   box-shadow: var(--dsw-shadow-lv3, 0 10px 32px rgba(0,0,0,.18));
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   animation: dshav-preview-in .22s var(--dshav-ease-enter, ease-out);
 }
 .dshav-preview-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--dshav-text);
 }
 /* 标题麦克风固定小尺寸（SVG 无 width/height 默认渲染 300px，必须显式约束） */
 .dshav-preview-title svg {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   color: var(--dshav-accent);
   display: block;
 }
 .dshav-preview-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .dshav-preview-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 9px;
   background: var(--dshav-bg-layer);
   border: 1px solid var(--dshav-border);
 }
@@ -226,17 +229,17 @@ export const CSS = `
   border-color: color-mix(in srgb, var(--dshav-accent) 22%, var(--dshav-border));
 }
 .dshav-preview-label {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   color: var(--dshav-text-3);
   letter-spacing: .03em;
 }
 .dshav-preview-text {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.55;
   color: var(--dshav-text);
-  max-height: 110px;
+  max-height: 96px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
