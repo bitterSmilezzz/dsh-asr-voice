@@ -176,49 +176,75 @@ export const CSS = `
 .dshav-preview {
   position: fixed;
   left: 50%;
-  bottom: 92px;
+  bottom: 88px;
   transform: translateX(-50%);
   z-index: 1200;
-  width: min(560px, calc(100vw - 32px));
+  width: min(600px, calc(100vw - 32px));
   box-sizing: border-box;
-  padding: 14px 14px 12px;
+  padding: 16px 16px 14px;
   border: 1px solid var(--dshav-border);
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--dshav-bg);
-  box-shadow: var(--dsw-shadow-lv3, 0 8px 28px rgba(0,0,0,.16));
+  box-shadow: var(--dsw-shadow-lv3, 0 10px 32px rgba(0,0,0,.18));
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  animation: dshav-preview-in .22s var(--dshav-ease-enter, ease-out);
 }
 .dshav-preview-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--dshav-text);
 }
-.dshav-preview-col {
+/* 标题麦克风固定小尺寸（SVG 无 width/height 默认渲染 300px，必须显式约束） */
+.dshav-preview-title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--dshav-accent);
+  display: block;
+}
+.dshav-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dshav-preview-block {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dshav-bg-layer);
+  border: 1px solid var(--dshav-border);
+}
+/* 优化后区块轻微强调，突出「要用的结果」 */
+.dshav-preview-block[data-role='optimized'] {
+  background: color-mix(in srgb, var(--dshav-accent) 6%, var(--dshav-bg-layer));
+  border-color: color-mix(in srgb, var(--dshav-accent) 22%, var(--dshav-border));
 }
 .dshav-preview-label {
   font-size: 11px;
+  font-weight: 600;
   color: var(--dshav-text-3);
-  letter-spacing: .02em;
+  letter-spacing: .03em;
 }
 .dshav-preview-text {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.6;
   color: var(--dshav-text);
-  max-height: 120px;
+  max-height: 110px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
 }
-.dshav-preview-text[data-role='original'] { color: var(--dshav-text-2); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--dshav-text-3) 45%, transparent); }
+/* 原始：次级色即可，不用删除线（划线=删除感，反而看不清） */
+.dshav-preview-text[data-role='original'] { color: var(--dshav-text-2); }
+/* 优化后：主色加粗突出 */
+.dshav-preview-text[data-role='optimized'] { color: var(--dshav-text); font-weight: 500; }
 .dshav-preview-actions {
   display: flex;
   align-items: center;

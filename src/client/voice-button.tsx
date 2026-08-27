@@ -336,13 +336,15 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             <MicIcon />
             <span>{t('previewTitle')}</span>
           </div>
-          <div className="dshav-preview-col">
-            <span className="dshav-preview-label">{t('previewOriginal')}</span>
-            <p className="dshav-preview-text" data-role="original">{preview.original}</p>
-          </div>
-          <div className="dshav-preview-col">
-            <span className="dshav-preview-label">{t('previewOptimized')}</span>
-            <p className="dshav-preview-text" data-role="optimized">{preview.optimized}</p>
+          <div className="dshav-preview-body">
+            <div className="dshav-preview-block" data-role="original">
+              <span className="dshav-preview-label">{t('previewOriginal')}</span>
+              <p className="dshav-preview-text" data-role="original">{preview.original}</p>
+            </div>
+            <div className="dshav-preview-block" data-role="optimized">
+              <span className="dshav-preview-label">{t('previewOptimized')}</span>
+              <p className="dshav-preview-text" data-role="optimized">{preview.optimized}</p>
+            </div>
           </div>
           <div className="dshav-preview-actions">
             <button type="button" className="dshav-button dshav-button-outline dshav-button-sm" onClick={() => setPreview(null)}>{t('previewCancel')}</button>
