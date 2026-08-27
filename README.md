@@ -1,21 +1,35 @@
 # dsh-asr-voice（语音输入）
 
-DeepSeek Harness（DSH）语音输入插件：**说话 → 识别 → 提示词优化 → 填入/发送**，
-体验类似 Codex 语音输入。设置页可配置 ASR 引擎与模型、提示词优化方式、快捷键等。
+<p align="center">
+  <img src="docs/images/cover.png" alt="dsh-asr-voice — DSH 语音输入插件" width="720">
+</p>
 
-- 默认**浏览器 Web Speech API**（免费、免 key、Chrome/Edge macOS + Windows 双平台可用）；
-  引擎为 `auto` 时，若 Web Speech 不可用/被网络屏蔽（如国内无法访问 Google 识别服务），
-  会自动回落到已配置的**云端 OpenAI-compatible ASR**（OpenAI / Groq / 硅基流动 / 通义 Qwen-ASR，可自定义 baseUrl + model）
+DeepSeek Harness（DSH）语音输入插件：**说话 → 识别 → 提示词优化 → 填入/发送**，
+体验类似 Codex 语音输入。对着麦克风说出想法，插件把口语转成干净、可直接发送的提示词。
+
+- **混合 ASR 引擎**（默认 `auto`）：浏览器 Web Speech 优先（免费、免 key、Chrome/Edge 双平台）；
+  不可用或被网络屏蔽时（如国内无法访问 Google 识别服务）**自动回落**到已配置的云端 ASR
+  （小米 MiMo / OpenAI / Groq / 硅基流动 / 通义 Qwen-ASR，可自定义 baseUrl + model）
 - **提示词优化**：默认用**当前所选 LLM** 重写（走官方 LLM 通道，无需单独配 key）；可选本地启发式（免费离线）
-- **API key 只存本机服务端**（host settings），浏览器只经 `/api/asr-voice/*` 私有 JSON 代理，key 不进前端
+- **隐私友好**：API key 只存本机服务端（host settings），浏览器只经 `/api/asr-voice/*` 私有 JSON
+  代理调用，key 不进前端；录音在浏览器本地完成格式转换后再上传
+- **零第三方依赖**：运行时只依赖官方 `@deepseek-ai/*` peer 包，可单独用、可组合用
 
 ## 功能
 
 - 输入框工具行**麦克风按钮**（`conversation.input.right`）：点击开始/结束，静音自动停止，可选按住说话
 - 默认快捷键 **Ctrl+Shift+Space**（可配置，支持 macOS 的 Cmd 兼容）
-- 识别后**提示词优化**：默认用当前所选 LLM 重写（识别耗时较长时预览 原始→优化 后确认）；可切换本地启发式（清洗语气词/补标点/分段，即时填入）
+- 识别后**提示词优化**：默认用当前所选 LLM 重写（预览「原始 → 优化」后确认）；可切换本地启发式（清洗语气词/补标点/分段，即时填入）
 - 识别后**填入草稿**待确认；可选「识别后自动发送」（push-to-talk 风格）
 - 设置卡片：「设置 → 插件 → 配置 → 语音输入」
+
+## 效果
+
+<video src="docs/video-mute.mp4" width="720" controls loop muted></video>
+
+| 输入框麦克风按钮 | 录音中（红色扩散 + 实时频谱） | LLM 优化预览 |
+| --- | --- | --- |
+| ![输入框麦克风按钮](docs/images/screenshot-idle.png) | ![录音中](docs/images/screenshot-recording.png) | ![LLM 优化预览](docs/images/screenshot-preview.png) |
 
 ## 安装
 
@@ -30,7 +44,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 分组 | 字段 | 默认 | 说明 |
 |---|---|---|---|
 | 识别引擎 | `asr.provider` | `auto` | `auto`（浏览器 Web Speech 优先，失败自动切云端）/ `browser`（Web Speech）/ `cloud`（OpenAI-compatible） |
-| 云端 | `asr.cloud.preset` | `openai` | `openai` / `groq` / `siliconflow` / `dashscope` / `custom` |
+| 云端 | `asr.cloud.preset` | `openai` | `openai` / `groq` / `siliconflow` / `mimo` / `dashscope` / `custom` |
 | 云端 | `asr.cloud.baseUrl` | 预置自动填 | 任意 OpenAI-compatible base URL |
 | 云端 | `asr.cloud.apiKey` | 空 | 仅存本机服务端；MiMo 端点留空时自动复用 DSH 凭据 `MIMO_API_KEY` |
 | 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `mimo-v2.5-asr` / `qwen3-asr-flash` |
