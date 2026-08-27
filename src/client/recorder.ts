@@ -61,11 +61,20 @@ export function isWebSpeechSupported(): boolean {
   return typeof window !== 'undefined' && 'webkitSpeechRecognition' in window
 }
 
+/** 麦克风采集约束：显式关闭 Chrome 音频处理三件套。
+ * 某些 macOS 设备/驱动组合下，回声消除/降噪/自动增益会把输入整体清零
+ * （系统输入正常、MediaRecorder 却录到纯数字静音），关闭后走原始输入。 */
+const MIC_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+}
+
 /** 麦克风是否可用（权限 + 设备）。 */
 export async function hasMicrophone(): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return false
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS })
     for (const track of stream.getTracks()) track.stop()
     return true
   } catch {
@@ -320,7 +329,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
     }
     let s: MediaStream
     try {
-      s = await navigator.mediaDevices.getUserMedia({ audio: true })
+      s = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS })
     } catch {
       onError('mic-denied')
       return
