@@ -4,15 +4,16 @@
  * 配置权威源是 host settings 服务（namespace `asr-voice`）。本模块持有运行时
  * 快照 `config`（控制器/组件同步读取），提供 host scope 的绑定与写入。
  * 结构与 host schema（src/settings.ts）保持一致，避免双源漂移。
+ *
+ * settingsScope 是「可选服务」：按当前 DSH client 规范用 `ctx.inject(['settingsScope'], …)`
+ * 拿到 binder 后传入 bindConfigScope，而不是把它列为插件级硬依赖（避免 settings
+ * 界面未挂载时阻塞整个插件）。
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-// Type-only: pulls the settings domain's Context merge (ctx.settingsScope).
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 
 /** 统一配置对象：与 host settings schema 结构一致。 */
 export interface AsrVoiceConfig {
   asr: {
-    provider: 'browser' | 'cloud'
+    provider: 'auto' | 'browser' | 'cloud'
     cloud: {
       preset: string
       baseUrl: string
@@ -37,7 +38,7 @@ export interface AsrVoiceConfig {
 
 /** 配置默认值（与 host schema 的 default 一致）。 */
 export const DEFAULTS: AsrVoiceConfig = {
-  asr: { provider: 'browser', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '' } },
+  asr: { provider: 'auto', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '' } },
   optimize: { mode: 'llm', llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
@@ -56,7 +57,20 @@ export function subscribeConfig(fn: () => void): () => void {
 }
 
 /** host settings scope 的写路径（apply 时绑定；未绑定则只更新本地快照）。 */
-let voiceScope: { set(field: string, value: unknown): Promise<void> } | undefined
+export interface SettingsScopeLike<T> {
+  getSnapshot(): { value?: T }
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<void>
+  unset?(field: string): Promise<void>
+}
+
+/** settingsScope 服务的最小面（当前 DSH client 的 SettingsScopeBinder.bind）。 */
+export interface SettingsBinderLike {
+  bind<T>(spec: { namespace: string }): SettingsScopeLike<T>
+}
+
+/** host settings scope 的写路径（apply 时绑定；未绑定则只更新本地快照）。 */
+let voiceScope: SettingsScopeLike<AsrVoiceConfig> | undefined
 
 /** 广播配置变更（设置卡片/录音按钮监听，驱动重渲染）。 */
 export function announce(): void {
@@ -83,12 +97,13 @@ export function mergeHostValue(value: Partial<AsrVoiceConfig>): void {
 
 /**
  * 绑定 host settings scope 并订阅：首次读取当前值，之后 scope 变化回写本地
- * 快照并广播。
- * @param ctx - client root context。
+ * 快照并广播。settingsScope 为可选服务——由调用方（apply 里 scoped inject）
+ * 把 binder 传入；拿不到则不绑定，仅用本地快照。
+ * @param binder - settingsScope 服务的 binder（SettingsScopeBinder）。
  * @returns 订阅 disposer（随 fiber 清理）。
  */
-export function bindConfigScope(ctx: ClientContext): () => void {
-  const scope = ctx.settingsScope.bind<AsrVoiceConfig>({ namespace: 'asr-voice' })
+export function bindConfigScope(binder: SettingsBinderLike): () => void {
+  const scope = binder.bind<AsrVoiceConfig>({ namespace: 'asr-voice' })
   voiceScope = scope
   const applySnapshot = (): void => {
     const value = scope.getSnapshot().value

@@ -3,8 +3,9 @@
 DeepSeek Harness（DSH）语音输入插件：**说话 → 识别 → 提示词优化 → 填入/发送**，
 体验类似 Codex 语音输入。设置页可配置 ASR 引擎与模型、提示词优化方式、快捷键等。
 
-- 默认**浏览器 Web Speech API**（免费、免 key、Chrome/Edge macOS + Windows 双平台可用）
-- 可选**云端 OpenAI-compatible ASR**（OpenAI / Groq / 硅基流动 / 通义 Qwen-ASR，可自定义 baseUrl + model）
+- 默认**浏览器 Web Speech API**（免费、免 key、Chrome/Edge macOS + Windows 双平台可用）；
+  引擎为 `auto` 时，若 Web Speech 不可用/被网络屏蔽（如国内无法访问 Google 识别服务），
+  会自动回落到已配置的**云端 OpenAI-compatible ASR**（OpenAI / Groq / 硅基流动 / 通义 Qwen-ASR，可自定义 baseUrl + model）
 - **提示词优化**：默认用**当前所选 LLM** 重写（走官方 LLM 通道，无需单独配 key）；可选本地启发式（免费离线）
 - **API key 只存本机服务端**（host settings），浏览器只经 `/api/asr-voice/*` 私有 JSON 代理，key 不进前端
 
@@ -28,7 +29,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 
 | 分组 | 字段 | 默认 | 说明 |
 |---|---|---|---|
-| 识别引擎 | `asr.provider` | `browser` | `browser`（Web Speech）/ `cloud`（OpenAI-compatible） |
+| 识别引擎 | `asr.provider` | `auto` | `auto`（浏览器 Web Speech 优先，失败自动切云端）/ `browser`（Web Speech）/ `cloud`（OpenAI-compatible） |
 | 云端 | `asr.cloud.preset` | `openai` | `openai` / `groq` / `siliconflow` / `dashscope` / `custom` |
 | 云端 | `asr.cloud.baseUrl` | 预置自动填 | 任意 OpenAI-compatible base URL |
 | 云端 | `asr.cloud.apiKey` | 空 | 仅存本机服务端 |

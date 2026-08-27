@@ -31,9 +31,9 @@ export const LlmSchema = z.object({
 
 /** 插件设置 schema（与 client 的 AsrVoiceConfig 结构一致）。 */
 export const AsrVoiceSettingsSchema = z.object({
-  /** ASR 引擎：browser（Web Speech API，默认）/ cloud（云端 OpenAI-compatible）。 */
+  /** ASR 引擎：auto（默认，浏览器 Web Speech 优先、失败自动切云端）/ browser / cloud。 */
   asr: z.object({
-    provider: z.string().default('browser'),
+    provider: z.string().default('auto'),
     cloud: CloudSchema,
   }),
   /** 提示词优化：llm（默认，用当前所选 LLM 重写）/ heuristic（本地启发式，可选）。 */
@@ -58,7 +58,7 @@ export type AsrVoiceSettings = Schemastery.TypeT<typeof AsrVoiceSettingsSchema>
 
 /** 设置默认值（与 schema default 一致；client 侧也用同一份，避免双源漂移）。 */
 export const DEFAULT_SETTINGS: AsrVoiceSettings = {
-  asr: { provider: 'browser', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '' } },
+  asr: { provider: 'auto', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '' } },
   optimize: { mode: 'llm', llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },

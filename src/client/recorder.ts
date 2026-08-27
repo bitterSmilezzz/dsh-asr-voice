@@ -13,6 +13,14 @@
 /** 录音最长时长（毫秒）。 */
 export const MAX_RECORD_MS = 120_000
 
+/** 云端转写请求超时（毫秒）：上游不可达/卡住时不把 UI 永远钉在「识别中」。 */
+const TRANSCRIBE_TIMEOUT_MS = 60_000
+
+/** 云端 ASR 是否已配置（baseUrl + apiKey 均非空）。 */
+export function isCloudConfigured(cfg: { baseUrl: string; apiKey: string }): boolean {
+  return cfg.baseUrl.trim() !== '' && cfg.apiKey.trim() !== ''
+}
+
 /** 静音判定阈值（RMS，0~1）。 */
 const SILENCE_RMS = 0.02
 
@@ -164,14 +172,24 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   }
 
   recognition.onerror = (event) => {
+    // 无论哪种错误都 settle：避免 UI 一直停在「录音中」（网络错误等会先于 onend 到来）。
     if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      settle()
       onError('mic-denied')
     } else if (event.error === 'no-speech') {
-      // 静音结束：当作正常结束
+      // 静音结束：当作正常结束（轻提示，非错误）。
+      settle()
+      onError('no-speech')
     } else if (event.error === 'aborted') {
-      // 主动 abort
+      // 主动 abort：正常结束。
+      settle()
+    } else if (event.error === 'network') {
+      // 中国网络下 Chrome Web Speech 走 Google 服务器常被屏蔽 → network 错误。
+      settle()
+      onError('network')
     } else {
-      onError(event.error)
+      settle()
+      onError(event.error || 'unknown')
     }
   }
 
@@ -225,7 +243,9 @@ function createCloudRecorder(language: string, onError: (msg: string) => void): 
   let active = false
 
   const pickMime = (): string => {
-    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+    // mp4(m4a/AAC) 优先：OpenAI Whisper / Groq / 硅基流动 / 通义 Qwen-ASR 普遍接受，
+    // webm/opus 部分国产服务（如 DashScope compatible-mode）不接收。
+    const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
     for (const m of candidates) {
       if (MediaRecorder.isTypeSupported(m)) return m
     }
@@ -347,20 +367,32 @@ function createCloudRecorder(language: string, onError: (msg: string) => void): 
   return recorder
 }
 
-/** 上传音频到 host 转写代理。 */
+/** 上传音频到 host 转写代理（带超时，防上游卡死钉住 UI）。 */
 async function transcribeViaHost(blob: Blob, language: string): Promise<string> {
   const lang = resolveLang(language)
   const query = lang ? `?language=${encodeURIComponent(lang)}` : ''
-  const res = await fetch(`/api/asr-voice/transcribe${query}`, {
-    method: 'POST',
-    headers: { 'content-type': blob.type || 'audio/webm' },
-    body: blob,
-  })
-  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; text?: string; reason?: string }
-  if (!res.ok || data.ok !== true || typeof data.text !== 'string') {
-    throw new Error(data.reason || 'transcribe failed')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS)
+  try {
+    const res = await fetch(`/api/asr-voice/transcribe${query}`, {
+      method: 'POST',
+      headers: { 'content-type': blob.type || 'audio/webm' },
+      body: blob,
+      signal: controller.signal,
+    })
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; text?: string; reason?: string }
+    if (!res.ok || data.ok !== true || typeof data.text !== 'string') {
+      throw new Error(data.reason || 'transcribe failed')
+    }
+    return data.text
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('transcribe timeout')
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
   }
-  return data.text
 }
 
 /**

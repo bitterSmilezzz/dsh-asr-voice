@@ -17,23 +17,19 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import * as jsxRuntime from 'react/jsx-runtime'
 import { zh, en } from './locales.ts'
 import { CSS } from './styles.ts'
-import { bindConfigScope, config, subscribeConfig } from './config.ts'
+import { bindConfigScope, config, subscribeConfig, type SettingsBinderLike } from './config.ts'
 import { VoiceSettingsCard } from './settings-card.tsx'
-import { registerVoiceButton, voiceController } from './voice-button.tsx'
+import { VoiceButton, voiceController } from './voice-button.tsx'
 import { matchHotkey, parseHotkey } from './hotkey.ts'
 
 export { zh, en }
 
 const NS = 'asr-voice'
 
+/** 只依赖实际存在的硬服务；settingsScope 走 scoped inject（可选）。 */
 export const inject = [
   'slots',
   'locale',
-  'remote',
-  'sessions',
-  'conversation',
-  'inputTriggers',
-  'settingsScope',
 ]
 
 /** 快捷键处理（按住说话 / 点击切换），随 fiber 生命周期注册。 */
@@ -74,9 +70,9 @@ function applyHotkey(): () => void {
 }
 
 export function apply(ctx: ClientContext): void {
-  // 配置权威源是 host settings 服务。
-  ctx.effect(() => bindConfigScope(ctx), 'asr-voice: settings scope sync')
+  // 词典注册。
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'asr-voice: dictionaries')
+  // 样式注入（单 <style data-plugin="dsh-asr-voice"> 标签）。
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'dsh-asr-voice'
@@ -88,18 +84,31 @@ export function apply(ctx: ClientContext): void {
 
   const t = ctx.locale.bind(NS)
 
-  // 设置卡片（settings.plugin.item, key: asr-voice）。
-  ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-    name: 'settings.plugin.item',
-    key: 'asr-voice',
+  // 录音按钮（conversation.input.right 工具行，输入区 right 端）。
+  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+    name: 'conversation.input.right',
+    id: 'dsh-asr-voice-button',
+    order: 10,
     locale: NS,
-  }, () => jsxRuntime.jsx(VoiceSettingsCard, { t })))
-
-  // 录音按钮（conversation.input.right 工具行）。
-  registerVoiceButton(ctx, t)
+    inject: (sessionId: string) => ({ sessionId, t }),
+  }, (props) => jsxRuntime.jsx(VoiceButton, props)))
 
   // 快捷键（默认 Ctrl+Shift+Space；可选按住说话）。
   ctx.effect(applyHotkey, 'asr-voice: hotkey')
+
+  // 设置卡片（settings.plugin.item, key: asr-voice）+ 配置绑定。
+  // settingsScope 为可选服务：用 scoped inject 拿到 binder，未挂载则只跳过卡片。
+  ctx.inject(['settingsScope'], (raw) => {
+    const c = raw as ClientContext & { settingsScope?: SettingsBinderLike }
+    const binder = c.settingsScope
+    if (binder === undefined) return
+    c.effect(() => bindConfigScope(binder), 'asr-voice: settings scope sync')
+    c.slots.inject('settings.plugin.item', () => c.slots.register({
+      name: 'settings.plugin.item',
+      key: 'asr-voice',
+      locale: NS,
+    }, () => jsxRuntime.jsx(VoiceSettingsCard, { t })))
+  })
 }
 
 export const name = 'dsh-asr-voice'

@@ -12,47 +12,41 @@
  * 纯 Node HTTP + 官方 LLM 通道，无平台专属二进制 → macOS / Windows 双平台。
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 // Type-only: pulls the @deepseek-ai/cordis Context merge (ctx.webServer).
 import type {} from '@deepseek-ai/dsh-host-webserver';
 // Type-only: pulls ctx.llm (LlmRuntime).
 import type {} from '@deepseek-ai/dsh-llm';
+// Type-only: pulls ctx.settings (SettingsProvider) merge for scoped inject.
+import type {} from '@deepseek-ai/dsh-settings';
 import { ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema, type AsrVoiceSettings } from './settings.ts';
 import { registerTranscribeRoute, type CloudAsrConfig } from './transcribe.ts';
 import { registerOptimizeRoute, registerModelsRoute } from './optimize.ts';
 
-/** 最小 settings 面（本插件只用 register + scope.get）。 */
-interface SettingsLike {
-  register<T>(ns: unknown, schema: unknown, options?: { base?: unknown; validate?: unknown }): { get(): T };
-}
-
-/** Host context slice this plugin consumes (webServer/llm/agentDefaultModel from type merges). */
-type AsrVoiceHostContext = Context & {
-  settings: SettingsLike;
-  webServer: {
-    register(def: {
-      kind: 'exact';
-      path: string;
-      handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
-    }): () => void;
-  };
-};
+/** Host context slice this plugin consumes (webServer/llm/settings via type merges). */
+type AsrVoiceHostContext = Context;
 
 export const name = 'dsh-asr-voice';
 
 /** 所需 Cordis 服务（服务名，非 entry id）。 */
-export const inject = ['webServer', 'settings', 'llm', 'agentDefaultModel'];
+// settings / agentDefaultModel 不作为硬依赖：settings 用 scoped inject（缺失时仅云端
+// ASR 无 key 可用、不影响挂载），agentDefaultModel 在优化路由内 ctx.get 可选读取。
+export const inject = ['webServer', 'llm'];
 
 export function apply(ctx: AsrVoiceHostContext): void {
   // 插件配置 namespace：设置统一存 host settings 服务（namespace `asr-voice`）。
-  const scope = ctx.settings.register<AsrVoiceSettings>(ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema);
+  // settings 为可选服务：用 scoped inject 挂载（与当前官方插件一致），缺失时
+  // getCloudConfig 返回空配置（云端 ASR 报「未配置」，浏览器 ASR 不受影响）。
+  let settingsScope: { get(): AsrVoiceSettings } | undefined
+  ctx.inject(['settings'], (sctx) => {
+    settingsScope = sctx.settings.register<AsrVoiceSettings>(ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema);
+  });
 
   const getCloudConfig = (): CloudAsrConfig => {
-    const v = scope.get();
+    const v = settingsScope?.get();
     return {
-      baseUrl: v.asr.cloud.baseUrl,
-      apiKey: v.asr.cloud.apiKey,
-      model: v.asr.cloud.model,
+      baseUrl: v?.asr.cloud.baseUrl ?? '',
+      apiKey: v?.asr.cloud.apiKey ?? '',
+      model: v?.asr.cloud.model ?? '',
     };
   };
 

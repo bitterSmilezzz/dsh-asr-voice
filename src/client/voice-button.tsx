@@ -15,12 +15,11 @@
  * 不依赖任何第三方插件；样式 data 标签与命名空间唯一。
  */
 import * as react from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the ui-conversation SlotMap merge (input seats + standard kit).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { config } from './config.ts'
 import { heuristicOptimize, llmOptimize } from './optimize.ts'
-import { createVoiceRecorder, isWebSpeechSupported, type VoiceRecorder } from './recorder.ts'
+import { createVoiceRecorder, isWebSpeechSupported, isCloudConfigured, type VoiceRecorder } from './recorder.ts'
 import { fromTo } from './animate.ts'
 import type { LocaleT } from './locales.ts'
 
@@ -87,6 +86,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const disabled = !inputActions || props.session?.blank === true
   const [state, setState] = react.useState<VoiceState>('idle')
   const [error, setError] = react.useState<string | null>(null)
+  const [notice, setNotice] = react.useState<string | null>(null)
   const [interim, setInterim] = react.useState<string>('')
   const [preview, setPreview] = react.useState<{ original: string; optimized: string } | null>(null)
 
@@ -117,27 +117,55 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       ? t('errNoMic')
       : code === 'no-speech-support'
         ? t('errNoSpeechSupport')
-        : code === 'cloud-not-configured'
-          ? t('errCloudNotConfigured')
-          : code === 'optimize'
-            ? `${t('errOptimize')}${detail ? `: ${detail}` : ''}`
-            : `${t('errTranscribe')}${detail ? `: ${detail}` : ''}`
+        : code === 'network'
+          ? t('errWebSpeechNetwork')
+          : code === 'cloud-not-configured'
+            ? t('errCloudNotConfigured')
+            : code === 'optimize'
+              ? `${t('errOptimize')}${detail ? `: ${detail}` : ''}`
+              : `${t('errTranscribe')}${detail ? `: ${detail}` : ''}`
     setError(msg)
+    setNotice(null)
     setPhase('idle')
   }
 
-  const begin = async (): Promise<void> => {
-    setError(null)
-    setInterim('')
-    const engine = config.asr.provider === 'cloud' ? 'cloud' : 'browser'
-    if (engine === 'browser' && !isWebSpeechSupported()) {
-      showError('no-speech-support')
-      return
-    }
+  /** 解析最终引擎：auto = 浏览器优先（Web Speech 可用时），否则回落到已配置的云端。 */
+  const resolveEngine = (): 'browser' | 'cloud' => {
+    const provider = config.asr.provider
+    if (provider === 'cloud') return 'cloud'
+    if (provider === 'browser') return 'browser'
+    // auto
+    if (!isWebSpeechSupported()) return isCloudConfigured(config.asr.cloud) ? 'cloud' : 'browser'
+    return 'browser'
+  }
+
+  /** 启动指定引擎的录音（云端自动兜底：auto 模式下浏览器失败 → 云端重试一次）。 */
+  const startWithEngine = (engine: 'browser' | 'cloud'): void => {
     let recorder: VoiceRecorder
     try {
-      recorder = createVoiceRecorder(engine, config.language, (code) => showError(code))
+      recorder = createVoiceRecorder(engine, config.language, (code) => {
+        if (code === 'no-speech') {
+          // 无语音：当作正常结束，给一个轻提示（非错误）。
+          setPhase('idle')
+          setError(null)
+          setNotice(t('noSpeechDetected'))
+          return
+        }
+        // auto 兜底：浏览器不可用（网络/权限被浏览器 Web Speech 拒）且云端已配置 → 重试云端。
+        const recoverable = code === 'network' || code === 'not-allowed' || code === 'service-not-allowed' || code === 'no-speech-support'
+        if (engine === 'browser' && config.asr.provider === 'auto' && recoverable && isCloudConfigured(config.asr.cloud)) {
+          setNotice(t('fallbackToCloud'))
+          startWithEngine('cloud')
+          return
+        }
+        showError(code)
+      })
     } catch {
+      if (engine === 'browser' && config.asr.provider === 'auto' && isCloudConfigured(config.asr.cloud)) {
+        setNotice(t('fallbackToCloud'))
+        startWithEngine('cloud')
+        return
+      }
       showError('no-speech-support')
       return
     }
@@ -153,10 +181,27 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     recorder.start()
   }
 
+  const begin = async (): Promise<void> => {
+    setError(null)
+    setNotice(null)
+    setInterim('')
+    const engine = resolveEngine()
+    if (engine === 'cloud' && !isCloudConfigured(config.asr.cloud)) {
+      showError('cloud-not-configured')
+      return
+    }
+    if (engine === 'browser' && !isWebSpeechSupported()) {
+      showError('no-speech-support')
+      return
+    }
+    startWithEngine(engine)
+  }
+
   const finish = async (): Promise<void> => {
     const recorder = recorderRef.current
     if (!recorder) { setPhase('idle'); return }
     stopWave()
+    setNotice(null)
     setPhase('transcribing')
     let text = ''
     try {
@@ -265,6 +310,12 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             {error}
           </span>
         )}
+        {notice !== null && (
+          <span className="dshav-hotkey-hint" data-kind="notice" role="status">
+            <span className="dshav-dot" />
+            {notice}
+          </span>
+        )}
         {busy && (
           <span className="dshav-hotkey-hint" data-state={state} ref={hintRef} role="status">
             {state === 'recording' ? <span className="dshav-dot" /> : <Spinner />}
@@ -301,16 +352,4 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       )}
     </react.Fragment>
   )
-}
-
-/** 供 index.ts 注册槽位：把翻译函数注入组件（owner share 只补 sessionId）。 */
-export function registerVoiceButton(ctx: ClientContext, t: LocaleT): void {
-  ctx.inject(['slots'], (scope) => {
-    scope.slots.inject('conversation.input.right', () => scope.slots.register({
-      name: 'conversation.input.right',
-      id: 'dsh-asr-voice-button',
-      order: 10,
-      inject: (sessionId: string) => ({ sessionId, t }),
-    }, VoiceButton))
-  })
 }

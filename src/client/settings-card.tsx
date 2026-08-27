@@ -235,7 +235,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   const preset = presetById(config.asr.cloud.preset) ?? presetById(DEFAULT_PRESET_ID)
 
   const setProvider = (v: string): void => {
-    setConfig('asr', () => { config.asr.provider = v === 'cloud' ? 'cloud' : 'browser' })
+    setConfig('asr', () => { config.asr.provider = v === 'cloud' ? 'cloud' : v === 'browser' ? 'browser' : 'auto' })
   }
   const setPreset = (id: string): void => {
     setConfig('asr', () => {
@@ -316,6 +316,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
           title={t('asrProviderLabel')}
           value={config.asr.provider}
           options={[
+            { value: 'auto', label: t('asrProviderAuto') },
             { value: 'browser', label: t('asrProviderBrowser') },
             { value: 'cloud', label: t('asrProviderCloud') },
           ]}

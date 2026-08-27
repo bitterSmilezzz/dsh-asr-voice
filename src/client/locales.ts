@@ -8,6 +8,7 @@ export type LocaleKey =
   | 'cardCopy'
   | 'groupAsr'
   | 'asrProviderLabel'
+  | 'asrProviderAuto'
   | 'asrProviderBrowser'
   | 'asrProviderCloud'
   | 'cloudPresetLabel'
@@ -46,7 +47,10 @@ export type LocaleKey =
   | 'optimizingTitle'
   | 'errNoMic'
   | 'errNoSpeechSupport'
+  | 'errWebSpeechNetwork'
   | 'errCloudNotConfigured'
+  | 'noSpeechDetected'
+  | 'fallbackToCloud'
   | 'errTranscribe'
   | 'errOptimize'
   | 'previewTitle'
@@ -67,6 +71,7 @@ export const zh: LocaleDict = {
   cardCopy: '开口成文：识别、优化、填入草稿。',
   groupAsr: '识别引擎',
   asrProviderLabel: 'ASR 引擎',
+  asrProviderAuto: '自动（浏览器优先，云端兜底）',
   asrProviderBrowser: '浏览器（Web Speech，免费免 key）',
   asrProviderCloud: '云端（OpenAI-compatible）',
   cloudPresetLabel: '服务商预置',
@@ -105,7 +110,10 @@ export const zh: LocaleDict = {
   optimizingTitle: '优化中…',
   errNoMic: '未检测到麦克风',
   errNoSpeechSupport: '当前浏览器不支持 Web Speech，请改用云端 ASR（Chrome/Edge 均支持）。',
+  errWebSpeechNetwork: '浏览器语音识别网络不可用（服务可能被网络屏蔽），已请改用云端 ASR。',
   errCloudNotConfigured: '云端 ASR 未配置：请到设置填写 Base URL 与 API Key。',
+  noSpeechDetected: '未检测到语音',
+  fallbackToCloud: '浏览器语音识别不可用，已自动切换云端 ASR',
   errTranscribe: '识别失败',
   errOptimize: '优化失败',
   previewTitle: '提示词优化预览',
@@ -121,6 +129,7 @@ export const en: LocaleDict = {
   cardCopy: 'Speak to prompt — recognized, optimized, delivered.',
   groupAsr: 'Recognition engine',
   asrProviderLabel: 'ASR engine',
+  asrProviderAuto: 'Auto (browser first, cloud fallback)',
   asrProviderBrowser: 'Browser (Web Speech, free, no key)',
   asrProviderCloud: 'Cloud (OpenAI-compatible)',
   cloudPresetLabel: 'Provider preset',
@@ -159,7 +168,10 @@ export const en: LocaleDict = {
   optimizingTitle: 'Optimizing…',
   errNoMic: 'No microphone detected',
   errNoSpeechSupport: 'Web Speech is not supported by this browser; switch to cloud ASR (Chrome/Edge support it).',
+  errWebSpeechNetwork: 'Browser speech recognition network is unavailable (the service may be blocked); switch to cloud ASR.',
   errCloudNotConfigured: 'Cloud ASR is not configured: set Base URL and API key in settings.',
+  noSpeechDetected: 'No speech detected',
+  fallbackToCloud: 'Browser speech unavailable; switched to cloud ASR',
   errTranscribe: 'Transcription failed',
   errOptimize: 'Optimization failed',
   previewTitle: 'Prompt optimization preview',
