@@ -247,14 +247,18 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   }
 
   // ── 呼吸光环（back.out 缓动 + 错开延迟 + 变化幅度，非机械同步） ──
+  // 保存无限循环补间的 handle，stop 时 kill 掉——否则 repeat:Infinity 的 rAF 循环
+  // 永不停（stopWave 只改内联样式，下一帧又被动画覆盖回去，红色波纹残留）。
+  const waveHandlesRef = react.useRef<Array<{ kill(): void }>>([])
   const startWave = (): void => {
     const wrap = wrapRef.current
     if (!wrap) return
+    stopWave()
     wrap.querySelectorAll<HTMLElement>('.dshav-wave-ring').forEach((ring, i) => {
       ring.style.opacity = '0.5'
       const spread = 1.9 + (i % 2) * 0.35
       const duration = 1.35 + (i % 2) * 0.2
-      fromTo(ring, { scale: 0.72, opacity: 0.5 }, {
+      const handle = fromTo(ring, { scale: 0.72, opacity: 0.5 }, {
         scale: spread,
         opacity: 0,
         duration,
@@ -262,9 +266,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         ease: 'back.out',
         repeat: Infinity,
       })
+      waveHandlesRef.current.push(handle)
     })
   }
   const stopWave = (): void => {
+    for (const handle of waveHandlesRef.current) {
+      try { handle.kill() } catch { /* noop */ }
+    }
+    waveHandlesRef.current = []
     const wrap = wrapRef.current
     if (!wrap) return
     wrap.querySelectorAll<HTMLElement>('.dshav-wave-ring').forEach((ring) => {
