@@ -69,6 +69,20 @@ function keepAllWavs(): boolean {
   return v === '1' || v === 'true' || v === 'yes'
 }
 
+/** 从请求 UA 推断浏览器短名（落盘标签用，如 Chrome150/Edge/Safari18）。 */
+function uaTag(req: IncomingMessage): string {
+  const ua = String(req.headers['user-agent'] ?? '')
+  const ver = (re: RegExp): string => {
+    const m = ua.match(re)
+    return m?.[1] !== undefined ? m[1] : ''
+  }
+  if (/Edg\//.test(ua)) return `Edge${ver(/Edg\/(\d+)/)}`
+  if (/Chrome\//.test(ua)) return `Chrome${ver(/Chrome\/(\d+)/)}`
+  if (/Version\//.test(ua) && /Safari\//.test(ua)) return `Safari${ver(/Version\/(\d+)/)}`
+  if (/Firefox\//.test(ua)) return `Firefox${ver(/Firefox\/(\d+)/)}`
+  return 'UA'
+}
+
 /** 目录里最多保留的音频个数（超出删最旧，防长期诊断撑爆磁盘）。 */
 const MAX_KEPT_FILES = 100
 
@@ -227,9 +241,11 @@ export function registerTranscribeRoute(
         if (audio.length === 0) return sendJson(res, 400, { ok: false, reason: 'empty audio body' });
         mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0]?.trim() || 'audio/webm';
         const url = new URL(req.url ?? '/', 'http://localhost');
+        // 诊断标记：从请求 UA 推断浏览器，让每个落盘文件的标签自带浏览器身份。
+        const ua = uaTag(req);
         // 纯抓取请求（诊断）：保存转换前的原始录音后直接返回，不调用上游。
         if (url.searchParams.get('capture') === '1') {
-          void saveDebugAudio(audio, mime, 'raw');
+          void saveDebugAudio(audio, mime, `raw-${ua}`);
           return sendJson(res, 200, { ok: true, saved: true });
         }
         const language = url.searchParams.get('language') ?? undefined;
@@ -244,13 +260,13 @@ export function registerTranscribeRoute(
         const { text } = await upstreamTranscribe(cfg, audio, mime, language, apiKey);
         // 诊断抓取：成功音频在 DSH_ASR_DEBUG_KEEP_WAVS=1 时全存；识别结果过短
         // （≤8 字符，覆盖 "yeah"/单个语气词 等疑似听错/幻觉）时总是落盘，便于重放定位。
-        if (keepAllWavs() || text.trim().length <= 8) void saveDebugAudio(audio, mime, `ok-${text.slice(0, 20)}`);
+        if (keepAllWavs() || text.trim().length <= 8) void saveDebugAudio(audio, mime, `${ua}-ok-${text.slice(0, 18)}`);
         return sendJson(res, 200, { ok: true, text });
       } catch (error) {
         const base = error instanceof Error ? error.message : String(error);
         const reason = audio.length > 0 ? `${base} (audio ${audio.length}B, ${mime})` : base;
         // 失败时把原始音频落盘到 ~/.dsh/asr-voice-debug/（重放定位用，不影响主流程）。
-        if (audio.length > 0) void saveDebugAudio(audio, mime, base);
+        if (audio.length > 0) void saveDebugAudio(audio, mime, `${ua}-${base}`);
         return sendJson(res, 502, { ok: false, reason });
       }
     },

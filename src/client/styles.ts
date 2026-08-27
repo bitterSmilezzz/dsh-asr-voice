@@ -130,7 +130,14 @@ export const CSS = `
   box-shadow: var(--dsw-shadow-lv3, 0 4px 16px rgba(0,0,0,.12));
   animation: dshav-hint-in .22s var(--dshav-ease-exit, cubic-bezier(.3,0,.8,.15));
 }
-.dshav-hotkey-hint[data-kind='err'] { color: var(--dshav-danger); }
+.dshav-hotkey-hint[data-kind='err'] {
+  color: var(--dshav-danger);
+  /* 错误信息允许换行：诊断详情（设备/浏览器）不能被 nowrap 截断 */
+  white-space: normal;
+  line-height: 1.35;
+  max-width: min(480px, calc(100vw - 120px));
+}
+.dshav-hotkey-hint[data-kind='err'] .dshav-hint-dismiss { align-self: flex-start; }
 .dshav-hint-dismiss {
   flex: none;
   margin-left: 2px;
