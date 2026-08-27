@@ -8,11 +8,13 @@ DeepSeek Harness（DSH）语音输入插件：**说话 → 识别 → 提示词�
 体验类似 Codex 语音输入。对着麦克风说出想法，插件把口语转成干净、可直接发送的提示词。
 
 - **混合 ASR 引擎**（默认 `auto`）：浏览器 Web Speech 优先（免费、免 key、Chrome/Edge 双平台）；
-  不可用或被网络屏蔽时（如国内无法访问 Google 识别服务）**自动回落**到已配置的云端 ASR
-  （小米 MiMo / OpenAI / Groq / 硅基流动 / 通义 Qwen-ASR，可自定义 baseUrl + model）
+  不可用或被网络屏蔽时（如国内无法访问 Google 识别服务）**自动回落**到已配置的云端 ASR。
+  云端支持**多供应商**（可同时保存小米 MiMo / OpenAI / Groq / 硅基流动 / 通义 Qwen-ASR 的
+  key，设置页切换当前使用，并按需「获取模型」动态拉取各供应商最新 ASR 模型）
 - **提示词优化**：默认用**当前所选 LLM** 重写（走官方 LLM 通道，无需单独配 key）；可选本地启发式（免费离线）
 - **隐私友好**：API key 只存本机服务端（host settings），浏览器只经 `/api/asr-voice/*` 私有 JSON
   代理调用，key 不进前端；录音在浏览器本地完成格式转换后再上传
+- **顺手的细节**：识别结果可一键复制到剪贴板（默认开）、选择「完整替换」或「末尾追加」到草稿
 - **零第三方依赖**：运行时只依赖官方 `@deepseek-ai/*` peer 包，可单独用、可组合用
 
 ## 功能
@@ -44,17 +46,22 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 分组 | 字段 | 默认 | 说明 |
 |---|---|---|---|
 | 识别引擎 | `asr.provider` | `auto` | `auto`（浏览器 Web Speech 优先，失败自动切云端）/ `browser`（Web Speech）/ `cloud`（OpenAI-compatible） |
+| 云端 | `asr.cloud.providers` | `[]` | **多供应商列表**：每个含 `{id, preset, baseUrl, apiKey, model, mode}`，可保存多个服务商 key |
+| 云端 | `asr.cloud.active` | 空 | 当前使用的供应商 id（空 = 取第一个）；设置页可切换 |
 | 云端 | `asr.cloud.preset` | `openai` | `openai` / `groq` / `siliconflow` / `mimo` / `dashscope` / `custom` |
 | 云端 | `asr.cloud.baseUrl` | 预置自动填 | 任意 OpenAI-compatible base URL |
 | 云端 | `asr.cloud.apiKey` | 空 | 仅存本机服务端；MiMo 端点留空时自动复用 DSH 凭据 `MIMO_API_KEY` |
-| 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `mimo-v2.5-asr` / `qwen3-asr-flash` |
+| 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `mimo-v2.5-asr` / `qwen3-asr-flash`；设置页可「获取模型」动态拉取该供应商最新 ASR 模型 |
 | 云端 | `asr.cloud.mode` | `auto` | `auto`（按模型名判定）/ `transcriptions`（whisper 式）/ `chat`（MiMo/Qwen-ASR） |
 | 优化 | `optimize.mode` | `llm` | `llm`（默认，用当前所选 LLM 重写）/ `heuristic`（本地启发式） |
 | 优化 | `optimize.llm.provider` / `.model` | 空 | 可选：从 **DSH 已配置模型列表**指定；留空则用当前所选 LLM。自定义须先到 DSH 模型列表添加 |
 | 语言 | `language` | `auto` | `auto` / `zh-CN` / `en-US` |
 | 行为 | `behavior.autoSend` | `false` | 识别后自动发送 |
 | 行为 | `behavior.holdToTalk` | `false` | 按住快捷键说话、松开结束 |
+| 行为 | `behavior.textMode` | `replace` | 文本输入模式：`replace`（完整替换草稿）/ `append`（在已有文字后追加） |
+| 行为 | `behavior.copyToClipboard` | `true` | 识别/优化后自动把结果复制到剪贴板 |
 | 行为 | `behavior.hotkey` | `Ctrl+Shift+Space` | 快捷键（空 = 关闭） |
+| 统计 | `/api/asr-voice/stats` | — | ASR 用量统计（次数/字符/最近时间，进程内） |
 
 ## 云端 ASR 预置
 
