@@ -356,12 +356,23 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
         recorder.onState?.('transcribing')
         try {
           // 静音守卫：电平表可用且整段峰值趋近零 → 麦克风没采到声，
-          // 不浪费一次上游 ASR（避免对静音幻觉出 "yeah"/"no text"），直接报错带设备名。
+          // 不浪费一次上游 ASR（避免对静音幻觉出 "yeah"/"no text"），直接报错带设备信息。
           if (levelMeterActive && peakLevel < 0.01) {
             active = false
             for (const t of stream!.getTracks()) t.stop()
             const label = currentInputLabel()
-            reject(new Error(label === '' ? 'no-sound' : `no-sound:${label}`))
+            // 附上 Chrome 可见的全部输入设备，一眼看出是否选错/只见到虚拟设备。
+            let devices = ''
+            try {
+              const list = await navigator.mediaDevices.enumerateDevices()
+              devices = list
+                .filter((d) => d.kind === 'audioinput' && d.label !== '')
+                .map((d) => d.label)
+                .slice(0, 5)
+                .join('、')
+            } catch { /* 枚举失败不影响主错误 */ }
+            const extra = [label, devices].filter(Boolean).join(' | ')
+            reject(new Error(extra === '' ? 'no-sound' : `no-sound:${extra}`))
             return
           }
           // MiMo/Qwen-ASR 等 chat 通道只收 wav/mp3，whisper 式也兼容 wav →
