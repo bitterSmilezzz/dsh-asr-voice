@@ -1,4 +1,4 @@
-# dsh-asr-voice · 开口即成文（Voice Input for DeepSeek Harness）
+# dsh-asr-voice — 语音输入（Voice Input）
 
 <p align="center">
   <img src="docs/images/cover.png" alt="dsh-asr-voice — DSH 语音输入插件" width="720">
@@ -130,7 +130,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 麦克风 | 高 | 浏览器 `getUserMedia` 需要用户授权；录音仅在点击/快捷键触发时进行 |
 | 网络 | 中 | 云端 ASR/LLM 时，本机 host 向**你配置的** baseUrl 发起 HTTPS 请求 |
 | 设置读写 | 中 | 读写自有 namespace `asr-voice`（含 API key，仅存本机服务端） |
-| 文件/命令/凭据 | 无 | 不访问文件系统、不执行命令、不读取其他凭据 |
+| 文件（诊断落盘） | 中 | 转写失败 / 识别结果异常短 / 显式诊断抓取时，将原始录音写入 `~/.dsh/asr-voice-debug/`（可用 `DSH_ASR_DEBUG_DIR` 重定向，自动裁剪至 100 个）；不执行命令、不读取其他凭据 |
 
 已知风险：
 
