@@ -25,6 +25,10 @@ export type LocaleKey =
   | 'optimizeModeLabel'
   | 'optimizeHeuristic'
   | 'optimizeLlm'
+  | 'optimizePreviewLabel'
+  | 'optimizePreviewDesc'
+  | 'optimizingHint'
+  | 'optimizeFailedKeep'
   | 'llmDefaultHint'
   | 'llmProviderLabel'
   | 'llmModelLabel'
@@ -92,6 +96,10 @@ export const zh: LocaleDict = {
   optimizeModeLabel: '优化方式',
   optimizeHeuristic: '本地启发式（免费、离线）',
   optimizeLlm: 'LLM 重写（默认用当前所选模型）',
+  optimizePreviewLabel: '优化结果先预览确认',
+  optimizePreviewDesc: '关闭（默认）：停止录音立即把清洗版文本填入草稿，LLM 优化在后台完成后自动替换（不覆盖你的编辑）；开启：等优化完成弹出预览卡，确认后再填入。',
+  optimizingHint: '优化中…草稿已填入，可直接编辑或发送',
+  optimizeFailedKeep: '优化失败，已保留草稿中的清洗版文本',
   llmDefaultHint: '默认使用当前所选 LLM；可在此指定 DSH 已配置的模型。',
   llmProviderLabel: '模型提供方',
   llmModelLabel: '模型',
@@ -154,6 +162,10 @@ export const en: LocaleDict = {
   optimizeModeLabel: 'Optimization mode',
   optimizeHeuristic: 'Local heuristic (free, offline)',
   optimizeLlm: 'LLM rewrite (uses current model by default)',
+  optimizePreviewLabel: 'Preview optimized text before inserting',
+  optimizePreviewDesc: 'Off (default): the cleaned text fills the draft immediately after recording; the background LLM rewrite replaces it when done (never overrides your edits). On: wait for the rewrite, confirm in a preview card.',
+  optimizingHint: 'Optimizing… draft is ready — edit or send now',
+  optimizeFailedKeep: 'Optimization failed; the cleaned draft was kept',
   llmDefaultHint: 'Uses the current model by default; pick a configured DSH model below.',
   llmProviderLabel: 'Provider',
   llmModelLabel: 'Model',

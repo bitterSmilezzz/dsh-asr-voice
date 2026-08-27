@@ -264,6 +264,9 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   const setOptimizeMode = (v: string): void => {
     setConfig('optimize', () => { config.optimize.mode = v === 'llm' ? 'llm' : 'heuristic' })
   }
+  const setOptimizePreview = (v: boolean): void => {
+    setConfig('optimize', () => { config.optimize.preview = v })
+  }
   const setLlmProvider = (v: string): void => {
     setConfig('optimize', () => { config.optimize.llm.provider = v; config.optimize.llm.model = '' })
   }
@@ -369,6 +372,12 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
               onModel={setLlmModel}
             />
             <p className="dshav-field-hint">{t('llmCustomHint')}</p>
+            <ToggleRow
+              title={t('optimizePreviewLabel')}
+              desc={t('optimizePreviewDesc')}
+              checked={config.optimize.preview}
+              onChange={() => setOptimizePreview(!config.optimize.preview)}
+            />
           </div>
         )}
       </div>

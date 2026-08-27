@@ -24,6 +24,8 @@ export interface AsrVoiceConfig {
   }
   optimize: {
     mode: 'heuristic' | 'llm'
+    /** llm 模式入框方式：false = 立即填入清洗版 + 后台优化替换；true = 预览卡确认后填入。 */
+    preview: boolean
     llm: {
       provider: string
       model: string
@@ -40,7 +42,7 @@ export interface AsrVoiceConfig {
 /** 配置默认值（与 host schema 的 default 一致）。 */
 export const DEFAULTS: AsrVoiceConfig = {
   asr: { provider: 'auto', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '', mode: 'auto' } },
-  optimize: { mode: 'llm', llm: { provider: '', model: '' } },
+  optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
 }

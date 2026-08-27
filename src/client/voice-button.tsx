@@ -89,6 +89,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const [notice, setNotice] = react.useState<string | null>(null)
   const [interim, setInterim] = react.useState<string>('')
   const [preview, setPreview] = react.useState<{ original: string; optimized: string } | null>(null)
+  // 快速路径标志：optimizing 状态下草稿已填入（区别于预览卡路径的等待）。
+  const [optimizingDraft, setOptimizingDraft] = react.useState(false)
 
   const wrapRef = react.useRef<HTMLSpanElement | null>(null)
   const hintRef = react.useRef<HTMLSpanElement | null>(null)
@@ -96,6 +98,12 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const recorderRef = react.useRef<VoiceRecorder | null>(null)
   const stateRef = react.useRef<VoiceState>('idle')
   stateRef.current = state
+  // 草稿最新值（props 异步回写）与本次填入的值——后台优化替换时防覆盖用户编辑。
+  const draftRef = react.useRef<string>('')
+  const insertedRef = react.useRef<string | null>(null)
+  react.useEffect(() => {
+    draftRef.current = props.input?.draft ?? ''
+  }, [props.input?.draft])
 
   // 挂载/卸载：注册到全局控制器（快捷键驱动当前实例）。
   const instance = react.useMemo(() => ({
@@ -185,6 +193,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setError(null)
     setNotice(null)
     setInterim('')
+    setOptimizingDraft(false)
     const engine = resolveEngine()
     if (engine === 'cloud' && !isCloudConfigured(config.asr.cloud)) {
       showError('cloud-not-configured')
@@ -195,6 +204,31 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       return
     }
     startWithEngine(engine)
+  }
+
+  /**
+   * 快速路径（preview=false 默认）：ASR 文本返回后立即把清洗版填入草稿，
+   * LLM 优化在后台跑，完成后仅在用户未编辑草稿时替换。
+   */
+  const runBackgroundOptimize = async (raw: string, fast: string): Promise<void> => {
+    try {
+      const target = {
+        provider: config.optimize.llm.provider,
+        model: config.optimize.llm.model,
+      }
+      const optimized = await llmOptimize(raw, target)
+      // 防覆盖：仅当草稿仍是我们填入的文本时才替换（用户已编辑则保留编辑）。
+      if (draftRef.current === insertedRef.current && inputActions !== undefined) {
+        inputActions.setDraft(optimized)
+      }
+    } catch {
+      // 后台优化失败不打断用户：草稿已可用，仅轻提示。
+      setNotice(`${t('errOptimize')} · ${t('optimizeFailedKeep')}`)
+    } finally {
+      insertedRef.current = null
+      setOptimizingDraft(false)
+      setPhase('idle')
+    }
   }
 
   const finish = async (): Promise<void> => {
@@ -215,18 +249,33 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
 
     const mode = config.optimize.mode
     if (mode === 'llm') {
-      setPhase('optimizing')
-      try {
-        const target = {
-          provider: config.optimize.llm.provider,
-          model: config.optimize.llm.model,
+      // autoSend 保持原流程（说完即发，用优化后文本），不受 preview 影响。
+      if (config.behavior.autoSend || config.optimize.preview) {
+        setPhase('optimizing')
+        try {
+          const target = {
+            provider: config.optimize.llm.provider,
+            model: config.optimize.llm.model,
+          }
+          const optimized = await llmOptimize(text, target)
+          if (config.optimize.preview) {
+            setPreview({ original: text, optimized })
+            setPhase('idle')
+          } else {
+            finalize(optimized)
+          }
+        } catch (error) {
+          showError('optimize', String(error instanceof Error ? error.message : error))
         }
-        const optimized = await llmOptimize(text, target)
-        setPreview({ original: text, optimized })
-        setPhase('idle')
-      } catch (error) {
-        showError('optimize', String(error instanceof Error ? error.message : error))
+        return
       }
+      // 快速路径（默认）：立即填入清洗版，优化后台替换。
+      const fast = heuristicOptimize(text) || text
+      insertedRef.current = fast
+      finalize(fast)
+      setOptimizingDraft(true)
+      setPhase('optimizing')
+      void runBackgroundOptimize(text, fast)
       return
     }
     finalize(heuristicOptimize(text))
@@ -329,6 +378,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           <span className="dshav-hotkey-hint" data-state={state} ref={hintRef} role="status">
             {state === 'recording' ? <span className="dshav-dot" /> : <Spinner />}
             {state === 'recording' && interim !== '' ? <span className="dshav-hint-text">{interim}</span> : null}
+            {state === 'optimizing' && optimizingDraft ? <span className="dshav-hint-text">{t('optimizingHint')}</span> : null}
             {state === 'recording' && (
               <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
                 {Array.from({ length: SPECTRUM_BARS }, (_, i) => (

@@ -13,7 +13,7 @@ DeepSeek Harness（DSH）语音输入插件：**说话 → 识别 → 提示词�
 
 - 输入框工具行**麦克风按钮**（`conversation.input.right`）：点击开始/结束，静音自动停止，可选按住说话
 - 默认快捷键 **Ctrl+Shift+Space**（可配置，支持 macOS 的 Cmd 兼容）
-- 识别后**提示词优化**：默认用当前所选 LLM 重写（识别耗时较长时预览 原始→优化 后确认）；可切换本地启发式（清洗语气词/补标点/分段，即时填入）
+- 识别后**提示词优化**：默认用当前所选 LLM 重写——**停止录音立即把清洗版填入草稿，LLM 优化在后台完成后自动替换**（不覆盖你的编辑）；可选「优化结果先预览确认」（`optimize.preview: true`）或本地启发式（清洗语气词/补标点/分段，即时填入）
 - 识别后**填入草稿**待确认；可选「识别后自动发送」（push-to-talk 风格）
 - 设置卡片：「设置 → 插件 → 配置 → 语音输入」
 
@@ -36,6 +36,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `mimo-v2.5-asr` / `qwen3-asr-flash` |
 | 云端 | `asr.cloud.mode` | `auto` | `auto`（按模型名判定）/ `transcriptions`（whisper 式）/ `chat`（MiMo/Qwen-ASR） |
 | 优化 | `optimize.mode` | `llm` | `llm`（默认，用当前所选 LLM 重写）/ `heuristic`（本地启发式） |
+| 优化 | `optimize.preview` | `false` | `false`（默认）：停止录音立即填入清洗版文本，LLM 优化后台完成后自动替换；`true`：等优化完成，预览 原始→优化 后确认填入 |
 | 优化 | `optimize.llm.provider` / `.model` | 空 | 可选：从 **DSH 已配置模型列表**指定；留空则用当前所选 LLM。自定义须先到 DSH 模型列表添加 |
 | 语言 | `language` | `auto` | `auto` / `zh-CN` / `en-US` |
 | 行为 | `behavior.autoSend` | `false` | 识别后自动发送 |
