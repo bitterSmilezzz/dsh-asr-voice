@@ -236,13 +236,14 @@ export function registerTranscribeRoute(
       if (req.method !== 'POST') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
       let audio: Buffer = Buffer.alloc(0)
       let mime = 'audio/webm'
+      let ua = 'UA'
       try {
         audio = await readRawBody(req, MAX_AUDIO_BYTES);
         if (audio.length === 0) return sendJson(res, 400, { ok: false, reason: 'empty audio body' });
         mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0]?.trim() || 'audio/webm';
         const url = new URL(req.url ?? '/', 'http://localhost');
         // 诊断标记：从请求 UA 推断浏览器，让每个落盘文件的标签自带浏览器身份。
-        const ua = uaTag(req);
+        ua = uaTag(req);
         // 纯抓取请求（诊断）：保存转换前的原始录音后直接返回，不调用上游。
         if (url.searchParams.get('capture') === '1') {
           void saveDebugAudio(audio, mime, `raw-${ua}`);
