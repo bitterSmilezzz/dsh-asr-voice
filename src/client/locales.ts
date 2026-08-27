@@ -17,6 +17,10 @@ export type LocaleKey =
   | 'cloudApiKeyLabel'
   | 'cloudModelLabel'
   | 'cloudModelHint'
+  | 'cloudModeLabel'
+  | 'cloudModeAuto'
+  | 'cloudModeTranscriptions'
+  | 'cloudModeChat'
   | 'groupOptimize'
   | 'optimizeModeLabel'
   | 'optimizeHeuristic'
@@ -80,6 +84,10 @@ export const zh: LocaleDict = {
   cloudApiKeyLabel: 'API Key（仅存本机服务端）',
   cloudModelLabel: '模型',
   cloudModelHint: '预置自动填充，可自行修改；自定义端点可填任意 OpenAI-compatible 模型。',
+  cloudModeLabel: '调用通道',
+  cloudModeAuto: '自动（按模型名判定）',
+  cloudModeTranscriptions: 'whisper 式 /audio/transcriptions',
+  cloudModeChat: 'chat + input_audio（MiMo/Qwen-ASR）',
   groupOptimize: '提示词优化',
   optimizeModeLabel: '优化方式',
   optimizeHeuristic: '本地启发式（免费、离线）',
@@ -138,6 +146,10 @@ export const en: LocaleDict = {
   cloudApiKeyLabel: 'API key (stored on this machine, server-side)',
   cloudModelLabel: 'Model',
   cloudModelHint: 'Pre-filled from the preset; editable. Custom endpoints accept any OpenAI-compatible model.',
+  cloudModeLabel: 'Endpoint mode',
+  cloudModeAuto: 'Auto (by model name)',
+  cloudModeTranscriptions: 'Whisper-style /audio/transcriptions',
+  cloudModeChat: 'Chat + input_audio (MiMo/Qwen-ASR)',
   groupOptimize: 'Prompt optimization',
   optimizeModeLabel: 'Optimization mode',
   optimizeHeuristic: 'Local heuristic (free, offline)',

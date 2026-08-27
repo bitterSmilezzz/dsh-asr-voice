@@ -47,11 +47,12 @@ export function apply(ctx: AsrVoiceHostContext): void {
       baseUrl: v?.asr.cloud.baseUrl ?? '',
       apiKey: v?.asr.cloud.apiKey ?? '',
       model: v?.asr.cloud.model ?? '',
+      mode: v?.asr.cloud.mode ?? 'auto',
     };
   };
 
   // 路由随 fiber 生命周期注册/回收。
-  ctx.effect(() => registerTranscribeRoute((def) => ctx.webServer.register(def), getCloudConfig), 'asr-voice: transcribe route');
+  ctx.effect(() => registerTranscribeRoute((def) => ctx.webServer.register(def), getCloudConfig, ctx), 'asr-voice: transcribe route');
   ctx.effect(() => registerOptimizeRoute((def) => ctx.webServer.register(def), ctx), 'asr-voice: optimize route');
   ctx.effect(() => registerModelsRoute((def) => ctx.webServer.register(def), ctx), 'asr-voice: models route');
 }

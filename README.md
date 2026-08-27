@@ -32,8 +32,9 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 识别引擎 | `asr.provider` | `auto` | `auto`（浏览器 Web Speech 优先，失败自动切云端）/ `browser`（Web Speech）/ `cloud`（OpenAI-compatible） |
 | 云端 | `asr.cloud.preset` | `openai` | `openai` / `groq` / `siliconflow` / `dashscope` / `custom` |
 | 云端 | `asr.cloud.baseUrl` | 预置自动填 | 任意 OpenAI-compatible base URL |
-| 云端 | `asr.cloud.apiKey` | 空 | 仅存本机服务端 |
-| 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `qwen3-asr-flash` |
+| 云端 | `asr.cloud.apiKey` | 空 | 仅存本机服务端；MiMo 端点留空时自动复用 DSH 凭据 `MIMO_API_KEY` |
+| 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `mimo-v2.5-asr` / `qwen3-asr-flash` |
+| 云端 | `asr.cloud.mode` | `auto` | `auto`（按模型名判定）/ `transcriptions`（whisper 式）/ `chat`（MiMo/Qwen-ASR） |
 | 优化 | `optimize.mode` | `llm` | `llm`（默认，用当前所选 LLM 重写）/ `heuristic`（本地启发式） |
 | 优化 | `optimize.llm.provider` / `.model` | 空 | 可选：从 **DSH 已配置模型列表**指定；留空则用当前所选 LLM。自定义须先到 DSH 模型列表添加 |
 | 语言 | `language` | `auto` | `auto` / `zh-CN` / `en-US` |
@@ -43,14 +44,20 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 
 ## 云端 ASR 预置
 
-| 预置 | baseUrl | 默认模型 |
-|---|---|---|
-| OpenAI | `https://api.openai.com/v1` | `whisper-1` |
-| Groq | `https://api.groq.com/openai/v1` | `whisper-large-v3` |
-| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `FunAudioLLM/SenseVoiceSmall` |
-| 通义/阿里云百炼 Qwen-ASR | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3-asr-flash` |
+| 预置 | baseUrl | 默认模型 | 通道 |
+|---|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | `whisper-1` | whisper 式 `/audio/transcriptions` |
+| Groq | `https://api.groq.com/openai/v1` | `whisper-large-v3` | whisper 式 `/audio/transcriptions` |
+| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `FunAudioLLM/SenseVoiceSmall` | whisper 式 `/audio/transcriptions` |
+| 小米 MiMo | `https://api.xiaomimimo.com/v1` | `mimo-v2.5-asr` | chat + `input_audio`（key 可复用 DSH 凭据 `MIMO_API_KEY`） |
+| 通义/阿里云百炼 Qwen-ASR | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3-asr-flash` | chat + `input_audio` |
 
-自定义端点兼容任何 OpenAI-compatible `/audio/transcriptions`（含本地/私有部署的 ASR 服务）。
+两条调用通道（设置项 `asr.cloud.mode`，默认 `auto`）：
+- **whisper 式** `transcriptions`：multipart 上传到 `/audio/transcriptions`（OpenAI / Groq / 硅基流动 / 本地部署）。
+- **chat + input_audio** `chat`：base64 data URI 走 `/chat/completions`——小米 MiMo-V2.5-ASR、通义 Qwen-ASR 等音频大模型的 OpenAI 兼容姿势。
+- **auto**：按模型名自动判定（模型名含 `asr`/`audio`/`omni`/`sensevoice` 走 chat，否则 whisper 式）。
+
+自定义端点兼容任何 OpenAI-compatible 服务（按模型选对应通道）。
 
 ## 外部依赖
 

@@ -244,6 +244,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
       if (p) {
         config.asr.cloud.baseUrl = p.baseUrl
         config.asr.cloud.model = p.defaultModel
+        config.asr.cloud.mode = p.mode
       }
     })
   }
@@ -255,6 +256,9 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   }
   const setCloudModel = (v: string): void => {
     setConfig('asr', () => { config.asr.cloud.model = v })
+  }
+  const setCloudMode = (v: string): void => {
+    setConfig('asr', () => { config.asr.cloud.mode = v })
   }
 
   const setOptimizeMode = (v: string): void => {
@@ -328,6 +332,16 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
             <TextRow title={t('cloudBaseUrlLabel')} value={config.asr.cloud.baseUrl} onChange={setCloudBase} />
             <TextRow title={t('cloudApiKeyLabel')} value={config.asr.cloud.apiKey} onChange={setCloudKey} type="password" />
             <TextRow title={t('cloudModelLabel')} desc={t('cloudModelHint')} value={config.asr.cloud.model} onChange={setCloudModel} wide />
+            <SelectRow
+              title={t('cloudModeLabel')}
+              value={config.asr.cloud.mode}
+              options={[
+                { value: 'auto', label: t('cloudModeAuto') },
+                { value: 'transcriptions', label: t('cloudModeTranscriptions') },
+                { value: 'chat', label: t('cloudModeChat') },
+              ]}
+              onChange={setCloudMode}
+            />
             {preset && <p className="dshav-field-hint">{preset.hint}</p>}
           </div>
         )}

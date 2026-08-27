@@ -9,6 +9,9 @@
  * 跨平台说明：云端 ASR 是纯 HTTP，macOS / Windows 行为一致。
  */
 
+/** 云端 ASR 调用通道：whisper 式 multipart /audio/transcriptions，或 chat-completions input_audio（MiMo / Qwen-ASR）。 */
+export type CloudAsrMode = 'auto' | 'transcriptions' | 'chat'
+
 /** 一个云端 ASR 预置。 */
 export interface CloudPreset {
   /** 稳定 id（settings 里存的 preset 值）。 */
@@ -19,17 +22,20 @@ export interface CloudPreset {
   baseUrl: string
   /** 默认模型（可改）。 */
   defaultModel: string
+  /** 调用通道（auto = 按模型名自动判定；transcriptions = whisper 式 /audio/transcriptions；chat = chat.completions input_audio）。 */
+  mode: CloudAsrMode
   /** 简介（设置页提示）。 */
   hint: string
 }
 
-/** 内置预置：OpenAI / Groq（国际）+ 硅基流动 / 通义 Qwen-ASR（国产）。 */
+/** 内置预置：OpenAI / Groq（国际）+ 硅基流动 / 小米 MiMo / 通义 Qwen-ASR（国产）。 */
 export const CLOUD_PRESETS: readonly CloudPreset[] = [
   {
     id: 'openai',
     label: 'OpenAI Whisper',
     baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'whisper-1',
+    mode: 'transcriptions',
     hint: 'OpenAI 官方 /audio/transcriptions',
   },
   {
@@ -37,6 +43,7 @@ export const CLOUD_PRESETS: readonly CloudPreset[] = [
     label: 'Groq Whisper',
     baseUrl: 'https://api.groq.com/openai/v1',
     defaultModel: 'whisper-large-v3',
+    mode: 'transcriptions',
     hint: 'Groq 高速推理，whisper-large-v3',
   },
   {
@@ -44,14 +51,24 @@ export const CLOUD_PRESETS: readonly CloudPreset[] = [
     label: '硅基流动 SiliconFlow',
     baseUrl: 'https://api.siliconflow.cn/v1',
     defaultModel: 'FunAudioLLM/SenseVoiceSmall',
+    mode: 'transcriptions',
     hint: '国产，SenseVoice 系语音识别',
+  },
+  {
+    id: 'mimo',
+    label: '小米 MiMo',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    defaultModel: 'mimo-v2.5-asr',
+    mode: 'chat',
+    hint: '小米 MiMo-V2.5-ASR（OpenAI 兼容 chat input_audio；key 复用 DSH 凭据 MIMO_API_KEY）',
   },
   {
     id: 'dashscope',
     label: '通义/阿里云百炼 Qwen-ASR',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     defaultModel: 'qwen3-asr-flash',
-    hint: '国产，Qwen-ASR（compatible-mode OpenAI 兼容）',
+    mode: 'chat',
+    hint: '国产，Qwen-ASR（compatible-mode OpenAI 兼容 chat input_audio）',
   },
 ]
 
@@ -63,8 +80,25 @@ export function presetById(id: string): CloudPreset | undefined {
 /** 预置默认 id。 */
 export const DEFAULT_PRESET_ID = 'openai'
 
-/** 云端 ASR 端点（拼在 baseUrl 之后）。 */
+/** 云端 ASR 端点（拼在 baseUrl 之后，whisper 式通道用）。 */
 export const TRANSCRIBE_PATH = '/audio/transcriptions'
+
+/** chat-completions 通道端点（拼在 baseUrl 之后）。 */
+export const CHAT_COMPLETIONS_PATH = '/chat/completions'
 
 /** 上传/代理的音频大小上限（字节），防滥用。 */
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024
+
+/** 模型名含这些词 → 判定为「音频/ASR 大模型」走 chat input_audio 通道。 */
+const CHAT_MODE_MODEL_RE = /(^|[/_.-])(asr|audio|omni)([/_.-]|$)|sensevoice/i
+
+/** 按模型名自动判定调用通道：chat 音频大模型 vs whisper 式 /audio/transcriptions。 */
+export function autoModeForModel(model: string): CloudAsrMode {
+  return CHAT_MODE_MODEL_RE.test(model) ? 'chat' : 'transcriptions'
+}
+
+/** 解析最终调用通道：显式模式优先，auto 按模型名判定。 */
+export function resolveAsrMode(mode: string, model: string): CloudAsrMode {
+  if (mode === 'chat' || mode === 'transcriptions') return mode
+  return autoModeForModel(model)
+}

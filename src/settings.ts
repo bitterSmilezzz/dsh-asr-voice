@@ -13,14 +13,16 @@ export const ASR_VOICE_SETTINGS_NAMESPACE: SettingsNamespace = settingsNamespace
 
 /** 云端 ASR 配置。 */
 export const CloudSchema = z.object({
-  /** 预置 id（openai | groq | siliconflow | dashscope | custom）。 */
+  /** 预置 id（openai | groq | siliconflow | mimo | dashscope | custom）。 */
   preset: z.string().default('openai'),
   /** OpenAI-compatible base URL（预置自动填充，可改）。 */
   baseUrl: z.string().default(''),
-  /** 服务端保存的 API key（浏览器不可读）。 */
+  /** 服务端保存的 API key（浏览器不可读；留空时 mimO 端点可复用 DSH 凭据 MIMO_API_KEY）。 */
   apiKey: z.string().default(''),
   /** ASR 模型（预置自动填充，可改）。 */
   model: z.string().default(''),
+  /** 调用通道：auto（按模型名判定）/ transcriptions（whisper 式 /audio/transcriptions）/ chat（chat.completions input_audio，MiMo/Qwen-ASR）。 */
+  mode: z.string().default('auto'),
 })
 
 /** LLM 提示词优化目标（DSH 已配置模型的 provider/model；空 = 用当前所选 LLM）。 */
@@ -58,7 +60,7 @@ export type AsrVoiceSettings = Schemastery.TypeT<typeof AsrVoiceSettingsSchema>
 
 /** 设置默认值（与 schema default 一致；client 侧也用同一份，避免双源漂移）。 */
 export const DEFAULT_SETTINGS: AsrVoiceSettings = {
-  asr: { provider: 'auto', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '' } },
+  asr: { provider: 'auto', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '', mode: 'auto' } },
   optimize: { mode: 'llm', llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
