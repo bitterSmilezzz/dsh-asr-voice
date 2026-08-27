@@ -167,7 +167,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           return
         }
         showError(code)
-      })
+      }, config.behavior.silenceStop)
     } catch {
       if (engine === 'browser' && config.asr.provider === 'auto' && isCloudConfigured(config.asr.cloud)) {
         setNotice(t('fallbackToCloud'))

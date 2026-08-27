@@ -7,7 +7,8 @@
  *   - cloud：getUserMedia + MediaRecorder 采集音频，停止后把原始字节 POST 到
  *     host /api/asr-voice/transcribe，由服务端转发云端 ASR（key 不进浏览器）。
  *
- * 两者都带：静音自动停止（可配）、最长录音上限、interim 文本回调、状态回调。
+ * 两者都带：最长录音上限、interim 文本回调、状态回调；cloud 引擎可选静音自动停止
+ * （默认关 = 手动关麦，点停止整段去 ASR，见 behavior.silenceStop）。
  */
 
 /** 录音最长时长（毫秒）。 */
@@ -233,7 +234,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
 }
 
 /** 云端引擎：MediaRecorder 采集 → host 代理转写。 */
-function createCloudRecorder(language: string, onError: (msg: string) => void): VoiceRecorder {
+function createCloudRecorder(language: string, onError: (msg: string) => void, silenceStop: boolean): VoiceRecorder {
   const recorder: VoiceRecorder = { onInterim: null, onState: null, onLevel: null, start: () => {}, stop: () => Promise.resolve(''), abort: () => {} }
   let stream: MediaStream | null = null
   let mediaRecorder: MediaRecorder | null = null
@@ -348,7 +349,8 @@ function createCloudRecorder(language: string, onError: (msg: string) => void): 
     })
     mediaRecorder.start(250)
     recorder.onState?.('recording')
-    startSilenceDetection()
+    // 静音自动停止：仅在配置开启时启用（默认关 = 手动关麦，点停止才整段去 ASR）。
+    if (silenceStop) startSilenceDetection()
     maxTimer = setTimeout(() => { void recorder.stop().catch(() => {}) }, MAX_RECORD_MS)
   }
 
@@ -470,12 +472,14 @@ async function transcribeViaHost(blob: Blob, language: string): Promise<string> 
  * @param engine - browser | cloud。
  * @param language - auto / zh-CN / en-US 等。
  * @param onError - 错误回调（错误码字符串）。
+ * @param silenceStop - 云端引擎是否启用静音自动停止（默认关 = 手动关麦）。
  */
 export function createVoiceRecorder(
   engine: 'browser' | 'cloud',
   language: string,
   onError: (code: string) => void,
+  silenceStop = false,
 ): VoiceRecorder {
-  if (engine === 'cloud') return createCloudRecorder(language, onError)
+  if (engine === 'cloud') return createCloudRecorder(language, onError, silenceStop)
   return createBrowserRecorder(language, onError)
 }

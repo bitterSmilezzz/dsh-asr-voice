@@ -280,6 +280,9 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   const setAutoSend = (v: boolean): void => {
     setConfig('behavior', () => { config.behavior.autoSend = v })
   }
+  const setSilenceStop = (v: boolean): void => {
+    setConfig('behavior', () => { config.behavior.silenceStop = v })
+  }
   const setHoldToTalk = (v: boolean): void => {
     setConfig('behavior', () => { config.behavior.holdToTalk = v })
   }
@@ -399,6 +402,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
       <div className="dshav-group">
         <span className="dshav-groupTitle">{t('groupBehavior')}</span>
         <ToggleRow title={t('autoSendLabel')} desc={t('autoSendDesc')} checked={config.behavior.autoSend} onChange={() => setAutoSend(!config.behavior.autoSend)} />
+        <ToggleRow title={t('silenceStopLabel')} desc={t('silenceStopDesc')} checked={config.behavior.silenceStop} onChange={() => setSilenceStop(!config.behavior.silenceStop)} />
         <ToggleRow title={t('holdToTalkLabel')} desc={t('holdToTalkDesc')} checked={config.behavior.holdToTalk} onChange={() => setHoldToTalk(!config.behavior.holdToTalk)} />
         <Field
           title={t('hotkeyLabel')}

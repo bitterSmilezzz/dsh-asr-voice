@@ -51,6 +51,8 @@ export const AsrVoiceSettingsSchema = z.object({
   behavior: z.object({
     /** 识别优化完成后是否自动发送（默认关，防误发）。 */
     autoSend: z.boolean().default(false),
+    /** 静音自动停止（默认关 = 只有手动点击/快捷键结束录音）。 */
+    silenceStop: z.boolean().default(false),
     /** 按住说话模式（可选）。 */
     holdToTalk: z.boolean().default(false),
     /** 快捷键（默认 Ctrl+Shift+Space，可改；'' 表示关闭）。 */
@@ -65,5 +67,5 @@ export const DEFAULT_SETTINGS: AsrVoiceSettings = {
   asr: { provider: 'auto', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '', mode: 'auto' } },
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
-  behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
+  behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
 }

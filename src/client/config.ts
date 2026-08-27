@@ -34,6 +34,8 @@ export interface AsrVoiceConfig {
   language: string
   behavior: {
     autoSend: boolean
+    /** 静音自动停止（默认关 = 手动结束录音）。 */
+    silenceStop: boolean
     holdToTalk: boolean
     hotkey: string
   }
@@ -44,7 +46,7 @@ export const DEFAULTS: AsrVoiceConfig = {
   asr: { provider: 'auto', cloud: { preset: 'openai', baseUrl: '', apiKey: '', model: '', mode: 'auto' } },
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
-  behavior: { autoSend: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
+  behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space' },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与 setConfig 共同维护。 */

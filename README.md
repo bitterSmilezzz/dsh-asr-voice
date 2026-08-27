@@ -11,7 +11,7 @@ DeepSeek Harness（DSH）语音输入插件：**说话 → 识别 → 提示词�
 
 ## 功能
 
-- 输入框工具行**麦克风按钮**（`conversation.input.right`）：点击开始/结束，静音自动停止，可选按住说话
+- 输入框工具行**麦克风按钮**（`conversation.input.right`）：点击开始/结束（默认手动关麦，点停止即整段去识别；可选静音自动停止），可选按住说话
 - 默认快捷键 **Ctrl+Shift+Space**（可配置，支持 macOS 的 Cmd 兼容）
 - 识别后**提示词优化**：默认用当前所选 LLM 重写——**停止录音立即把清洗版填入草稿，LLM 优化在后台完成后自动替换**（不覆盖你的编辑）；可选「优化结果先预览确认」（`optimize.preview: true`）或本地启发式（清洗语气词/补标点/分段，即时填入）
 - 识别后**填入草稿**待确认；可选「识别后自动发送」（push-to-talk 风格）
@@ -40,6 +40,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 优化 | `optimize.llm.provider` / `.model` | 空 | 可选：从 **DSH 已配置模型列表**指定；留空则用当前所选 LLM。自定义须先到 DSH 模型列表添加 |
 | 语言 | `language` | `auto` | `auto` / `zh-CN` / `en-US` |
 | 行为 | `behavior.autoSend` | `false` | 识别后自动发送 |
+| 行为 | `behavior.silenceStop` | `false` | 静音自动停止（默认关 = 手动点击/快捷键结束录音，点停止即整段去识别） |
 | 行为 | `behavior.holdToTalk` | `false` | 按住快捷键说话、松开结束 |
 | 行为 | `behavior.hotkey` | `Ctrl+Shift+Space` | 快捷键（空 = 关闭） |
 

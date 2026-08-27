@@ -40,6 +40,8 @@ export type LocaleKey =
   | 'groupBehavior'
   | 'autoSendLabel'
   | 'autoSendDesc'
+  | 'silenceStopLabel'
+  | 'silenceStopDesc'
   | 'holdToTalkLabel'
   | 'holdToTalkDesc'
   | 'hotkeyLabel'
@@ -111,8 +113,10 @@ export const zh: LocaleDict = {
   groupBehavior: '交互行为',
   autoSendLabel: '识别后自动发送',
   autoSendDesc: '开启后说完即发（push-to-talk 风格），关闭则填入草稿待确认。',
+  silenceStopLabel: '静音自动停止',
+  silenceStopDesc: '关闭（默认）：只有手动点击/快捷键结束录音，点停止即整段去识别；开启：静音持续 2.5 秒自动结束。',
   holdToTalkLabel: '按住说话',
-  holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击开始/点击或静音自动结束。',
+  holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击开始、再点结束（静音自动结束由「静音自动停止」开关决定）。',
   hotkeyLabel: '快捷键',
   hotkeyDesc: '点击后按新组合键（如 Ctrl+Shift+Space）；留空关闭。',
   hotkeyPlaceholder: '点击录制快捷键',
@@ -177,8 +181,10 @@ export const en: LocaleDict = {
   groupBehavior: 'Behavior',
   autoSendLabel: 'Auto-send after recognition',
   autoSendDesc: 'When on, the prompt is submitted right after recognition (push-to-talk style). When off, it fills the draft for confirmation.',
+  silenceStopLabel: 'Auto-stop on silence',
+  silenceStopDesc: 'Off (default): recording ends only when you stop it manually — everything you said goes to recognition at once. On: ends automatically after 2.5s of silence.',
   holdToTalkLabel: 'Hold to talk',
-  holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off, click to start and click again (or silence) to stop.',
+  holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off, click to start and click again to stop (silence auto-stop is controlled by its own toggle).',
   hotkeyLabel: 'Hotkey',
   hotkeyDesc: 'Click, then press a new combo (e.g. Ctrl+Shift+Space). Clear to disable.',
   hotkeyPlaceholder: 'Click to record hotkey',
