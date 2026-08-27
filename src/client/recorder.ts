@@ -61,20 +61,16 @@ export function isWebSpeechSupported(): boolean {
   return typeof window !== 'undefined' && 'webkitSpeechRecognition' in window
 }
 
-/** 麦克风采集约束：显式关闭 Chrome 音频处理三件套。
- * 某些 macOS 设备/驱动组合下，回声消除/降噪/自动增益会把输入整体清零
- * （系统输入正常、MediaRecorder 却录到纯数字静音），关闭后走原始输入。 */
-const MIC_CONSTRAINTS: MediaTrackConstraints = {
-  echoCancellation: false,
-  noiseSuppression: false,
-  autoGainControl: false,
-}
+// 麦克风采集：用浏览器默认约束（AEC/降噪/自动增益交给 Chromium 处理）。
+// 注意：显式关闭 echoCancellation/noiseSuppression/autoGainControl 在部分 macOS
+// 设备上会直接采到纯静音（AEC 兼做时钟/重采样适配），故不在此处改约束；
+// 设备级静音由「静音守卫」（基于转换后 WAV 的真实峰值）兜底识别。
 
 /** 麦克风是否可用（权限 + 设备）。 */
 export async function hasMicrophone(): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return false
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS })
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     for (const track of stream.getTracks()) track.stop()
     return true
   } catch {
@@ -266,11 +262,10 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
 
   /**
    * 实时音量电平（驱动频谱条）。始终启用（能直观看出麦克风是否采到声）；
-   * 仅当 silenceStop 开启时附带静音自动停止逻辑。同时记录峰值电平，
-   * 供 onstop 的「静音守卫」判断整段录音是否静音（采到静音就别发 ASR）。
+   * 仅当 silenceStop 开启时附带静音自动停止逻辑。
+   * 注意：静音判定不依赖此处（Web Audio 双消费/挂起会误读），改由 onstop 里
+   * 基于「转换后 WAV 的真实峰值」判定，此处只做实时反馈。
    */
-  let peakLevel = 0
-  let levelMeterActive = false
   const startLevelMeter = (withSilenceStop: boolean): void => {
     try {
       const audioCtx = new AudioContext()
@@ -280,7 +275,6 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       source.connect(analyser)
       const data = new Uint8Array(analyser.fftSize)
       let silentSince: number | null = null
-      levelMeterActive = true
       const loop = (): void => {
         if (!active) { void audioCtx.close().catch(() => {}) ; return }
         analyser.getByteTimeDomainData(data)
@@ -290,7 +284,6 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
           sum += v * v
         }
         const rms = Math.sqrt(sum / data.length)
-        if (rms > peakLevel) peakLevel = rms
         // 实时音量（0~1，放大到可视范围）
         recorder.onLevel?.(Math.min(1, rms * 4))
         if (withSilenceStop) {
@@ -308,7 +301,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       }
       requestAnimationFrame(loop)
     } catch {
-      // 音频分析不可用：频谱静默（静音守卫随之失效，录音仍正常）
+      // 音频分析不可用：频谱静默，录音仍正常
     }
   }
 
@@ -329,7 +322,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
     }
     let s: MediaStream
     try {
-      s = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS })
+      s = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch {
       onError('mic-denied')
       return
@@ -355,13 +348,31 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
         const blob = new Blob(chunks, { type })
         recorder.onState?.('transcribing')
         try {
-          // 静音守卫：电平表可用且整段峰值趋近零 → 麦克风没采到声，
-          // 不浪费一次上游 ASR（避免对静音幻觉出 "yeah"/"no text"），直接报错带设备信息。
-          if (levelMeterActive && peakLevel < 0.01) {
+          // MiMo/Qwen-ASR 等 chat 通道只收 wav/mp3，whisper 式也兼容 wav →
+          // 统一把浏览器录音（webm/m4a/ogg）解码重编码成 16kHz 单声道 WAV 再上传。
+          let audio = blob
+          let wavPeak = -1 // -1 = 转换失败，无法判定
+          try {
+            const r = await blobToWav16k(blob)
+            audio = r.wav
+            wavPeak = r.peak
+          } catch {
+            // 解码失败：退回原始 blob，让上游报错（避免转换本身卡死录音）。
+          }
+          // 静音守卫（ground truth）：转换后的 WAV 真实峰值趋零 → MediaRecorder 确实没录到声，
+          // 不发 ASR（避免对静音幻觉出 "yeah"/"no text"）；原始录音也抓一份供诊断对比。
+          if (wavPeak >= 0 && wavPeak < 0.005) {
+            if (blob.size > 0) {
+              void fetch('/api/asr-voice/transcribe?capture=1', {
+                method: 'POST',
+                headers: { 'content-type': blob.type || 'audio/webm' },
+                body: blob,
+              }).catch(() => {})
+            }
             active = false
             for (const t of stream!.getTracks()) t.stop()
             const label = currentInputLabel()
-            // 附上 Chrome 可见的全部输入设备 + 浏览器标识，一眼看出是否选错/非主流内核。
+            // 附上浏览器可见的全部输入设备 + 内核标识，一眼看出是否选错/非主流内核。
             let devices = ''
             try {
               const list = await navigator.mediaDevices.enumerateDevices()
@@ -376,14 +387,6 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
             const extra = [label, devices, `浏览器:${br}`].filter(Boolean).join(' | ')
             reject(new Error(extra === '' ? 'no-sound' : `no-sound:${extra}`))
             return
-          }
-          // MiMo/Qwen-ASR 等 chat 通道只收 wav/mp3，whisper 式也兼容 wav →
-          // 统一把浏览器录音（webm/m4a/ogg）解码重编码成 16kHz 单声道 WAV 再上传。
-          let audio = blob
-          try {
-            audio = await blobToWav16k(blob)
-          } catch {
-            // 解码失败：退回原始 blob，让上游报错（避免转换本身卡死录音）。
           }
           const text = await transcribeViaHost(audio, language)
           // 异常短结果（疑似静音/听错）：把转换前的原始录音也抓一份到 host，
@@ -443,8 +446,9 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
  * 把浏览器录音 blob（webm/m4a/ogg…）解码重编码成 16kHz 单声道 16-bit PCM WAV。
  * MiMo-V2.5-ASR 只接受 wav/mp3（实测 webm/m4a 报 Param Incorrect）；whisper 式
  * 通道也兼容 wav，故统一走 WAV。纯浏览器 Web Audio API，无外部依赖。
+ * 返回转换结果 + 归一化前的原始峰值（供静音守卫做 ground-truth 判定）。
  */
-async function blobToWav16k(blob: Blob): Promise<Blob> {
+async function blobToWav16k(blob: Blob): Promise<{ wav: Blob; peak: number }> {
   const windowLike = window as unknown as {
     AudioContext?: typeof AudioContext
     webkitAudioContext?: typeof AudioContext
@@ -506,7 +510,7 @@ async function blobToWav16k(blob: Blob): Promise<Blob> {
       const s = Math.max(-1, Math.min(1, out[i]!))
       view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
     }
-    return new Blob([wav], { type: 'audio/wav' })
+    return { wav: new Blob([wav], { type: 'audio/wav' }), peak }
   } finally {
     void ctx.close().catch(() => {})
   }
