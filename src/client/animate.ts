@@ -80,7 +80,7 @@ function currentNumeric(target: HTMLElement, key: string): number {
 }
 
 /** 把数值属性应用到元素样式（变换缩写合并为 transform）。 */
-function applyNumeric(target: HTMLElement, props: NumProps, progress: number, end: NumProps): void {
+function applyNumeric(target: HTMLElement, props: NumProps, progress: number, end: NumProps, baseMatrix?: DOMMatrixReadOnly): void {
   const transformParts: string[] = []
   for (const [key, start] of Object.entries(props)) {
     const value = start + ((end[key] ?? start) - start) * progress
@@ -97,12 +97,22 @@ function applyNumeric(target: HTMLElement, props: NumProps, progress: number, en
     }
   }
   if (transformParts.length > 0) {
-    const existing = new DOMMatrixReadOnly(getComputedStyle(target).transform)
-    const hasTranslate = transformParts.some((p) => p.startsWith('translate'))
-    if (!hasTranslate && (existing.m41 !== 0 || existing.m42 !== 0)) {
-      transformParts.unshift(`translate(${existing.m41}px, ${existing.m42}px)`)
+    // 只做一次基础位移保留（动画启动时缓存），避免每帧 getComputedStyle。
+    if (baseMatrix !== undefined && (baseMatrix.m41 !== 0 || baseMatrix.m42 !== 0)) {
+      transformParts.unshift(`translate(${baseMatrix.m41}px, ${baseMatrix.m42}px)`)
     }
     target.style.transform = transformParts.join(' ')
+  }
+}
+
+/** 读取元素当前基础 transform 位移（补间开始时一次；无 translate 返回 undefined 跳过保留）。 */
+function baseTranslateOf(target: HTMLElement): DOMMatrixReadOnly | undefined {
+  const cs = getComputedStyle(target)
+  try {
+    const m = new DOMMatrixReadOnly(cs.transform)
+    return m.m41 !== 0 || m.m42 !== 0 ? m : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -134,6 +144,11 @@ export function tween(
   for (const [key, value] of Object.entries(to)) {
     if (typeof value === 'number') endProps[key] = value
   }
+  // 是否有 transform 缩写属性参与 → 需要保留基础位移时只读一次（补间期间
+  // transform 由本补间独占写入，读取一次即可复用，避免每帧 getComputedStyle）。
+  const hasTransform = Object.keys(startProps).some((k) =>
+    k === 'x' || k === 'y' || k === 'scale' || k === 'scaleX' || k === 'scaleY' || k === 'rotate')
+  const baseMatrix = hasTransform ? baseTranslateOf(target) : undefined
 
   let startTime: number | null = null
   let cycles = 0
@@ -154,7 +169,7 @@ export function tween(
     const local = (now - startTime) / (duration * 1000)
     const t = Math.min(1, Math.max(0, local))
     const eased = ease(t)
-    applyNumeric(target, startProps, eased, endProps)
+    applyNumeric(target, startProps, eased, endProps, baseMatrix)
     progressVal = t
     onUpdate?.({ progress: t })
     const done = t >= 1

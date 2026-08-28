@@ -101,6 +101,9 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const wrapRef = react.useRef<HTMLSpanElement | null>(null)
   const hintRef = react.useRef<HTMLSpanElement | null>(null)
   const spectrumRef = react.useRef<HTMLSpanElement | null>(null)
+  // 频谱电平上次写入值：rAF 每帧都会回调，只在变化超过阈值时写 CSS 变量，
+  // 避免无谓的样式传播（波动是连续的，0.01 步进视觉无差）。
+  const levelRef = react.useRef(-1)
   const recorderRef = react.useRef<VoiceRecorder | null>(null)
   const optimizeControllerRef = react.useRef<AbortController | null>(null)
   const stateRef = react.useRef<VoiceState>('idle')
@@ -213,11 +216,17 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       return
     }
     recorderRef.current = recorder
+    levelRef.current = -1
     recorder.onInterim = (text) => setInterim(text)
     recorder.onState = (s) => { if (s === 'transcribing') setPhase('transcribing') }
     recorder.onLevel = (rms) => {
-      // 频谱条：CSS 变量驱动柱高（避免每帧 React 渲染）
-      if (spectrumRef.current) spectrumRef.current.style.setProperty('--level', rms.toFixed(3))
+      // 频谱条：CSS 变量驱动柱高（避免每帧 React 渲染）。只在与上次写入
+      // 差 ≥0.01 时更新（rAF 每帧回调，连续波动微小变化不触发样式传播）。
+      const was = levelRef.current
+      if (spectrumRef.current && Math.abs(rms - was) >= 0.01) {
+        levelRef.current = rms
+        spectrumRef.current.style.setProperty('--level', rms.toFixed(2))
+      }
     }
     // 结果统一经 onDone/onFail 送达（手动 / 静音自动停止 / 超时自动停止三条路径收敛），
     // 由 handleTranscribed 消费文本、showTranscribeError 消费错误。

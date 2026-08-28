@@ -256,6 +256,37 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   return recorder
 }
 
+/** 分析用 AudioContext（电平表）：懒创建、跨录音复用——AudioContext 创建开销大
+ * 且系统资源有限，反复 new/close 会抖动；录音开始接新流、结束断流即可。 */
+let meterCtx: AudioContext | null = null
+function getMeterCtx(): AudioContext | null {
+  if (meterCtx !== null) return meterCtx
+  try {
+    const windowLike = window as unknown as {
+      AudioContext?: typeof AudioContext
+      webkitAudioContext?: typeof AudioContext
+    }
+    const AudioCtor = windowLike.AudioContext ?? windowLike.webkitAudioContext
+    meterCtx = AudioCtor ? new AudioCtor() : null
+    return meterCtx
+  } catch {
+    return null
+  }
+}
+
+/** 模块级：电平表当前 source 与 rAF 句柄，供录音结束断流/停帧。 */
+let meterSources: MediaStreamAudioSourceNode[] = []
+let meterRaf: { cancel(): void } | null = null
+/** 录音结束后停止电平表（断流 + 停帧；AudioContext 保留复用）。 */
+function stopLevelMeter(): void {
+  meterRaf?.cancel()
+  meterRaf = null
+  for (const src of meterSources) {
+    try { src.disconnect() } catch { /* noop */ }
+  }
+  meterSources = []
+}
+
 /** 云端引擎：MediaRecorder 采集 → host 代理转写。 */
 function createCloudRecorder(language: string, onError: (msg: string) => void, silenceStop: boolean): VoiceRecorder {
   const recorder: VoiceRecorder = {
@@ -292,15 +323,23 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
    */
   const startLevelMeter = (withSilenceStop: boolean): void => {
     try {
-      const audioCtx = new AudioContext()
-      const source = audioCtx.createMediaStreamSource(stream!)
+      const audioCtx = getMeterCtx()
+      if (audioCtx === null || stream === null) return
+      // 复用上下文时先断开旧的 source（避免叠流）。
+      for (const src of meterSources) {
+        try { src.disconnect() } catch { /* noop */ }
+      }
+      meterSources = []
+      const source = audioCtx.createMediaStreamSource(stream)
       const analyser = audioCtx.createAnalyser()
       analyser.fftSize = 1024
       source.connect(analyser)
+      meterSources.push(source)
       const data = new Uint8Array(analyser.fftSize)
       let silentSince: number | null = null
+      let raf = 0
       const loop = (): void => {
-        if (!active) { void audioCtx.close().catch(() => {}) ; return }
+        if (!active) { raf = 0; return }
         analyser.getByteTimeDomainData(data)
         let sum = 0
         for (let i = 0; i < data.length; i++) {
@@ -314,8 +353,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
           if (rms < SILENCE_RMS) {
             if (silentSince === null) silentSince = performance.now()
             else if (performance.now() - silentSince > SILENCE_MS) {
-              // 先关掉分析用的 AudioContext 再触停（复用 !active 分支不会执行了）。
-              void audioCtx.close().catch(() => {})
+              raf = 0
               void recorder.stop().catch(() => {})
               return
             }
@@ -323,9 +361,11 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
             silentSince = null
           }
         }
-        requestAnimationFrame(loop)
+        raf = requestAnimationFrame(loop)
       }
-      requestAnimationFrame(loop)
+      raf = requestAnimationFrame(loop)
+      // 供录音结束路径取消 rAF（避免 stop 后仍跑一帧空转）。
+      meterRaf = { cancel: () => { if (raf) cancelAnimationFrame(raf); raf = 0 } }
     } catch {
       // 音频分析不可用：频谱静默，录音仍正常
     }
@@ -377,6 +417,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
     }
     stopPromise = new Promise<string>((resolve, reject) => {
       mediaRecorder!.onstop = async () => {
+        stopLevelMeter()
         if (cancelled) { active = false; for (const t of stream!.getTracks()) t.stop(); return }
         const type = mediaRecorder?.mimeType?.split(';')[0]?.trim() || 'audio/webm'
         const blob = new Blob(chunks, { type })
@@ -453,6 +494,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
         }
       }
       mediaRecorder!.onerror = () => {
+        stopLevelMeter()
         active = false
         // 录音错误也要释放麦克风流，否则轨道保持活跃（麦克风常亮、占用输入设备）。
         if (stream) for (const t of stream.getTracks()) t.stop()
@@ -480,6 +522,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
     // 打断：置取消标志 + 中止在途转写请求，onstop 流程各检查点会放弃送达结果。
     cancelled = true
     active = false
+    stopLevelMeter()
     if (maxTimer) clearTimeout(maxTimer)
     transcribeController?.abort()
     transcribeController = null

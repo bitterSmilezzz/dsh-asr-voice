@@ -20,6 +20,9 @@ interface AgentDefaultModelLike {
   currentSelection(): { provider: string; model: string; reasoningEffort?: string }
 }
 
+/** LLM 优化流超时（ms）：模型卡住/过慢时不把宿主流挂死。 */
+const LLM_STREAM_TIMEOUT_MS = 60_000
+
 /** 提示词优化 system prompt（中英双语指令，要求保留语义、去掉口语、结构化）。 */
 const OPTIMIZE_SYSTEM = [
   '你是语音输入的提示词优化器。',
@@ -93,6 +96,8 @@ async function optimizeWithLlm(ctx: Context, text: string, target?: OptimizeTarg
       }),
     ],
     temperature: 0.2,
+    // 模型卡住/过慢时不把宿主流挂死（客户端 60s 超时后 host 应停止等待）。
+    signal: AbortSignal.timeout(LLM_STREAM_TIMEOUT_MS),
   };
   let output = '';
   let failed = false;

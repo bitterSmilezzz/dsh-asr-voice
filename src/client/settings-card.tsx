@@ -17,6 +17,11 @@ export interface SettingsCardProps {
   t: LocaleT
 }
 
+/** 模块级模型目录缓存（同会话 60s 内复用，避免重复拉取 /api/asr-voice/models）。 */
+let modelsCache: DshProviderEntry[] | null = null
+let modelsCacheAt = 0
+const MODELS_CACHE_TTL_MS = 60_000
+
 /** 订阅配置变更，驱动重渲染。 */
 function useConfigVersion(): number {
   const [v, bump] = react.useReducer((x: number) => x + 1, 0)
@@ -169,12 +174,20 @@ function ModelPicker({ t, provider, model, onProvider, onModel }: {
 }): react.ReactElement {
   const [providers, setProviders] = react.useState<DshProviderEntry[] | null>(null)
   const [status, setStatus] = react.useState<'loading' | 'ok' | 'err'>('loading')
+  // 模块级缓存：模型目录同一会话内不频繁变化，卡片重复挂载/刷新时避免重复拉取。
   const load = react.useCallback(async () => {
+    if (modelsCache !== null && Date.now() - modelsCacheAt < MODELS_CACHE_TTL_MS) {
+      setProviders(modelsCache)
+      setStatus('ok')
+      return
+    }
     setStatus('loading')
     try {
       const res = await fetch('/api/asr-voice/models', { cache: 'no-store' })
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; providers?: DshProviderEntry[]; reason?: string }
       if (!res.ok || data.ok !== true || data.providers === undefined) throw new Error(data.reason || 'load failed')
+      modelsCache = data.providers
+      modelsCacheAt = Date.now()
       setProviders(data.providers)
       setStatus('ok')
     } catch {

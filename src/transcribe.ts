@@ -26,6 +26,9 @@ import { join } from 'node:path';
 import { CHAT_COMPLETIONS_PATH, MAX_AUDIO_BYTES, TRANSCRIBE_PATH, resolveAsrMode } from './presets.ts';
 import { isTrusted, readRawBody, sendJson } from './http.ts';
 
+/** 上游 ASR 请求超时（ms）：上游不可达/卡死时不无限挂起请求。 */
+const UPSTREAM_TIMEOUT_MS = 60_000
+
 /** 云端 ASR 配置面（来自 settings scope 解析出的当前生效供应商）。 */
 export interface CloudAsrConfig {
   /** 供应商 id（用于统计；旧单配置为 'legacy'）。 */
@@ -124,6 +127,8 @@ async function upstreamTranscribeMultipart(cfg: CloudAsrConfig, audio: Buffer, m
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
+    // 上游卡死时及时失败（客户端 60s 超时后 host 不应继续占着请求）。
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
   const data = (await res.json().catch(() => ({}))) as { text?: unknown; error?: unknown; message?: unknown };
   if (!res.ok) {
@@ -152,6 +157,7 @@ async function upstreamTranscribeChat(cfg: CloudAsrConfig, audio: Buffer, mime: 
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
   const data = (await res.json().catch(() => ({}))) as {
     choices?: { message?: { content?: unknown } }[]

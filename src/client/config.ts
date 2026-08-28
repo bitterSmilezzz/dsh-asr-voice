@@ -98,7 +98,9 @@ let voiceScope: SettingsScopeLike<AsrVoiceConfig> | undefined
 
 /** 广播配置变更（设置卡片/录音按钮监听，驱动重渲染）。 */
 export function announce(): void {
-  window.dispatchEvent(new CustomEvent('dsh-asr-voice:config', { detail: config }))
+  // detail 传浅拷贝：消费方绝不拿到全局真相的可变引用（防意外污染 config）。
+  const detail = { ...config }
+  window.dispatchEvent(new CustomEvent('dsh-asr-voice:config', { detail }))
   for (const fn of listeners) fn()
 }
 
