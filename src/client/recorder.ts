@@ -590,10 +590,8 @@ async function blobToWav16k(blob: Blob): Promise<{ wav: Blob; peak: number }> {
       if (a > peak) peak = a
     }
     const gain = peak > 0.0001 ? Math.min(4, 0.9 / peak) : 1
-    if (gain !== 1) {
-      for (let i = 0; i < outLen; i++) out[i] = out[i]! * gain
-    }
-    // 16-bit PCM WAV
+    // 16-bit PCM WAV（增益在写入时一并应用，省去独立增益遍历——长录音
+    // outLen 可达数十万采样，减一遍循环在解码后是真实的 CPU 收益）。
     const dataLen = outLen * 2
     const wav = new ArrayBuffer(44 + dataLen)
     const view = new DataView(wav)
@@ -609,7 +607,7 @@ async function blobToWav16k(blob: Blob): Promise<{ wav: Blob; peak: number }> {
     view.setUint16(34, 16, true)
     writeStr(36, 'data'); view.setUint32(40, dataLen, true)
     for (let i = 0; i < outLen; i++) {
-      const s = Math.max(-1, Math.min(1, out[i]!))
+      const s = Math.max(-1, Math.min(1, out[i]! * gain))
       view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
     }
 return { wav: new Blob([wav], { type: 'audio/wav' }), peak }
