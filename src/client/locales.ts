@@ -39,6 +39,8 @@ export type LocaleKey =
   | 'optimizePreviewLabel'
   | 'optimizePreviewDesc'
   | 'optimizingHint'
+  | 'transcribingHint'
+  | 'cancelBusy'
   | 'optimizeFailedKeep'
   | 'llmDefaultHint'
   | 'llmProviderLabel'
@@ -137,6 +139,8 @@ export const zh: LocaleDict = {
   optimizePreviewLabel: '优化结果先预览确认',
   optimizePreviewDesc: '关闭（默认）：停止录音立即把清洗版文本填入草稿，LLM 优化在后台完成后自动替换（不覆盖你的编辑）；开启：等优化完成弹出预览卡，确认后再填入。',
   optimizingHint: '优化中…草稿已填入，可直接编辑或发送',
+  transcribingHint: '识别中…',
+  cancelBusy: '取消（丢掉本次语音）',
   optimizeFailedKeep: '优化失败，已保留草稿中的清洗版文本',
   llmDefaultHint: '默认使用当前所选 LLM；可在此指定 DSH 已配置的模型。',
   llmProviderLabel: '模型提供方',
@@ -169,8 +173,8 @@ holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击
   loadFailed: '加载失败',
   micTitle: '语音输入',
   recordingTitle: '录音中…点击结束',
-  transcribingTitle: '识别中…',
-  optimizingTitle: '优化中…',
+  transcribingTitle: '识别中…点击取消',
+  optimizingTitle: '优化中…点击取消',
   errNoMic: '未检测到麦克风',
   errNoSound: '未检测到声音：录音为静音，未发送识别。请检查麦克风权限、系统输入音量，并在浏览器地址栏站点设置/授权弹窗中把输入设备选为「内置麦克风」（虚拟音频设备常被误选导致静音）',
   errNoSpeechSupport: '当前浏览器不支持 Web Speech，请改用云端 ASR（Chrome/Edge 均支持）。',
@@ -230,6 +234,8 @@ export const en: LocaleDict = {
   optimizePreviewLabel: 'Preview optimized text before inserting',
   optimizePreviewDesc: 'Off (default): the cleaned text fills the draft immediately after recording; the background LLM rewrite replaces it when done (never overrides your edits). On: wait for the rewrite, confirm in a preview card.',
   optimizingHint: 'Optimizing… draft is ready — edit or send now',
+  transcribingHint: 'Transcribing…',
+  cancelBusy: 'Cancel (discard this utterance)',
   optimizeFailedKeep: 'Optimization failed; the cleaned draft was kept',
   llmDefaultHint: 'Uses the current model by default; pick a configured DSH model below.',
   llmProviderLabel: 'Provider',
@@ -262,8 +268,8 @@ holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off,
   loadFailed: 'Load failed',
   micTitle: 'Voice input',
   recordingTitle: 'Recording… click to stop',
-  transcribingTitle: 'Transcribing…',
-  optimizingTitle: 'Optimizing…',
+  transcribingTitle: 'Transcribing… click to cancel',
+  optimizingTitle: 'Optimizing… click to cancel',
   errNoMic: 'No microphone detected',
   errNoSound: 'No sound detected: the recording was silent and was not sent. Check the mic permission, system input volume, and pick the built-in microphone as the input device in the browser site settings / permission prompt (virtual audio devices are often selected by mistake and record silence)',
   errNoSpeechSupport: 'Web Speech is not supported by this browser; switch to cloud ASR (Chrome/Edge support it).',

@@ -116,13 +116,18 @@ export interface OptimizeTarget {
 const OPTIMIZE_TIMEOUT_MS = 60_000
 
 /** 调用 host /api/asr-voice/optimize（用 DSH 已配置模型重写）。 */
-export async function llmOptimize(text: string, target?: OptimizeTarget): Promise<string> {
+export async function llmOptimize(text: string, target?: OptimizeTarget, externalSignal?: AbortSignal): Promise<string> {
   const body: { text: string; provider?: string; model?: string } = { text }
   if (target !== undefined && target.provider !== '' && target.model !== '') {
     body.provider = target.provider
     body.model = target.model
   }
   const controller = new AbortController()
+  const onExternalAbort = (): void => controller.abort()
+  if (externalSignal !== undefined) {
+    if (externalSignal.aborted) controller.abort()
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+  }
   const timer = setTimeout(() => controller.abort(), OPTIMIZE_TIMEOUT_MS)
   try {
     const res = await fetch('/api/asr-voice/optimize', {
@@ -143,6 +148,7 @@ export async function llmOptimize(text: string, target?: OptimizeTarget): Promis
     throw error
   } finally {
     clearTimeout(timer)
+    externalSignal?.removeEventListener('abort', onExternalAbort)
   }
 }
 

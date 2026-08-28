@@ -42,6 +42,11 @@ function applyHotkey(): () => void {
     e.preventDefault()
     e.stopPropagation()
     if (config.behavior.holdToTalk) {
+      // busy（识别/优化中）：按一次 = 打断，不进入 held（避免松键误触发新录音）。
+      if (voiceController.isBusy()) {
+        voiceController.toggle()
+        return
+      }
       if (!held && !voiceController.isRecording()) {
         held = true
         voiceController.toggle()

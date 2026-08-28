@@ -49,12 +49,14 @@ const SPECTRUM_BARS = 12
 export const voiceController = {
   toggle: (): void => { current?.toggle() },
   isRecording: (): boolean => current?.isRecording() ?? false,
-  mount(instance: { toggle(): void; isRecording(): boolean }): () => void {
+  /** 是否处于 busy（录音 / 识别 / 优化）——快捷键据此区分"打断"与"开始"。 */
+  isBusy: (): boolean => current?.isBusy() ?? false,
+  mount(instance: { toggle(): void; isRecording(): boolean; isBusy(): boolean }): () => void {
     current = instance
     return () => { if (current === instance) current = undefined }
   },
 }
-let current: { toggle(): void; isRecording(): boolean } | undefined
+let current: { toggle(): void; isRecording(): boolean; isBusy(): boolean } | undefined
 
 /** 麦克风图标。 */
 function MicIcon(): react.ReactElement {
@@ -100,8 +102,11 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const hintRef = react.useRef<HTMLSpanElement | null>(null)
   const spectrumRef = react.useRef<HTMLSpanElement | null>(null)
   const recorderRef = react.useRef<VoiceRecorder | null>(null)
+  const optimizeControllerRef = react.useRef<AbortController | null>(null)
   const stateRef = react.useRef<VoiceState>('idle')
   stateRef.current = state
+  // 打断标志：cancel() 置位后，迟到的 onDone/onFail/优化结果一律丢弃。
+  const cancelledRef = react.useRef(false)
   // 草稿最新值（props 异步回写）与本次填入的值——后台优化替换时防覆盖用户编辑。
   const draftRef = react.useRef<string>('')
   const insertedRef = react.useRef<string | null>(null)
@@ -125,9 +130,10 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   // 挂载/卸载：注册到全局控制器（快捷键驱动当前实例）。
   const instance = react.useMemo(() => ({
     toggle: () => {
-      if (stateRef.current === 'idle') { void begin() } else if (stateRef.current === 'recording') { void finish() }
+      if (stateRef.current === 'idle') { void begin() } else if (stateRef.current === 'recording') { void finish() } else { cancel() }
     },
     isRecording: () => stateRef.current === 'recording',
+    isBusy: () => stateRef.current !== 'idle',
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [])
   react.useEffect(() => voiceController.mount(instance), [instance])
@@ -210,6 +216,10 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       // 频谱条：CSS 变量驱动柱高（避免每帧 React 渲染）
       if (spectrumRef.current) spectrumRef.current.style.setProperty('--level', rms.toFixed(3))
     }
+    // 结果统一经 onDone/onFail 送达（手动 / 静音自动停止 / 超时自动停止三条路径收敛），
+    // 由 handleTranscribed 消费文本、showTranscribeError 消费错误。
+    recorder.onDone = (text) => handleTranscribed(text)
+    recorder.onFail = (error) => showTranscribeError(error)
     setPhase('recording')
     startWave()
     recorder.start()
@@ -220,6 +230,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setNotice(null)
     setInterim('')
     setOptimizingDraft(false)
+    cancelledRef.current = false
+    optimizeControllerRef.current = new AbortController()
     const engine = resolveEngine()
     if (engine === 'cloud' && !cloudConfigured()) {
       showError('cloud-not-configured')
@@ -232,6 +244,65 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     startWithEngine(engine)
   }
 
+  /** 转写错误统一入口（onFail）：取消后到达的错误一律丢弃。 */
+  const showTranscribeError = (error: unknown): void => {
+    if (cancelledRef.current) return
+    recorderRef.current = null
+    showError('transcribe', String(error instanceof Error ? error.message : error))
+  }
+
+  /**
+   * 转写完成统一入口（onDone）：默认快速路径（preview=false）——ASR 文本返回后
+   * 立即把清洗版填入草稿，LLM 优化在后台跑；preview / autoSend 走等优化路径。
+   */
+  const handleTranscribed = (text: string): void => {
+    if (cancelledRef.current) return
+    recorderRef.current = null
+    const cleaned = text.trim()
+    if (cleaned === '') { setPhase('idle'); return }
+
+    const mode = config.optimize.mode
+    if (mode === 'llm') {
+      // 文本本来就干净（无语气词/标点问题）→ 跳过 LLM 优化，直接走填入/发送流程。
+      const clean = heuristicOptimize(cleaned)
+      // autoSend 保持原流程（说完即发，用优化后文本）；preview = 预览卡确认。
+      if (config.behavior.autoSend || config.optimize.preview) {
+        if (clean === cleaned) {
+          finalize(cleaned)
+          return
+        }
+        setPhase('optimizing')
+        void llmOptimize(cleaned, {
+          provider: config.optimize.llm.provider,
+          model: config.optimize.llm.model,
+        }, optimizeControllerRef.current?.signal)
+          .then((optimized) => {
+            if (cancelledRef.current) return
+            if (config.optimize.preview) {
+              setPreview({ original: cleaned, optimized })
+              setPhase('idle')
+            } else {
+              finalize(optimized)
+            }
+          })
+          .catch((error: unknown) => {
+            if (cancelledRef.current) return
+            showError('optimize', String(error instanceof Error ? error.message : error))
+          })
+        return
+      }
+      // 快速路径（默认）：立即填入清洗版，优化后台替换。
+      const fast = clean || cleaned
+      insertedRef.current = fast
+      finalize(fast)
+      setOptimizingDraft(true)
+      setPhase('optimizing')
+      void runBackgroundOptimize(cleaned)
+      return
+    }
+    finalize(heuristicOptimize(cleaned))
+  }
+
   /**
    * 快速路径（preview=false 默认）：ASR 文本返回后立即把清洗版填入草稿，
    * LLM 优化在后台跑，完成后仅在用户未编辑草稿时替换。
@@ -242,13 +313,15 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         provider: config.optimize.llm.provider,
         model: config.optimize.llm.model,
       }
-      const optimized = await llmOptimize(raw, target)
+      const optimized = await llmOptimize(raw, target, optimizeControllerRef.current?.signal)
       // 防覆盖：仅当草稿仍是我们填入的文本时才替换（用户已编辑则保留编辑）。
+      if (cancelledRef.current) return
       if (draftRef.current === insertedRef.current && inputActions !== undefined) {
         inputActions.setDraft(optimized)
       }
     } catch {
       // 后台优化失败不打断用户：草稿已可用，仅轻提示（6s 后自动消散，可点 × 关闭）。
+      if (cancelledRef.current) return
       setNotice(t('optimizeFailedKeep'))
     } finally {
       insertedRef.current = null
@@ -257,60 +330,33 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     }
   }
 
-  const finish = async (): Promise<void> => {
+  /** 手动停止：结束录音并进入识别（结果经 onDone 送达）。 */
+  const finish = (): void => {
     const recorder = recorderRef.current
     if (!recorder) { setPhase('idle'); return }
     stopWave()
     setNotice(null)
     setPhase('transcribing')
-    let text = ''
-    try {
-      text = (await recorder.stop()).trim()
-    } catch (error) {
-      showError('transcribe', String(error instanceof Error ? error.message : error))
-      return
-    }
-    recorderRef.current = null
-    if (text === '') { setPhase('idle'); return }
+    void recorder.stop().catch(() => { /* 错误经 onFail 送达 */ })
+  }
 
-    const mode = config.optimize.mode
-    if (mode === 'llm') {
-      // 文本本来就干净（无语气词/标点问题）→ 跳过 LLM 优化，直接走填入/发送流程。
-      const clean = heuristicOptimize(text)
-      // autoSend 保持原流程（说完即发，用优化后文本）；preview = 预览卡确认。
-      if (config.behavior.autoSend || config.optimize.preview) {
-        if (clean === text) {
-          finalize(text)
-          return
-        }
-        setPhase('optimizing')
-        try {
-          const target = {
-            provider: config.optimize.llm.provider,
-            model: config.optimize.llm.model,
-          }
-          const optimized = await llmOptimize(text, target)
-          if (config.optimize.preview) {
-            setPreview({ original: text, optimized })
-            setPhase('idle')
-          } else {
-            finalize(optimized)
-          }
-        } catch (error) {
-          showError('optimize', String(error instanceof Error ? error.message : error))
-        }
-        return
-      }
-      // 快速路径（默认）：立即填入清洗版，优化后台替换。
-      const fast = clean || text
-      insertedRef.current = fast
-      finalize(fast)
-      setOptimizingDraft(true)
-      setPhase('optimizing')
-      void runBackgroundOptimize(text)
-      return
-    }
-    finalize(heuristicOptimize(text))
+  /** 打断：中止录音 / 转写 / 优化，丢弃一切迟到结果，回到 idle。 */
+  const cancel = (): void => {
+    if (cancelledRef.current && stateRef.current === 'idle') return
+    cancelledRef.current = true
+    const recorder = recorderRef.current
+    recorderRef.current = null
+    optimizeControllerRef.current?.abort()
+    optimizeControllerRef.current = null
+    if (recorder) recorder.abort()
+    stopWave()
+    setInterim('')
+    insertedRef.current = null
+    setOptimizingDraft(false)
+    setPreview(null)
+    setNotice(null)
+    setError(null)
+    setPhase('idle')
   }
 
   /** 把最终文本填入草稿（完整替换 / 末尾追加）+ 可选剪贴板。 */
@@ -397,7 +443,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           aria-label={title}
           aria-pressed={state === 'recording'}
           disabled={disabled}
-          onClick={() => { if (state === 'idle') { void begin() } else if (state === 'recording') { void finish() } }}
+          onClick={() => { if (state === 'idle') { void begin() } else if (state === 'recording') { void finish() } else { cancel() } }}
         >
           {state === 'recording' ? <RecDot /> : <MicIcon />}
           <span className="dshav-wave" aria-hidden="true">
@@ -425,12 +471,16 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             {state === 'recording' ? <span className="dshav-dot" /> : <Spinner />}
             {state === 'recording' && interim !== '' ? <span className="dshav-hint-text">{interim}</span> : null}
             {state === 'optimizing' && optimizingDraft ? <span className="dshav-hint-text">{t('optimizingHint')}</span> : null}
+            {state === 'transcribing' ? <span className="dshav-hint-text">{t('transcribingHint')}</span> : null}
             {state === 'recording' && (
               <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
                 {Array.from({ length: SPECTRUM_BARS }, (_, i) => (
                   <span key={i} className="dshav-bar" style={{ '--bar': String(0.35 + (i / (SPECTRUM_BARS - 1)) * 0.65) } as react.CSSProperties} />
                 ))}
               </span>
+            )}
+            {state !== 'recording' && (
+              <button type="button" className="dshav-hint-dismiss" aria-label={t('cancelBusy')} title={t('cancelBusy')} onClick={cancel}>×</button>
             )}
           </span>
         )}

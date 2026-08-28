@@ -87,6 +87,13 @@ export interface VoiceRecorder {
   onState: ((state: RecordState) => void) | null
   /** 实时音量回调（0~1 RMS；cloud 为真实音量，browser 为模拟能量）。 */
   onLevel: ((rms: number) => void) | null
+  /**
+   * 转写完成回调：无论 stop 由谁触发（手动点击 / 静音自动停止 / 超时自动停止），
+   * 结果文本统一经此送达 UI；被 abort（打断）则不触发。
+   */
+  onDone: ((text: string) => void) | null
+  /** 转写失败回调（网络/上游/静音守卫等；被 abort 不触发）。 */
+  onFail: ((error: unknown) => void) | null
 }
 
 /** 语言参数：auto → 返回 undefined（交给浏览器/服务端默认）。 */
@@ -111,6 +118,8 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   let finalText = ''
   let interim = ''
   let stopped = false
+  let cancelled = false
+  let delivered = false
   let endResolve: ((text: string) => void) | null = null
   let maxTimer: ReturnType<typeof setTimeout> | null = null
   let levelRaf = 0
@@ -118,7 +127,14 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   let levelPhase = Math.random() * Math.PI * 2
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recorder: VoiceRecorder = { onInterim: null, onState: null, onLevel: null } as any
+  const recorder: VoiceRecorder = { onInterim: null, onState: null, onLevel: null, onDone: null, onFail: null } as any
+
+  /** 一次性送达结果：settle 与 stop() 双入口都可能命中，用 delivered 防重复。 */
+  const deliver = (text: string): void => {
+    if (delivered || cancelled) return
+    delivered = true
+    recorder.onDone?.(text)
+  }
 
   /** 浏览器引擎无音频流，用平滑的模拟能量驱动频谱（装饰性，视觉近似语音起伏）。 */
   const startLevelSim = (): void => {
@@ -149,9 +165,13 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
     stopped = true
     stopLevelSim()
     if (maxTimer) clearTimeout(maxTimer)
-    if (endResolve) {
-      endResolve(finalText.trim())
+    // 被 abort（打断）时不送结果；正常结束时经 onDone 把文本送回 UI，
+    // 让「手动停止 / 自动停止」两条路径都能收敛到同一处消费。
+    if (!cancelled && endResolve) {
+      const text = finalText.trim()
+      endResolve(text)
       endResolve = null
+      deliver(text)
     }
   }
 
@@ -209,7 +229,9 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
 
   recorder.stop = () => {
     if (stopped) {
-      return Promise.resolve(finalText.trim())
+      const text = finalText.trim()
+      deliver(text)
+      return Promise.resolve(text)
     }
     return new Promise<string>((resolve) => {
       endResolve = (text) => resolve(text)
@@ -222,6 +244,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   }
 
   recorder.abort = () => {
+    cancelled = true
     try {
       recognition.abort()
     } catch {
@@ -235,13 +258,19 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
 
 /** 云端引擎：MediaRecorder 采集 → host 代理转写。 */
 function createCloudRecorder(language: string, onError: (msg: string) => void, silenceStop: boolean): VoiceRecorder {
-  const recorder: VoiceRecorder = { onInterim: null, onState: null, onLevel: null, start: () => {}, stop: () => Promise.resolve(''), abort: () => {} }
+  const recorder: VoiceRecorder = {
+    onInterim: null, onState: null, onLevel: null, onDone: null, onFail: null,
+    start: () => {}, stop: () => Promise.resolve(''), abort: () => {},
+  }
   let stream: MediaStream | null = null
   let mediaRecorder: MediaRecorder | null = null
   let chunks: Blob[] = []
   let maxTimer: ReturnType<typeof setTimeout> | null = null
   let stopPromise: Promise<string> | null = null
   let active = false
+  let cancelled = false
+  /** 当前转写请求的 AbortController：abort() 时可取消在途的 host 请求。 */
+  let transcribeController: AbortController | null = null
 
   const pickMime = (): string => {
     // webm/opus 优先：Chrome 对 MediaRecorder 产出的 mp4(AAC) 解码不稳定（decodeAudioData
@@ -339,6 +368,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
     }
     stopPromise = new Promise<string>((resolve, reject) => {
       mediaRecorder!.onstop = async () => {
+        if (cancelled) { active = false; for (const t of stream!.getTracks()) t.stop(); return }
         const type = mediaRecorder?.mimeType?.split(';')[0]?.trim() || 'audio/webm'
         const blob = new Blob(chunks, { type })
         recorder.onState?.('transcribing')
@@ -349,6 +379,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
           let wavPeak = -1 // -1 = 转换失败，无法判定
           try {
             const r = await blobToWav16k(blob)
+            if (cancelled) { active = false; for (const t of stream!.getTracks()) t.stop(); return }
             audio = r.wav
             wavPeak = r.peak
           } catch {
@@ -380,10 +411,16 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
             const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
             const br = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : '未知内核'
             const extra = [label, devices, `浏览器:${br}`].filter(Boolean).join(' | ')
-            reject(new Error(extra === '' ? 'no-sound' : `no-sound:${extra}`))
+            const err = new Error(extra === '' ? 'no-sound' : `no-sound:${extra}`)
+            recorder.onFail?.(err)
+            reject(err)
             return
           }
-          const text = await transcribeViaHost(audio, language)
+          const controller = new AbortController()
+          transcribeController = controller
+          const text = await transcribeViaHost(audio, language, controller.signal)
+          transcribeController = null
+          if (cancelled) { active = false; for (const t of stream!.getTracks()) t.stop(); return }
           // 异常短结果（疑似静音/听错）：把转换前的原始录音也抓一份到 host，
           // 与转换后的 WAV（host 侧 ≤8 字规则已存）对比定位是采集还是转码问题。
           if (text.trim().length <= 8 && blob.size > 0) {
@@ -395,11 +432,15 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
           }
           active = false
           for (const t of stream!.getTracks()) t.stop()
+          recorder.onDone?.(text)
           resolve(text)
         } catch (error) {
           active = false
           for (const t of stream!.getTracks()) t.stop()
-          reject(error instanceof Error ? error : new Error(String(error)))
+          if (cancelled) return
+          const err = error instanceof Error ? error : new Error(String(error))
+          recorder.onFail?.(err)
+          reject(err)
         }
       }
       mediaRecorder!.onerror = () => {
@@ -425,8 +466,12 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
   }
 
   recorder.abort = () => {
+    // 打断：置取消标志 + 中止在途转写请求，onstop 流程各检查点会放弃送达结果。
+    cancelled = true
     active = false
     if (maxTimer) clearTimeout(maxTimer)
+    transcribeController?.abort()
+    transcribeController = null
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try { mediaRecorder.stop() } catch { /* noop */ }
     }
@@ -529,10 +574,15 @@ return { wav: new Blob([wav], { type: 'audio/wav' }), peak }
 }
 
 /** 上传音频到 host 转写代理（带超时，防上游卡死钉住 UI）。 */
-async function transcribeViaHost(blob: Blob, language: string): Promise<string> {
+async function transcribeViaHost(blob: Blob, language: string, externalSignal?: AbortSignal): Promise<string> {
   const lang = resolveLang(language)
   const query = lang ? `?language=${encodeURIComponent(lang)}` : ''
   const controller = new AbortController()
+  const onExternalAbort = (): void => controller.abort()
+  if (externalSignal !== undefined) {
+    if (externalSignal.aborted) controller.abort()
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+  }
   const timer = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS)
   try {
     const res = await fetch(`/api/asr-voice/transcribe${query}`, {
@@ -553,6 +603,7 @@ async function transcribeViaHost(blob: Blob, language: string): Promise<string> 
     throw error
   } finally {
     clearTimeout(timer)
+    externalSignal?.removeEventListener('abort', onExternalAbort)
   }
 }
 
