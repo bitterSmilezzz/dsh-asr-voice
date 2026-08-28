@@ -102,6 +102,8 @@ export const CSS = `
   border: 2px solid var(--dshav-danger);
   opacity: 0;
   box-shadow: 0 0 12px 0 color-mix(in srgb, var(--dshav-danger) 45%, transparent);
+  /* 录音中持续缩放动画：提升为合成层，避免每帧重绘（transform 走 GPU）。 */
+  will-change: transform, opacity;
 }
 .dshav-wave-ring[data-ring='1'] { inset: -2px; }
 .dshav-wave-ring[data-ring='2'] { inset: -6px; }

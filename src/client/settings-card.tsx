@@ -354,8 +354,12 @@ function UsageStats({ t }: { t: LocaleT }): react.ReactElement {
       } catch { /* ignore */ }
     }
     void load()
-    const timer = window.setInterval(() => { void load() }, 5000)
-    return () => { live = false; window.clearInterval(timer) }
+    // 只在页面可见时轮询：标签页切走/隐藏后暂停，回来立即补一次。
+    const tick = (): void => { if (!document.hidden) void load() }
+    const timer = window.setInterval(tick, 5000)
+    const onVisible = (): void => { if (!document.hidden) void load() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { live = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
   if (stats === null) return <p className="dshav-field-hint">{t('statsEmpty')}</p>
   const lastAt = stats.lastAt ? new Date(stats.lastAt).toLocaleTimeString() : null
