@@ -83,7 +83,11 @@ function Spinner(): react.ReactElement {
  */
 export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const { inputActions, t } = props
-  const disabled = !inputActions || props.session?.blank === true
+  // 只有拿不到标准 kit 的 inputActions（无可用会话/惰性输入栏）才禁用。
+  // 注意：不按 session.blank 禁用——新版 DSH 里空白会话（hero 新对话）的输入栏
+  // 完全可用（可打字/发送首条消息），语音输入应同样可用；实测 blank 时点麦克风
+  // 无任何响应（disabled 吞掉点击），玩家以为是坏按钮。
+  const disabled = !inputActions
   const [state, setState] = react.useState<VoiceState>('idle')
   const [error, setError] = react.useState<string | null>(null)
   const [notice, setNotice] = react.useState<string | null>(null)
