@@ -7,7 +7,7 @@
  * 独立性契约：入口 id / locale namespace / CSS data 标签 / 路由全部唯一，
  * 只依赖官方 @deepseek-ai/* 服务，不 import 任何第三方插件。
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the settings slot merges (settings.general.item / settings.plugins.tab).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: pulls the ui-settings-plugins SlotMap merge (the settings.plugin.item card seat).
