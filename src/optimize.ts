@@ -99,12 +99,14 @@ async function optimizeWithLlm(ctx: Context, text: string, target?: OptimizeTarg
     // 模型卡住/过慢时不把宿主流挂死（客户端 60s 超时后 host 应停止等待）。
     signal: AbortSignal.timeout(LLM_STREAM_TIMEOUT_MS),
   };
-  let output = '';
+  // 流式文本累积用数组 + join（避免长响应对每 chunk 反复拼接字符串）。
+  const parts: string[] = [];
   let failed = false;
   for await (const chunk of ctx.llm.stream(options)) {
-    if (chunk.type === 'text-delta') output += chunk.text;
+    if (chunk.type === 'text-delta') parts.push(chunk.text);
     if (chunk.type === 'finish' && chunk.reason !== undefined && chunk.reason.kind === 'error') failed = true;
   }
+  const output = parts.join('');
   if (failed || output.trim() === '') {
     throw new Error('LLM optimize failed: model returned no text');
   }

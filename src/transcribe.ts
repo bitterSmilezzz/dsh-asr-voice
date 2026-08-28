@@ -170,10 +170,13 @@ async function upstreamTranscribeChat(cfg: CloudAsrConfig, audio: Buffer, mime: 
   // 兼容 content 为字符串或多模态数组（[{type:'text',text:'…'}]）两种形状。
   let content = data.choices?.[0]?.message?.content;
   if (Array.isArray(content)) {
-    content = content.map((p) => {
+    // 循环拼接替代 map+join：避免为最常见的单元素数组分配中间数组。
+    let acc = ''
+    for (const p of content) {
       const t = (p as { text?: unknown }).text
-      return typeof t === 'string' ? t : ''
-    }).join('')
+      if (typeof t === 'string') acc += t
+    }
+    content = acc
   }
   if (typeof content !== 'string' || content.trim() === '') {
     throw new Error(`upstream ASR returned no text (${audio.length}B ${mime})`);
