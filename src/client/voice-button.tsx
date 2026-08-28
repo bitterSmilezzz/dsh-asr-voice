@@ -80,6 +80,19 @@ function Spinner(): react.ReactElement {
 }
 
 /**
+ * 频谱条（12 根柱，CSS 变量 --bar 错落）：memo 化——interim 文本每次变化
+ * 重渲染 VoiceButton 时柱子的虚拟 DOM 不再重建（柱形是静态的，仅高度
+ * 由 CSS 变量 --level 在帧循环驱动）。
+ */
+const SpectrumBars = react.memo((): react.ReactElement => (
+  <react.Fragment>
+    {Array.from({ length: SPECTRUM_BARS }, (_, i) => (
+      <span key={i} className="dshav-bar" style={{ '--bar': String(0.35 + (i / (SPECTRUM_BARS - 1)) * 0.65) } as react.CSSProperties} />
+    ))}
+  </react.Fragment>
+))
+
+/**
  * 录音按钮 + 状态提示条 + 预览卡。
  * @param props - slot 注入的 owner share + 标准 kit + 翻译函数。
  */
@@ -495,9 +508,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             {state === 'transcribing' ? <span className="dshav-hint-text">{t('transcribingHint')}</span> : null}
             {state === 'recording' && (
               <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
-                {Array.from({ length: SPECTRUM_BARS }, (_, i) => (
-                  <span key={i} className="dshav-bar" style={{ '--bar': String(0.35 + (i / (SPECTRUM_BARS - 1)) * 0.65) } as react.CSSProperties} />
-                ))}
+                <SpectrumBars />
               </span>
             )}
             {state !== 'recording' && (
