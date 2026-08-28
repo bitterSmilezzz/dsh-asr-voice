@@ -20,7 +20,7 @@ import { CSS } from './styles.ts'
 import { bindConfigScope, config, subscribeConfig, type SettingsBinderLike } from './config.ts'
 import { VoiceSettingsCard } from './settings-card.tsx'
 import { VoiceButton, voiceController } from './voice-button.tsx'
-import { matchHotkey, parseHotkey } from './hotkey.ts'
+import { matchHotkey, parseHotkey, type HotkeySpec } from './hotkey.ts'
 
 export { zh, en }
 
@@ -35,8 +35,19 @@ export const inject = [
 /** 快捷键处理（按住说话 / 点击切换），随 fiber 生命周期注册。 */
 function applyHotkey(): () => void {
   let held = false
+  // -------- 快捷键规格缓存：keydown 是高频路径，只有 hotkey 字符串变化才重解析 --------
+  let cachedHotkey = ''
+  let cachedSpec: HotkeySpec | null = null
+  const hotkeySpec = (): HotkeySpec | null => {
+    const hk = config.behavior.hotkey
+    if (hk !== cachedHotkey) {
+      cachedHotkey = hk
+      cachedSpec = parseHotkey(hk)
+    }
+    return cachedSpec
+  }
   const onKeyDown = (e: KeyboardEvent): void => {
-    const spec = parseHotkey(config.behavior.hotkey)
+    const spec = hotkeySpec()
     if (spec === null) return
     if (!matchHotkey(e, spec)) return
     e.preventDefault()
@@ -57,7 +68,7 @@ function applyHotkey(): () => void {
   }
   const onKeyUp = (e: KeyboardEvent): void => {
     if (!held) return
-    const spec = parseHotkey(config.behavior.hotkey)
+    const spec = hotkeySpec()
     if (spec === null || !matchHotkey(e, spec)) return
     held = false
     if (config.behavior.holdToTalk) voiceController.toggle()
