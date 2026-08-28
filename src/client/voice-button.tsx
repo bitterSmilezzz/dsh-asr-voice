@@ -107,6 +107,9 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   stateRef.current = state
   // 打断标志：cancel() 置位后，迟到的 onDone/onFail/优化结果一律丢弃。
   const cancelledRef = react.useRef(false)
+  // 会话代际：begin() 递增，异步回调捕获自己的代际；cancel→立即 begin 时
+  // 旧 promise 的 finally 用代际差异识别并丢弃，避免改写新会话状态。
+  const generationRef = react.useRef(0)
   // 草稿最新值（props 异步回写）与本次填入的值——后台优化替换时防覆盖用户编辑。
   const draftRef = react.useRef<string>('')
   const insertedRef = react.useRef<string | null>(null)
@@ -231,6 +234,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setInterim('')
     setOptimizingDraft(false)
     cancelledRef.current = false
+    // 新会话代际：让旧异步回调（优化/迟到结果）用自己的代际差异识别并丢弃。
+    generationRef.current += 1
     optimizeControllerRef.current = new AbortController()
     const engine = resolveEngine()
     if (engine === 'cloud' && !cloudConfigured()) {
@@ -257,6 +262,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
    */
   const handleTranscribed = (text: string): void => {
     if (cancelledRef.current) return
+    const myGen = generationRef.current
     recorderRef.current = null
     const cleaned = text.trim()
     if (cleaned === '') { setPhase('idle'); return }
@@ -277,7 +283,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           model: config.optimize.llm.model,
         }, optimizeControllerRef.current?.signal)
           .then((optimized) => {
-            if (cancelledRef.current) return
+            if (cancelledRef.current || generationRef.current !== myGen) return
             if (config.optimize.preview) {
               setPreview({ original: cleaned, optimized })
               setPhase('idle')
@@ -286,7 +292,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             }
           })
           .catch((error: unknown) => {
-            if (cancelledRef.current) return
+            if (cancelledRef.current || generationRef.current !== myGen) return
             showError('optimize', String(error instanceof Error ? error.message : error))
           })
         return
@@ -308,6 +314,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
    * LLM 优化在后台跑，完成后仅在用户未编辑草稿时替换。
    */
   const runBackgroundOptimize = async (raw: string): Promise<void> => {
+    const myGen = generationRef.current
     try {
       const target = {
         provider: config.optimize.llm.provider,
@@ -315,7 +322,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       }
       const optimized = await llmOptimize(raw, target, optimizeControllerRef.current?.signal)
       // 防覆盖：仅当草稿仍是我们填入的文本时才替换（用户已编辑则保留编辑）。
-      if (cancelledRef.current) return
+      if (cancelledRef.current || generationRef.current !== myGen) return
       if (draftRef.current === insertedRef.current && inputActions !== undefined) {
         inputActions.setDraft(optimized)
       }
@@ -324,6 +331,10 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       if (cancelledRef.current) return
       setNotice(t('optimizeFailedKeep'))
     } finally {
+      // 打断（cancel）后旧 promise 的 finally 不得改写新会话状态：
+      // cancel → 立即 begin 时 cancelledRef 已重置，若直接 setPhase('idle')
+      // 会把新录音打回 idle。用会话代际标志（toast 由 begin 递增)区分。
+      if (cancelledRef.current || generationRef.current !== myGen) return
       insertedRef.current = null
       setOptimizingDraft(false)
       setPhase('idle')
@@ -421,10 +432,11 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     })
   }
 
-  // 卸载清理：停止录音 + 停止波纹。
+  // 卸载清理：停止录音 + 停止波纹 + 中止在途优化（防对已卸载会话 setDraft）。
   react.useEffect(() => () => {
     stopWave()
     recorderRef.current?.abort()
+    optimizeControllerRef.current?.abort()
   }, [])
 
   const busy = state !== 'idle'

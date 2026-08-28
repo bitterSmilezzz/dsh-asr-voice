@@ -314,6 +314,8 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
           if (rms < SILENCE_RMS) {
             if (silentSince === null) silentSince = performance.now()
             else if (performance.now() - silentSince > SILENCE_MS) {
+              // 先关掉分析用的 AudioContext 再触停（复用 !active 分支不会执行了）。
+              void audioCtx.close().catch(() => {})
               void recorder.stop().catch(() => {})
               return
             }
@@ -349,6 +351,13 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       s = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch {
       onError('mic-denied')
+      return
+    }
+    // 授权弹窗挂起期间用户可能已取消（abort）：复检，避免「幽灵录音」——
+    // 取消后恢复仍开始录音，且在其后新会话里把迟到的文本写入草稿。
+    if (cancelled) {
+      for (const t of s.getTracks()) t.stop()
+      active = false
       return
     }
     stream = s
@@ -445,6 +454,8 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       }
       mediaRecorder!.onerror = () => {
         active = false
+        // 录音错误也要释放麦克风流，否则轨道保持活跃（麦克风常亮、占用输入设备）。
+        if (stream) for (const t of stream.getTracks()) t.stop()
         reject(new Error('recorder-error'))
       }
     })
