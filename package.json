@@ -65,6 +65,14 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
+    "searchTerms": [
+      "语音输入",
+      "语音识别",
+      "ASR",
+      "听写",
+      "voice",
+      "speech"
+    ],
     "client": {
       "platform": "web",
       "inject": [
