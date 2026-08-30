@@ -1,6 +1,7 @@
 # deps
 node_modules/
-lib/
+# lib/ 必须入库：DSH 走 GitHub 固定源安装且契约禁止安装期构建脚本，
+# 不提交产物 = 装到空壳（见 dsh-plugins/AGENTS.md「固定源发布」）。
 *.tsbuildinfo
 *.tgz
 
