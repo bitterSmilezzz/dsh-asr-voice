@@ -37,27 +37,22 @@ echo "=== Node $(node -v) ==="
 
 # --- Locate a dependency root with tsc/tsdown + @deepseek-ai packages -----
 DEP_ROOT=""
-if [ -n "${DSH_CHECKOUT:-}" ] && [ -d "$DSH_CHECKOUT/packages" ]; then
+if [ -d "$ROOT/node_modules/.bin" ] && [ -d "$ROOT/node_modules/@deepseek-ai" ]; then
+  # Preferred: this plugin's own installed dependency tree (pnpm install).
+  DEP_ROOT="$ROOT"
+elif [ -n "${DSH_CHECKOUT:-}" ] && [ -d "$DSH_CHECKOUT/packages" ]; then
   DEP_ROOT="$DSH_CHECKOUT"
 elif [ -n "${DSH_HOME:-}" ] && [ -d "$DSH_HOME/source/current" ]; then
   DEP_ROOT="$DSH_HOME/source/current"
 elif [ -d "${HOME:-}/.dsh/source/current" ]; then
   DEP_ROOT="$HOME/.dsh/source/current"
-elif [ -d "$ROOT/../dsh-ui-tweaks/node_modules" ]; then
-  # BUILD-ONLY fallback (dev convenience in offline environments): reuse a
-  # sibling plugin's installed tsc/tsdown/@deepseek-ai packages. This is
-  # strictly a build-time dependency-resolution aid — the junction is
-  # gitignored and never shipped; the published package and its runtime
-  # import ONLY official @deepseek-ai peer dependencies, so the plugin stays
-  # fully independent of dsh-ui-tweaks (each plugin standalone + composable).
-  DEP_ROOT="$ROOT/../dsh-ui-tweaks"
 elif command -v dsh >/dev/null 2>&1; then
   DSH_BIN=$(readlink -f "$(command -v dsh)" 2>/dev/null || command -v dsh)
   DEP_ROOT=$(cd "$(dirname "$DSH_BIN")/../../.." 2>/dev/null && pwd)
 fi
 
 if [ -z "$DEP_ROOT" ] || [ ! -d "$DEP_ROOT/node_modules/.bin" ]; then
-  echo "build: cannot locate a dependency tree with tsc/tsdown (set DSH_CHECKOUT / DSH_HOME, or install a sibling plugin like dsh-ui-tweaks)" >&2
+  echo "build: cannot locate a dependency tree with tsc/tsdown (run pnpm install here, or set DSH_CHECKOUT / DSH_HOME)" >&2
   exit 1
 fi
 

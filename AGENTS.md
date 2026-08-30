@@ -32,5 +32,5 @@ AGENTS.md；任务结束前按伞仓库约定把经验落档到伞仓库 `doc/ex
 ## 本地开发纪律
 
 - 改完立即 `git add + commit`，不攒变更；稳定后 push。
-- 构建：`bash scripts/build.sh`（junction 链接依赖树 + tsc host + tsdown client）；
-  依赖树缺失时先安装一个兄弟插件（如 dsh-ui-tweaks）或设置 `DSH_CHECKOUT`。
+- 构建：`bash scripts/build.sh`（优先用本插件自己的 `node_modules`，否则回退 `DSH_CHECKOUT`
+  / `DSH_HOME` 源码树并 junction 链接）；依赖树缺失时先 `pnpm install`。
