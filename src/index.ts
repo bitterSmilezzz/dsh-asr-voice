@@ -92,7 +92,7 @@ export function apply(ctx: AsrVoiceHostContext): void {
   // 插件配置 namespace：设置统一存 host settings 服务（namespace `asr-voice`）。
   let settingsScope: { get(): AsrVoiceSettings } | undefined
   ctx.inject(['settings'], (sctx) => {
-    settingsScope = sctx.settings.register<AsrVoiceSettings>(ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema);
+    settingsScope = sctx.settings.register<typeof ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettings>(ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema);
   });
 
   const getCloudConfig = (): CloudAsrConfig => {

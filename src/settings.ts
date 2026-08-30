@@ -9,12 +9,10 @@
  * 兼容旧单配置：仍保留 preset/baseUrl/apiKey/model/mode 顶层字段，读取时若无
  * providers 则回退到旧单配置（向后兼容，写回优先新 shape）。
  */
-import { settingsNamespace } from '@deepseek-ai/dsh-settings';
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings';
 import z from '@deepseek-ai/schemastery';
 
 /** 插件配置页的 settings namespace：注册后出现在「设置 → 插件 → 配置」分派列表。 */
-export const ASR_VOICE_SETTINGS_NAMESPACE: SettingsNamespace = settingsNamespace('asr-voice')
+export const ASR_VOICE_SETTINGS_NAMESPACE = 'asr-voice'
 
 /** 单个云端 ASR 供应商配置。 */
 export const CloudProviderSchema = z.object({

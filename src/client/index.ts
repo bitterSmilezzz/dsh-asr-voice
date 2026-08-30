@@ -8,6 +8,8 @@
  * 只依赖官方 @deepseek-ai/* 服务，不 import 任何第三方插件。
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: pulls the ui-renderer Context merge (ctx.slots), moved here in dsh-settings alpha.2.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the settings slot merges (settings.general.item / settings.plugins.tab).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: pulls the ui-settings-plugins SlotMap merge (the settings.plugin.item card seat).
