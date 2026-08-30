@@ -11,8 +11,9 @@
 /** 常见中文语气词/口头禅（按词删除，保守集合）。 */
 const ZH_FILLERS = ['嗯嗯', '嗯', '呃呃', '呃', '啊那个', '那个那个', '那个', '这个这个', '这个', '就是说', '怎么说呢', '然后呢', '然后', '就是', '是吧', '对吧', '好不好', '明白了没']
 
-/** 常见英文语气词（整词删除，大小写不敏感）。 */
-const EN_FILLERS = ['um', 'uh', 'hmm', 'erm', 'you know', 'like', 'i mean', 'sort of', 'kind of', 'well']
+/** 常见英文语气词（整词删除，大小写不敏感）。不收 like/well 等实义词——
+ *  整词删除会把 "I like this"→"I this"、"as well as"→"as as" 这类正常句子削坏。 */
+const EN_FILLERS = ['um', 'uh', 'hmm', 'erm', 'you know', 'i mean']
 
 /** 规范化空白：折叠连续空白/换行，转为单个空格；保留段落间空行。 */
 function normalizeSpaces(text: string): string {

@@ -70,6 +70,7 @@ export type LocaleKey =
   | 'dismiss'
   | 'save'
   | 'saveFailed'
+  | 'configSaveFailed'
   | 'loadFailed'
   | 'micTitle'
   | 'recordingTitle'
@@ -170,6 +171,7 @@ holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击
   dismiss: '关闭',
   save: '保存',
   saveFailed: '保存失败',
+  configSaveFailed: '配置写回宿主失败——改动可能在重启后丢失，请检查宿主状态后重试',
   loadFailed: '加载失败',
   micTitle: '语音输入',
   recordingTitle: '录音中…点击结束',
@@ -265,6 +267,7 @@ holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off,
   dismiss: 'Dismiss',
   save: 'Save',
   saveFailed: 'Save failed',
+  configSaveFailed: 'Failed to persist config to host — changes may be lost on restart. Check host status and retry.',
   loadFailed: 'Load failed',
   micTitle: 'Voice input',
   recordingTitle: 'Recording… click to stop',

@@ -183,7 +183,8 @@ function ModelPicker({ t, provider, model, onProvider, onModel }: {
     }
     setStatus('loading')
     try {
-      const res = await fetch('/api/asr-voice/models', { cache: 'no-store' })
+      // 超时兜底：host /models 链路挂起时 UI 不能永久 loading（catch → err 提示）。
+      const res = await fetch('/api/asr-voice/models', { cache: 'no-store', signal: AbortSignal.timeout(30_000) })
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; providers?: DshProviderEntry[]; reason?: string }
       if (!res.ok || data.ok !== true || data.providers === undefined) throw new Error(data.reason || 'load failed')
       modelsCache = data.providers
@@ -248,7 +249,7 @@ function AsrModelFetch({ t, providerId, model, onModel }: {
     setStatus('loading')
     setErrMsg('')
     try {
-      const res = await fetch(`/api/asr-voice/asr-models?providerId=${encodeURIComponent(providerId)}`, { cache: 'no-store' })
+      const res = await fetch(`/api/asr-voice/asr-models?providerId=${encodeURIComponent(providerId)}`, { cache: 'no-store', signal: AbortSignal.timeout(30_000) })
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; models?: DshModelEntry[]; reason?: string }
       if (!res.ok || data.ok !== true || !Array.isArray(data.models)) throw new Error(data.reason || 'fetch failed')
       setModels(data.models)
@@ -348,7 +349,7 @@ function UsageStats({ t }: { t: LocaleT }): react.ReactElement {
     let live = true
     const load = async (): Promise<void> => {
       try {
-        const res = await fetch('/api/asr-voice/stats', { cache: 'no-store' })
+        const res = await fetch('/api/asr-voice/stats', { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; stats?: typeof stats }
         if (live && res.ok && data.ok === true && data.stats) setStats(data.stats)
       } catch { /* ignore */ }
@@ -395,6 +396,14 @@ function providerId(): string {
 export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement {
   useConfigVersion()
   const [open, setOpen] = react.useState(false)
+  // 配置写回失败提示：setConfig 静默失败（host 未就绪/写盘失败）时本地快照看似成功、
+  // 重启后回退旧值——监听全局 config-error 事件给出常驻提示，避免「key 悄悄丢了」。
+  const [saveErr, setSaveErr] = react.useState(false)
+  react.useEffect(() => {
+    const onError = (): void => setSaveErr(true)
+    window.addEventListener('dsh-asr-voice:config-error', onError)
+    return () => window.removeEventListener('dsh-asr-voice:config-error', onError)
+  }, [])
 
   // 旧单配置 → 多供应商一次迁移（providers 空且 legacy baseUrl 有值）。
   react.useEffect(() => {
@@ -501,6 +510,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
       </button>
       {open ? (
         <div className="dshav-body">
+          {saveErr ? <p className="dshav-field-hint" role="alert">{t('configSaveFailed')}</p> : null}
           <div className="dshav-group">
             <span className="dshav-groupTitle">{t('groupAsr')}</span>
             <SelectRow

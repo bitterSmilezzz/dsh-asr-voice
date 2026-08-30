@@ -53,19 +53,33 @@ export interface OptimizeTarget {
   model: string
 }
 
+/** 单个 provider 模型枚举的竞速超时：上游网络卡死不该拖死整个 /models 响应。 */
+const LIST_MODELS_TIMEOUT_MS = 20_000;
+
+/** 给 promise 套整体超时（listModels 是否支持 AbortSignal 不确定，用竞速兜底）。 */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`listModels timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 /**
  * 枚举 DSH 已配置模型（ctx.llm.listProviders + listModels）。
- * 枚举失败/不可用的 provider 给空模型列表（不阻断整体）。
+ * 枚举失败/不可用/超时的 provider 给空模型列表（不阻断整体）。
  */
 export async function enumerateModels(ctx: Context): Promise<DshProviderEntry[]> {
   const out: DshProviderEntry[] = [];
   for (const p of ctx.llm.listProviders()) {
     let models: DshModelEntry[] = [];
     try {
-      const listed = await ctx.llm.listModels(p.id);
+      const listed = await withTimeout(Promise.resolve(ctx.llm.listModels(p.id)), LIST_MODELS_TIMEOUT_MS);
       models = listed.map((m) => ({ id: m.id, name: m.name }));
     } catch {
-      // 该 provider 不可枚举：跳过模型（仍保留 provider 行，便于提示）。
+      // 该 provider 不可枚举（含超时）：跳过模型（仍保留 provider 行，便于提示）。
     }
     out.push({ provider: p.id, name: p.name, models });
   }

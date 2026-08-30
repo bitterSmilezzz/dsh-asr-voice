@@ -4,15 +4,23 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-/** 读取请求原始 body（Buffer），超限报错。 */
-export async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+/** 读取请求原始 body（Buffer），超限报错；读取停滞超过 timeoutMs 则销毁连接。 */
+export async function readRawBody(req: IncomingMessage, maxBytes: number, timeoutMs = 60_000): Promise<Buffer> {
   const parts: Buffer[] = [];
   let size = 0;
-  for await (const chunk of req) {
-    const buf = chunk as Buffer;
-    size += buf.length;
-    if (size > maxBytes) throw new Error(`request body exceeds ${maxBytes} bytes`);
-    parts.push(buf);
+  const timer = setTimeout(() => {
+    // 慢速/停滞上传不该长期占用 handler 与 socket；destroy 让 for-await 抛错走错误分支。
+    req.destroy(new Error(`request body read timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
+  try {
+    for await (const chunk of req) {
+      const buf = chunk as Buffer;
+      size += buf.length;
+      if (size > maxBytes) throw new Error(`request body exceeds ${maxBytes} bytes`);
+      parts.push(buf);
+    }
+  } finally {
+    clearTimeout(timer);
   }
   return Buffer.concat(parts);
 }
@@ -40,16 +48,36 @@ export function sendJson(res: ServerResponse, status: number, payload: unknown):
 }
 
 /**
- * 信任围栏：只接受本机回环 Host 或同源 Origin，防止任意网页 CSRF 借宿主
- * 代理调用云端（消耗用户的 API key / 额度）。与伞下其他插件一致。
+ * 信任围栏：只接受本机回环或同源请求，防止任意网页 CSRF 借宿主代理调用云端
+ * （消耗用户的 API key / 额度）。要点：
+ *  - sec-fetch-site === 'cross-site' 一票拒绝（浏览器注入、页面无法伪造）；
+ *  - Host 严格全等判定回环（127. 宽前缀会被 127.0.0.1.evil.com 之类 DNS rebinding 绕过）；
+ *  - Host 为回环也要求带 Origin 时同源——网页 fetch('http://localhost:…') 的 Host 恰是回环，
+ *    只查 Host 等于不设防；
+ *  - Origin/Host 解析失败（如字面量 Origin: null）一律不可信，不抛异常冒泡路由。
  */
 export function isTrusted(req: IncomingMessage): boolean {
-  const hostHeader = req.headers.host;
+  const site = req.headers['sec-fetch-site'];
+  if (typeof site === 'string' && site === 'cross-site') return false;
+  const stripBrackets = (h: string): string => (h.startsWith('[') && h.endsWith(']') ? h.slice(1, -1) : h);
+  const loopbackOf = (h: string): boolean =>
+    h === 'localhost' || h === '::1' || /^127\.\d+\.\d+\.\d+$/.test(h);
+  let hostName = '';
+  try {
+    hostName = stripBrackets(new URL(`http://${String(req.headers.host ?? 'invalid.invalid')}`).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+  const hostLoopback = loopbackOf(hostName);
   const originHeader = req.headers.origin;
-  const hostname = (String(hostHeader ?? '').replace(/^\[(.*)\]$/, '$1').split(':')[0] ?? '').toLowerCase();
-  const loopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname.startsWith('127.');
-  if (loopback) return true;
-  const originHost = originHeader === undefined ? '' : new URL(String(originHeader)).hostname.toLowerCase();
-  const originLoopback = originHost === 'localhost' || originHost === '127.0.0.1' || originHost === '::1' || originHost.startsWith('127.');
-  return originLoopback;
+  if (originHeader === undefined) return hostLoopback; // 无 Origin（curl/页面导航）：只信回环 Host
+  let originName = '';
+  try {
+    originName = stripBrackets(new URL(String(originHeader)).hostname.toLowerCase());
+  } catch {
+    return false; // Origin: null / 畸形 → 不可信
+  }
+  // 有 Origin：必须与 Host 同源。回环限制放开为「与 Host 一致」——LAN 同源访问
+  // （Origin 与 Host 都是局域网地址）同样可信，跨源网页无论如何都被拒。
+  return originName === hostName;
 }

@@ -147,13 +147,18 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   }
 
   // 挂载/卸载：注册到全局控制器（快捷键驱动当前实例）。
+  // instance 是 useMemo([]) 冻结产物，若直接捕获首帧 begin/finish/cancel，
+  // 其闭包里的 inputActions/props.input 也是首帧快照——会话就绪前挂载时，
+  // 快捷键路径 finalize 会拿不到 inputActions 静默丢字。经 ref 每渲染转发最新闭包。
+  const handlersRef = react.useRef<{ begin(): Promise<void>; finish(): void; cancel(): void }>({
+    begin: async () => {}, finish: () => {}, cancel: () => {},
+  })
   const instance = react.useMemo(() => ({
     toggle: () => {
-      if (stateRef.current === 'idle') { void begin() } else if (stateRef.current === 'recording') { void finish() } else { cancel() }
+      if (stateRef.current === 'idle') { void handlersRef.current.begin() } else if (stateRef.current === 'recording') { void handlersRef.current.finish() } else { handlersRef.current.cancel() }
     },
     isRecording: () => stateRef.current === 'recording',
     isBusy: () => stateRef.current !== 'idle',
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [])
   react.useEffect(() => voiceController.mount(instance), [instance])
 
@@ -201,8 +206,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   /** 启动指定引擎的录音（云端自动兜底：auto 模式下浏览器失败 → 云端重试一次）。 */
   const startWithEngine = (engine: 'browser' | 'cloud'): void => {
     let recorder: VoiceRecorder
+    // 本会话代际：recorder 级 cancelled 标志只防 abort，防不了「停止→立刻重开」
+    // 的会话替换——旧 recorder 的迟到回调（onDone/onFail/onState/onInterim）必须
+    // 用代际差异丢弃，否则会 null 掉新会话的 recorderRef 或污染新草稿。
+    const myGen = generationRef.current
+    const stale = (): boolean => cancelledRef.current || generationRef.current !== myGen
     try {
       recorder = createVoiceRecorder(engine, config.language, (code) => {
+        if (stale()) return
         if (code === 'no-speech') {
           // 无语音：当作正常结束，给一个轻提示（非错误）。
           setPhase('idle')
@@ -230,8 +241,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     }
     recorderRef.current = recorder
     levelRef.current = -1
-    recorder.onInterim = (text) => setInterim(text)
-    recorder.onState = (s) => { if (s === 'transcribing') setPhase('transcribing') }
+    recorder.onInterim = (text) => { if (!stale()) setInterim(text) }
+    recorder.onState = (s) => { if (s === 'transcribing' && !stale()) setPhase('transcribing') }
     recorder.onLevel = (rms) => {
       // 频谱条：CSS 变量驱动柱高（避免每帧 React 渲染）。只在与上次写入
       // 差 ≥0.01 时更新（rAF 每帧回调，连续波动微小变化不触发样式传播）。
@@ -243,8 +254,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     }
     // 结果统一经 onDone/onFail 送达（手动 / 静音自动停止 / 超时自动停止三条路径收敛），
     // 由 handleTranscribed 消费文本、showTranscribeError 消费错误。
-    recorder.onDone = (text) => handleTranscribed(text)
-    recorder.onFail = (error) => showTranscribeError(error)
+    recorder.onDone = (text) => { if (!stale()) handleTranscribed(text) }
+    recorder.onFail = (error) => { if (!stale()) showTranscribeError(error) }
     setPhase('recording')
     startWave()
     recorder.start()
@@ -255,6 +266,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setNotice(null)
     setInterim('')
     setOptimizingDraft(false)
+    // 上一段 preview 未确认就开新录音：旧预览确认会以旧文本覆盖新会话草稿，先清掉。
+    setPreview(null)
     cancelledRef.current = false
     // 新会话代际：让旧异步回调（优化/迟到结果）用自己的代际差异识别并丢弃。
     generationRef.current += 1
@@ -350,7 +363,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       }
     } catch {
       // 后台优化失败不打断用户：草稿已可用，仅轻提示（6s 后自动消散，可点 × 关闭）。
-      if (cancelledRef.current) return
+      // 取消→立刻重开时 cancelledRef 已重置，须连同会话代际一起判定，防旧会话假失败提示串台。
+      if (cancelledRef.current || generationRef.current !== myGen) return
       setNotice(t('optimizeFailedKeep'))
     } finally {
       // 打断（cancel）后旧 promise 的 finally 不得改写新会话状态：
@@ -397,7 +411,9 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     if (text === '') { setPhase('idle'); return }
     if (inputActions) {
       if (config.behavior.textMode === 'append') {
-        const existing = props.input?.draft ?? ''
+        // draftRef 是草稿的权威镜像（effect 同步 props 异步回写）；props.input?.draft
+        // 是本渲染帧快照，录音期间的编辑会读不到，append 会覆盖丢字。
+        const existing = draftRef.current
         const sep = existing !== '' && !/[ \n]$/.test(existing) ? ' ' : ''
         inputActions.setDraft(existing + sep + text)
       } else {
@@ -412,6 +428,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     }
     setPhase('idle')
   }
+  // 最新闭包转发的挂载点：所有 handler 定义完毕后更新，供冻结的 instance 调用。
+  handlersRef.current = { begin, finish, cancel }
 
   const onConfirm = (): void => {
     if (preview) finalize(preview.optimized)

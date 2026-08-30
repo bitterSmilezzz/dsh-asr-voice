@@ -300,6 +300,9 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
   let stopPromise: Promise<string> | null = null
   let active = false
   let cancelled = false
+  // 授权弹窗挂起（getUserMedia 未返回）期间收到 stop/abort：start 的 post-await
+  // 检查点据此放弃本次会话，避免「UI 已停、麦克风却恢复录音」的状态错位。
+  let stopRequested = false
   /** 当前转写请求的 AbortController：abort() 时可取消在途的 host 请求。 */
   let transcribeController: AbortController | null = null
 
@@ -393,11 +396,15 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       onError('mic-denied')
       return
     }
-    // 授权弹窗挂起期间用户可能已取消（abort）：复检，避免「幽灵录音」——
-    // 取消后恢复仍开始录音，且在其后新会话里把迟到的文本写入草稿。
-    if (cancelled) {
+    // 授权弹窗挂起期间用户可能已取消（abort）或已按停止（finish）：复检，避免
+    // 「幽灵录音」——取消后恢复仍开始录音，或 UI 已置 transcribing 却照常开录，
+    // 直到 120s 上限才自愈。stopRequested 分支经 onDone('') 把状态机干净收回 idle。
+    if (cancelled || stopRequested) {
+      stopRequested = false
       for (const t of s.getTracks()) t.stop()
       active = false
+      if (cancelled) return
+      recorder.onDone?.('')
       return
     }
     stream = s
@@ -496,9 +503,16 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       mediaRecorder!.onerror = () => {
         stopLevelMeter()
         active = false
+        if (maxTimer) { clearTimeout(maxTimer); maxTimer = null }
         // 录音错误也要释放麦克风流，否则轨道保持活跃（麦克风常亮、占用输入设备）。
         if (stream) for (const t of stream.getTracks()) t.stop()
-        reject(new Error('recorder-error'))
+        const err = new Error('recorder-error')
+        // 不经 stop() 直接触发的 MediaRecorder 错误也要送达 onFail，否则 voice-button
+        // 永久卡在 recording（后续 stop() 因 !active 只 resolve('')，无 onDone/onFail）。
+        if (!cancelled) recorder.onFail?.(err)
+        reject(err)
+        // onerror 可能在无 stop() 调用方时触发：标记 rejection 已消费，避免 unhandledrejection。
+        stopPromise?.catch(() => {})
       }
     })
     mediaRecorder.start(250)
@@ -509,7 +523,11 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
   }
 
   recorder.stop = () => {
-    if (!active || !mediaRecorder || !stopPromise) return Promise.resolve('')
+    if (!active || !mediaRecorder || !stopPromise) {
+      // 录音尚未真正开始（授权弹窗挂起）：置标志让 start 的 post-await 检查放弃本次会话。
+      stopRequested = true
+      return Promise.resolve('')
+    }
     active = false
     if (maxTimer) clearTimeout(maxTimer)
     if (mediaRecorder.state !== 'inactive') {
@@ -521,6 +539,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
   recorder.abort = () => {
     // 打断：置取消标志 + 中止在途转写请求，onstop 流程各检查点会放弃送达结果。
     cancelled = true
+    stopRequested = true
     active = false
     stopLevelMeter()
     if (maxTimer) clearTimeout(maxTimer)
