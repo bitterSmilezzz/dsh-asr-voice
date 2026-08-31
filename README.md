@@ -23,9 +23,11 @@ voice input.*
 - **混合识别，进退自如 — Hybrid ASR, always a way out**
   浏览器 Web Speech 优先（免费、免 key、Chrome/Edge 双平台）；不可用或被网络屏蔽时
   **自动回落**到已配置的云端。云端支持**多供应商**：小米 MiMo / OpenAI / Groq / 硅基流动 /
-  通义 Qwen-ASR 可同存并蓄，设置页一键切换，并按需「获取模型」动态拉取最新 ASR 模型。
+  通义 Qwen-ASR 可同存并蓄。设置页是一张**三步向导**：选方式 → 点服务商 → 看密钥状态，
+  点「测试连接」即自检并把该端点真实可用的模型灌进模型下拉。
   *Web Speech first, with automatic fallback to your cloud ASR. Multiple providers (MiMo, OpenAI,
-  Groq, SiliconFlow, Qwen-ASR) can coexist — switch with one tap and fetch the latest models on demand.*
+  Groq, SiliconFlow, Qwen-ASR) can coexist. Settings is a three-step wizard: pick the engine,
+  click a provider, check the key — “Test connection” self-checks and lists real models.*
 
 - **优化润于无声 — Polished without interrupting**
   停止录音，约一秒即把清洗版填入草稿；LLM 优化在**后台**润色，完成自动替换，**不覆盖你的编辑**。
@@ -33,9 +35,12 @@ voice input.*
   background and replaces it only when done — your edits are never overwritten.*
 
 - **隐私自守 — Privacy by design**
-  API key 只居本机服务端，浏览器仅经 `/api/asr-voice/*` 私有 JSON 代理而行；录音在本地完成
-  格式转换后再上传。*API keys live on your machine only; the browser talks through a private
-  local proxy, and audio is converted locally before upload.*
+  API key 只落在 **DSH 凭据服务**（与 LLM 共用同一份凭据体系），既不进插件 settings、也不进
+  浏览器 DOM，设置页只显示「已配置 / 未配置」。录音在本地完成格式转换后再上传，浏览器仅经
+  `/api/asr-voice/*` 私有 JSON 代理而行。
+  *API keys live in the DSH credential store only — never in the plugin's settings document nor
+  the browser DOM (the UI shows “configured / not configured”, nothing more). Audio is converted
+  locally before upload, and the browser talks through a private local proxy.*
 
 - **处处顺手 — Thoughtful touches**
   结果一键复制剪贴板（默认开）、完整替换或末尾追加、快捷键与按住说话、用量统计一目了然。
@@ -51,7 +56,26 @@ voice input.*
   点停止即整段去识别；可选静音自动停止），可选按住说话
 - 默认快捷键 **Ctrl+Shift+Space**（可配置，支持 macOS 的 Cmd 兼容）
 - 识别后**填入草稿**待确认；可选「识别后自动发送」（push-to-talk 风格）
-- 设置卡片：「设置 → 插件 → 配置 → 语音输入」
+- 设置卡片：「设置 → 插件 → 配置 → 语音输入」= **三步向导** + 默认折叠的「高级」（BaseURL /
+  模型 / 通道 / 多服务商 / 语言 / 优化 / 快捷键 / 用量）；改动先进本地草稿，点「保存」才写回，
+  写回后按段读回校验
+
+## 快速开始 Quick start
+
+三步，多数情况下**一个 key 都不用填**：
+
+1. **① 识别方式** 选「云端」（只想用浏览器识别的选「仅浏览器」，后面两步直接跳过）。
+2. **② 服务商** 点一个 chip（OpenAI / Groq / 硅基流动 / 小米 MiMo / 阿里云百炼 / 自定义），
+   BaseURL、模型、调用通道**自动填好**。
+3. **③ 密钥与自检** 看这一行的状态：
+   - 显示 `✓ 已使用 DSH 凭据 OPENAI_API_KEY` → 已经复用了你在 DSH 里配过的同名 LLM 凭据，**无需任何输入**。
+   - 显示未配置 → 把 key 粘进输入框点「保存密钥」；key 只写入 DSH 凭据，不回显、不进配置文件。
+   - 点「测试连接」自检（列一次该端点的模型：一次验掉 key + BaseURL + 网络，且不用麦克风）。
+4. 点「保存」→ 刷新页面确认仍在，即可对着输入框旁的麦克风开说。
+
+自定义服务商的凭据引用名为 `ASR_VOICE_<显示名>_API_KEY`（显示名参与派生，改名等于换一把 key）。
+*Your existing DSH LLM credential for the same provider is reused automatically — most users never
+type a key. “Test connection” verifies key + base URL + network in one click without the mic.*
 
 ## 效果 Preview
 
@@ -75,13 +99,10 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 分组 | 字段 | 默认 | 说明 |
 |---|---|---|---|
 | 识别引擎 | `asr.provider` | `auto` | `auto`（浏览器 Web Speech 优先，失败自动切云端）/ `browser`（Web Speech）/ `cloud`（OpenAI-compatible） |
-| 云端 | `asr.cloud.providers` | `[]` | **多供应商列表**：每个含 `{id, preset, baseUrl, apiKey, model, mode}`，可保存多个服务商 key |
-| 云端 | `asr.cloud.active` | 空 | 当前使用的供应商 id（空 = 取第一个）；设置页可切换 |
-| 云端 | `asr.cloud.preset` | `openai` | `openai` / `groq` / `siliconflow` / `mimo` / `dashscope` / `custom` |
-| 云端 | `asr.cloud.baseUrl` | 预置自动填 | 任意 OpenAI-compatible base URL |
-| 云端 | `asr.cloud.apiKey` | 空 | 仅存本机服务端；MiMo 端点留空时自动复用 DSH 凭据 `MIMO_API_KEY` |
-| 云端 | `asr.cloud.model` | 预置自动填 | 如 `whisper-1` / `whisper-large-v3` / `FunAudioLLM/SenseVoiceSmall` / `mimo-v2.5-asr` / `qwen3-asr-flash`；设置页可「获取模型」动态拉取该供应商最新 ASR 模型 |
-| 云端 | `asr.cloud.mode` | `auto` | `auto`（按模型名判定）/ `transcriptions`（whisper 式）/ `chat`（MiMo/Qwen-ASR） |
+| 云端 | `asr.cloud.providers` | `[]` | **多供应商列表**：每个含 `{id, preset, name, baseUrl, model, mode}`；`name` 是显示名，也是自定义供应商凭据引用名的派生依据 |
+| 云端 | `asr.cloud.active` | 空 | 当前使用的供应商 id（空 = 取第一个）；向导第 ② 步即切换 |
+| 云端 | `asr.cloud.preset` / `.baseUrl` / `.model` / `.mode` | `openai` / 预置自动填 | v0.1 的**旧单配置**：`providers` 为空时作为回退读取，新配置一律走 `providers` |
+| 云端 | `asr.cloud.providers[].apiKey` / `asr.cloud.apiKey` | 空 | **过渡字段（`role('secret')`）**：只为读走旧文档里的明文 key，首次加载即迁往 DSH 凭据并抹掉；除此之外 settings 与浏览器都不再持有任何密钥 |
 | 优化 | `optimize.mode` | `llm` | `llm`（默认，用当前所选 LLM 重写）/ `heuristic`（本地启发式） |
 | 优化 | `optimize.preview` | `false` | `false`（默认）：停止录音立即填入清洗版文本，LLM 优化后台完成后自动替换；`true`：等优化完成，预览 原始→优化 后确认填入 |
 | 优化 | `optimize.llm.provider` / `.model` | 空 | 可选：从 **DSH 已配置模型列表**指定；留空则用当前所选 LLM。自定义须先到 DSH 模型列表添加 |
@@ -94,15 +115,22 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 行为 | `behavior.hotkey` | `Ctrl+Shift+Space` | 快捷键（空 = 关闭） |
 | 统计 | `/api/asr-voice/stats` | — | ASR 用量统计（次数/字符/最近时间，进程内） |
 
+**API key 不在上表里。** 它存于 DSH 凭据服务，按引用名读取：预置供应商直接用
+`<PRESET>_API_KEY`（`OPENAI_API_KEY` / `GROQ_API_KEY` / `SILICONFLOW_API_KEY` /
+`MIMO_API_KEY` / `DASHSCOPE_API_KEY`）——与官方 LLM 凭据同名，因此**配过该服务商 LLM 的人
+零输入即可用**；自定义供应商用 `ASR_VOICE_<显示名>_API_KEY`。解析顺序：过渡期 settings 里的
+残留明文 → `credentials.resolve(ref)` → 环境变量 `ref`。
+
 ## 云端 ASR 预置 Presets
 
-| 预置 | baseUrl | 默认模型 | 通道 |
-|---|---|---|---|
-| OpenAI | `https://api.openai.com/v1` | `whisper-1` | whisper 式 `/audio/transcriptions` |
-| Groq | `https://api.groq.com/openai/v1` | `whisper-large-v3` | whisper 式 `/audio/transcriptions` |
-| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `FunAudioLLM/SenseVoiceSmall` | whisper 式 `/audio/transcriptions` |
-| 小米 MiMo | `https://api.xiaomimimo.com/v1` | `mimo-v2.5-asr` | chat + `input_audio`（key 可复用 DSH 凭据 `MIMO_API_KEY`） |
-| 通义/阿里云百炼 Qwen-ASR | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3-asr-flash` | chat + `input_audio` |
+| 预置 | baseUrl | 默认模型 | 通道 | 凭据引用名（与 LLM 共用） |
+|---|---|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | `whisper-1` | whisper 式 `/audio/transcriptions` | `OPENAI_API_KEY` |
+| Groq | `https://api.groq.com/openai/v1` | `whisper-large-v3` | whisper 式 `/audio/transcriptions` | `GROQ_API_KEY` |
+| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `FunAudioLLM/SenseVoiceSmall` | whisper 式 `/audio/transcriptions` | `SILICONFLOW_API_KEY` |
+| 小米 MiMo | `https://api.xiaomimimo.com/v1` | `mimo-v2.5-asr` | chat + `input_audio` | `MIMO_API_KEY` |
+| 通义/阿里云百炼 Qwen-ASR | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3-asr-flash` | chat + `input_audio` | `DASHSCOPE_API_KEY` |
+| 自定义 | 你填 | 你填 | 按模型选 | `ASR_VOICE_<显示名>_API_KEY` |
 
 两条调用通道（设置项 `asr.cloud.mode`，默认 `auto`）：
 - **whisper 式** `transcriptions`：multipart 上传到 `/audio/transcriptions`（OpenAI / Groq / 硅基流动 / 本地部署）。
@@ -129,7 +157,8 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 |---|---|---|
 | 麦克风 | 高 | 浏览器 `getUserMedia` 需要用户授权；录音仅在点击/快捷键触发时进行 |
 | 网络 | 中 | 云端 ASR/LLM 时，本机 host 向**你配置的** baseUrl 发起 HTTPS 请求 |
-| 设置读写 | 中 | 读写自有 namespace `asr-voice`（含 API key，仅存本机服务端） |
+| 设置读写 | 中 | 读写自有 namespace `asr-voice`（**不含密钥**：两个 `apiKey` 字段标了 `role('secret')`，过线即被脱敏） |
+| 凭据读写 | 中 | 只按**自己派生的引用名**读写：`OPENAI_API_KEY` / `GROQ_API_KEY` / `SILICONFLOW_API_KEY` / `MIMO_API_KEY` / `DASHSCOPE_API_KEY` / `ASR_VOICE_*_API_KEY`。预置引用名与官方 LLM 凭据**同名**（刻意复用，代价是共用同一把 key 与配额）。页面上输入的 key 仅在保存那一次经 connection RPC 送到 host 落库；**已存的值永不回传浏览器**，设置页只看得到「已配置 / 未配置」 |
 | 文件（诊断落盘） | 中 | 转写失败 / 识别结果异常短 / 显式诊断抓取时，将原始录音写入 `~/.dsh/asr-voice-debug/`（可用 `DSH_ASR_DEBUG_DIR` 重定向，自动裁剪至 100 个）；不执行命令、不读取其他凭据 |
 
 已知风险：
@@ -145,9 +174,22 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   varies by browser and provider.*
 - 云端转写会把你的语音上传到所配置的服务商，请确认其隐私政策。
   *Audio is uploaded to your configured provider for transcription — review their privacy policy.*
-- API key 明文存于本机 DSH settings；仅本机回环可访问代理路由（信任围栏防 CSRF）。
-  *API keys are stored in plaintext in local DSH settings; proxy routes are loopback-only
-  (trusted-origin fence against CSRF).*
+- API key 存于 DSH 凭据服务（落盘位置与格式由 host 的凭据策略决定），仅本机回环可访问代理路由
+  （信任围栏防 CSRF）。
+  *Keys live in the DSH credential store (where and how they are persisted is the host's policy);
+  proxy routes are loopback-only (trusted-origin fence against CSRF).*
+- **升级自 v0.1/v0.2 的注意**：旧版本的 `apiKey` 是写在 settings 里的明文字段，且曾随
+  `settings.describe` 过线到浏览器。本版本首次加载会自动把这些明文迁进凭据并抹掉 settings 里的值；
+  若你想立刻处理，可自己删 `~/.dsh/settings.yaml` 中的 `apiKey` 字段。**迁移前已经过线的那把 key
+  建议轮换一次**（如果你在意的话）。若 `credentials.set` 被拒（例如该引用名被只读来源遮蔽），迁移会
+  **整批放弃并保留 settings 原值**——识别照旧可用，只是 host 日志里会有一条 warn，而卡片第 ③ 步会显示
+  该引用名「尚未配置」；自己按提示填一次即可。
+  *Upgrading from v0.1/v0.2: `apiKey` used to be plaintext in the settings document and did cross the
+  settings wire to the browser. On first load this version moves those keys into credentials and clears
+  the settings copy; delete `apiKey` from `~/.dsh/settings.yaml` by hand if you want it gone now, and
+  consider rotating a key you care about. If the credential write is refused, the migration aborts and
+  leaves the plaintext in place — transcription keeps working, the host logs one warning, and the card
+  shows that ref as “no key yet”.*
 - 动效为**自研 GSAP 风格轻量动画模块**（离线构建环境无 gsap 包可装），API 对齐 GSAP
   （`to`/`fromTo`/`timeline`），后续可一行替换为真 GSAP——不影响组件调用点。
 

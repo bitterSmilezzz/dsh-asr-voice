@@ -8,10 +8,12 @@
  *   - /api/asr-voice/models      —— 枚举 DSH 已配置模型（优化模型选择器）
  *   - /api/asr-voice/asr-models  —— 动态获取某供应商的 ASR 模型（设置页「获取模型」）
  *   - /api/asr-voice/stats       —— ASR 用量统计（计费相关，低优先级）
+ *   - 启动时一次性迁移：settings 里的遗留明文 key → DSH credentials，随后抹掉明文
  *
  * LLM 优化默认走 DSH 当前所选 LLM（ctx.agentDefaultModel + ctx.llm），无需
- * 插件单独配 key。云端 ASR 支持多供应商（asr.cloud.providers + active）。
- * API key 全程在服务端，浏览器只经私有 JSON 路由调用。
+ * 插件单独配 key。云端 ASR 支持多供应商（asr.cloud.providers + active），但
+ * settings 里只有 baseUrl / model / mode 等无密钥元数据：API key 存 DSH
+ * credentials（引用名见 src/key-ref.ts），浏览器只经私有 JSON 路由调用，拿不到 key。
  * 纯 Node HTTP + 官方 LLM 通道，无平台专属二进制 → macOS / Windows 双平台。
  */
 import type { Context } from '@deepseek-ai/cordis';

@@ -8,10 +8,9 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { KeyRefSource } from './key-ref.ts';
 /** 单个供应商配置面（来自 settings providers 列表）。 */
-export interface CloudProviderLike {
-    id: string;
-    preset: string;
+export interface CloudProviderLike extends KeyRefSource {
     baseUrl: string;
     apiKey: string;
     model: string;
