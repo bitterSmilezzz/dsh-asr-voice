@@ -108,6 +108,43 @@ export type LocaleKey =
   | 'hotkeyDesc'
   | 'hotkeyPlaceholder'
   | 'hotkeyClear'
+  | 'maxRecordMsLabel'
+  | 'maxRecordMsDesc'
+  | 'silenceMsLabel'
+  | 'silenceMsDesc'
+  | 'silenceRmsLabel'
+  | 'silenceRmsDesc'
+  // 实时语音对话
+  | 'groupRealtime'
+  | 'realtimeEnableLabel'
+  | 'realtimeEnableDesc'
+  | 'realtimeTtsLabel'
+  | 'realtimeTtsDesc'
+  | 'realtimeTtsBrowser'
+  | 'realtimeTtsOff'
+  | 'realtimeHotkeyLabel'
+  | 'realtimeHotkeyDesc'
+  | 'realtimeSettleMsLabel'
+  | 'realtimeSettleMsDesc'
+  | 'realtimeTailMsLabel'
+  | 'realtimeTailMsDesc'
+  | 'realtimeMaxSessionLabel'
+  | 'realtimeMaxSessionDesc'
+  | 'realtimeFirstSentenceLabel'
+  | 'realtimeFirstSentenceDesc'
+  | 'realtimeWatchdogLabel'
+  | 'realtimeWatchdogDesc'
+  // 语音对话按钮
+  | 'chatTitle'
+  | 'chatListeningTitle'
+  | 'chatThinkingTitle'
+  | 'chatSpeakingTitle'
+  | 'chatThinkingHint'
+  | 'chatSpeakingHint'
+  | 'chatInterrupt'
+  | 'chatEndedLimit'
+  | 'chatNoReply'
+  | 'chatNoTts'
   // 录音链路 / 预览卡
   | 'dismiss'
   | 'loadFailed'
@@ -232,7 +269,7 @@ export const zh: LocaleDict = {
   autoSendLabel: '识别后自动发送',
   autoSendDesc: '开启后说完即发（push-to-talk 风格），关闭则填入草稿待确认。',
   silenceStopLabel: '静音自动停止',
-  silenceStopDesc: '关闭（默认）：只有手动点击/快捷键结束录音，点停止即整段去识别；开启：静音持续 2.5 秒自动结束。',
+  silenceStopDesc: '关闭（默认）：只有手动点击/快捷键结束录音，点停止即整段去识别；开启：静音持续下方「静音判定时长」后自动结束。',
   holdToTalkLabel: '按住说话',
   holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击开始、再点结束（静音自动结束由「静音自动停止」开关决定）。',
   textModeLabel: '文本输入',
@@ -245,6 +282,43 @@ export const zh: LocaleDict = {
   hotkeyDesc: '点击后按新组合键（如 Ctrl+Shift+Space）；留空关闭。',
   hotkeyPlaceholder: '点击录制快捷键',
   hotkeyClear: '清除',
+  maxRecordMsLabel: '单次录音上限',
+  maxRecordMsDesc: '单位毫秒。到点自动结束并送识别，避免忘记关麦一直录。',
+  silenceMsLabel: '静音判定时长',
+  silenceMsDesc: '单位毫秒。连续安静这么久就判定说完了（需先开启「静音自动停止」）。',
+  silenceRmsLabel: '静音阈值',
+  silenceRmsDesc: '0~1 的响度比例，低于它算安静。环境嘈杂就调高，说话很轻就调低。',
+
+  groupRealtime: '实时语音对话',
+  realtimeEnableLabel: '启用「语音对话」按钮',
+  realtimeEnableDesc: '在麦克风按钮旁再加一个：边说边上屏，停顿即发起回合，并把回复朗读出来。默认关闭。',
+  realtimeTtsLabel: '回复播报',
+  realtimeTtsDesc: '用浏览器内置语音把 agent 的回复读出来；选「不播报」则只上屏文字。',
+  realtimeTtsBrowser: '浏览器语音（默认）',
+  realtimeTtsOff: '不播报',
+  realtimeHotkeyLabel: '对话快捷键',
+  realtimeHotkeyDesc: '点击后按新组合键，用于开始/结束对话或打断播报；留空表示只用按钮。与上面的录音快捷键互不影响。',
+  realtimeSettleMsLabel: '断句等待',
+  realtimeSettleMsDesc: '单位毫秒。识别文字停止变化这么久，就认为这句说完并上屏。',
+  realtimeTailMsLabel: '收尾延时',
+  realtimeTailMsDesc: '单位毫秒。上屏前再多等一会儿，接住最后一个词的迟到结果；0 表示不等。',
+  realtimeMaxSessionLabel: '单次对话上限',
+  realtimeMaxSessionDesc: '单位毫秒。到点自动结束这次对话并交还麦克风，避免忘了关而一直听。',
+  realtimeFirstSentenceLabel: '首句最少字数',
+  realtimeFirstSentenceDesc: '播报时第一句先攒到这么多字才起音，避免一两个短词就开始读。',
+  realtimeWatchdogLabel: '播报兜底超时',
+  realtimeWatchdogDesc: '单位毫秒。浏览器迟迟不回「播完」事件时，最迟过这么久也按播完处理。',
+
+  chatTitle: '语音对话',
+  chatListeningTitle: '正在听…点击结束对话',
+  chatThinkingTitle: '思考中…点击打断',
+  chatSpeakingTitle: '朗读中…点击打断',
+  chatThinkingHint: '等回复…',
+  chatSpeakingHint: '朗读中…',
+  chatInterrupt: '打断',
+  chatEndedLimit: '已达单次对话上限，对话自动结束',
+  chatNoReply: '这句没有发起回合，继续听',
+  chatNoTts: '当前浏览器不支持语音播报，只显示字幕',
 
   dismiss: '关闭',
   loadFailed: '加载失败',
@@ -364,7 +438,7 @@ export const en: LocaleDict = {
   autoSendLabel: 'Auto-send after recognition',
   autoSendDesc: 'When on, the prompt is submitted right after recognition (push-to-talk style). When off, it fills the draft for confirmation.',
   silenceStopLabel: 'Auto-stop on silence',
-  silenceStopDesc: 'Off (default): recording ends only when you stop it manually — everything you said goes to recognition at once. On: ends automatically after 2.5s of silence.',
+  silenceStopDesc: 'Off (default): recording ends only when you stop it manually — everything you said goes to recognition at once. On: ends automatically once you stay quiet for the silence window below.',
   holdToTalkLabel: 'Hold to talk',
   holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off, click to start and click again to stop (silence auto-stop is controlled by its own toggle).',
   textModeLabel: 'Text insertion',
@@ -377,6 +451,43 @@ export const en: LocaleDict = {
   hotkeyDesc: 'Click, then press a new combo (e.g. Ctrl+Shift+Space). Clear to disable.',
   hotkeyPlaceholder: 'Click to record hotkey',
   hotkeyClear: 'Clear',
+  maxRecordMsLabel: 'Max recording length',
+  maxRecordMsDesc: 'Milliseconds. Recording stops and is sent for recognition at the limit, so a forgotten-open mic cannot run forever.',
+  silenceMsLabel: 'Silence window',
+  silenceMsDesc: 'Milliseconds of quiet that counts as "done talking" (needs the auto-stop toggle above).',
+  silenceRmsLabel: 'Silence threshold',
+  silenceRmsDesc: 'Loudness ratio from 0 to 1; anything below counts as quiet. Raise it in noisy rooms, lower it if you speak softly.',
+
+  groupRealtime: 'Realtime voice chat',
+  realtimeEnableLabel: 'Show the voice chat button',
+  realtimeEnableDesc: 'Adds a second button next to the mic: live captions while you speak, a turn starts on your pause, and the reply is read back. Off by default.',
+  realtimeTtsLabel: 'Speak replies',
+  realtimeTtsDesc: 'Reads the agent reply aloud with the browser built-in voice. Choose "off" for captions only.',
+  realtimeTtsBrowser: 'Browser speech (default)',
+  realtimeTtsOff: 'Do not speak',
+  realtimeHotkeyLabel: 'Chat hotkey',
+  realtimeHotkeyDesc: 'Click, then press a new combo to start, stop or interrupt the chat. Leave empty to use the button only. Independent from the recording hotkey above.',
+  realtimeSettleMsLabel: 'Turn settle time',
+  realtimeSettleMsDesc: 'Milliseconds. Once the transcript stops changing for this long, the turn is considered finished and put on screen.',
+  realtimeTailMsLabel: 'Turn tail delay',
+  realtimeTailMsDesc: 'Milliseconds. Waits a bit longer before submitting so the last word\'s late result still makes it in. 0 means no extra wait.',
+  realtimeMaxSessionLabel: 'Max conversation length',
+  realtimeMaxSessionDesc: 'Milliseconds. The conversation ends on its own at the limit and the microphone is handed back, so an unattended session cannot keep listening.',
+  realtimeFirstSentenceLabel: 'First sentence min length',
+  realtimeFirstSentenceDesc: 'When speaking a reply, the first sentence waits until it has this many characters, so reading does not start on a two-word fragment.',
+  realtimeWatchdogLabel: 'Broadcast watchdog',
+  realtimeWatchdogDesc: 'Milliseconds. If the browser never reports the utterance as finished, treat it as done after this long.',
+
+  chatTitle: 'Voice chat',
+  chatListeningTitle: 'Listening… click to end the chat',
+  chatThinkingTitle: 'Thinking… click to interrupt',
+  chatSpeakingTitle: 'Speaking… click to interrupt',
+  chatThinkingHint: 'Waiting for the reply…',
+  chatSpeakingHint: 'Reading the reply…',
+  chatInterrupt: 'Interrupt',
+  chatEndedLimit: 'Reached the max conversation length — the chat ended by itself',
+  chatNoReply: 'That line did not start a turn, still listening',
+  chatNoTts: 'This browser cannot speak replies — captions only',
 
   dismiss: 'Dismiss',
   loadFailed: 'Load failed',

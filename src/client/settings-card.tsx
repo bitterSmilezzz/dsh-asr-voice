@@ -66,6 +66,42 @@ function ToggleRow({ title, desc, checked, onChange }: { title: string; desc?: s
   )
 }
 
+/** 数值输入字段（min/max 与 host schema 的同一组约束）。 */
+function NumberRow({ title, desc, value, onChange, min, max, step = 1 }: {
+  title: string
+  desc?: string
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+  step?: number
+}): react.ReactElement {
+  return (
+    <Field
+      title={title}
+      desc={desc}
+      control={
+        <div className="dshav-field">
+          <input
+            type="number"
+            value={String(value)}
+            min={min}
+            max={max}
+            step={step}
+            onChange={(e: react.ChangeEvent<HTMLInputElement>) => {
+              // 清空/非法输入不回写：草稿留着上一个合法值。宿主拿到 NaN 会让
+              // setTimeout 立刻触发，把每一次录音都切成零长。
+              const next = Number(e.target.value)
+              if (e.target.value === '' || !Number.isFinite(next)) return
+              onChange(Math.min(max, Math.max(min, next)))
+            }}
+          />
+        </div>
+      }
+    />
+  )
+}
+
 /** 文本输入字段。 */
 function TextRow({ title, desc, value, onChange, type = 'text', placeholder }: {
   title: string
@@ -328,7 +364,7 @@ function normalizeKey(key: string): string {
 
 /** 段名 → 分组标题（保存失败时告诉用户到底是哪一段没落盘）。 */
 const SECTION_TITLE: Record<ConfigSection, LocaleKey> = {
-  asr: 'groupAsr', optimize: 'groupOptimize', language: 'languageLabel', behavior: 'groupBehavior',
+  asr: 'groupAsr', optimize: 'groupOptimize', language: 'languageLabel', behavior: 'groupBehavior', realtime: 'groupRealtime',
 }
 
 /** 设置卡片：外层折叠与其他插件卡一致（header + chevron + 条件 body）。 */
@@ -704,6 +740,28 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                 />
                 <ToggleRow title={t('copyToClipboardLabel')} desc={t('copyToClipboardDesc')} checked={draft.behavior.copyToClipboard} onChange={() => edit((c) => withSection(c, 'behavior', { copyToClipboard: !c.behavior.copyToClipboard }))} />
                 <Field title={t('hotkeyLabel')} desc={t('hotkeyDesc')} control={<HotkeyRecorder value={draft.behavior.hotkey} onChange={(v) => edit((c) => withSection(c, 'behavior', { hotkey: v }))} t={t} />} />
+                <NumberRow title={t('maxRecordMsLabel')} desc={t('maxRecordMsDesc')} value={draft.behavior.maxRecordMs} min={5_000} max={600_000} step={1_000} onChange={(v) => edit((c) => withSection(c, 'behavior', { maxRecordMs: v }))} />
+                <NumberRow title={t('silenceMsLabel')} desc={t('silenceMsDesc')} value={draft.behavior.silenceMs} min={200} max={60_000} step={100} onChange={(v) => edit((c) => withSection(c, 'behavior', { silenceMs: v }))} />
+                <NumberRow title={t('silenceRmsLabel')} desc={t('silenceRmsDesc')} value={draft.behavior.silenceRms} min={0} max={1} step={0.005} onChange={(v) => edit((c) => withSection(c, 'behavior', { silenceRms: v }))} />
+
+                <span className="dshav-groupTitle">{t('groupRealtime')}</span>
+                <ToggleRow title={t('realtimeEnableLabel')} desc={t('realtimeEnableDesc')} checked={draft.realtime.enabled} onChange={() => edit((c) => withSection(c, 'realtime', { enabled: !c.realtime.enabled }))} />
+                <SelectRow
+                  title={t('realtimeTtsLabel')}
+                  desc={t('realtimeTtsDesc')}
+                  value={draft.realtime.tts}
+                  options={[
+                    { value: 'browser', label: t('realtimeTtsBrowser') },
+                    { value: 'off', label: t('realtimeTtsOff') },
+                  ]}
+                  onChange={(v) => edit((c) => withSection(c, 'realtime', { tts: v === 'off' ? 'off' : 'browser' }))}
+                />
+                <Field title={t('realtimeHotkeyLabel')} desc={t('realtimeHotkeyDesc')} control={<HotkeyRecorder value={draft.realtime.hotkey} onChange={(v) => edit((c) => withSection(c, 'realtime', { hotkey: v }))} t={t} />} />
+                <NumberRow title={t('realtimeSettleMsLabel')} desc={t('realtimeSettleMsDesc')} value={draft.realtime.turn.settleMs} min={200} max={10_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, settleMs: v } }))} />
+                <NumberRow title={t('realtimeTailMsLabel')} desc={t('realtimeTailMsDesc')} value={draft.realtime.turn.tailMs} min={0} max={5_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, tailMs: v } }))} />
+                <NumberRow title={t('realtimeMaxSessionLabel')} desc={t('realtimeMaxSessionDesc')} value={draft.realtime.maxSessionMs} min={30_000} max={3_600_000} step={30_000} onChange={(v) => edit((c) => withSection(c, 'realtime', { maxSessionMs: v }))} />
+                <NumberRow title={t('realtimeFirstSentenceLabel')} desc={t('realtimeFirstSentenceDesc')} value={draft.realtime.speech.firstSentenceMinChars} min={1} max={200} onChange={(v) => edit((c) => withSection(c, 'realtime', { speech: { ...c.realtime.speech, firstSentenceMinChars: v } }))} />
+                <NumberRow title={t('realtimeWatchdogLabel')} desc={t('realtimeWatchdogDesc')} value={draft.realtime.speech.utteranceWatchdogMs} min={1_000} max={300_000} step={1_000} onChange={(v) => edit((c) => withSection(c, 'realtime', { speech: { ...c.realtime.speech, utteranceWatchdogMs: v } }))} />
 
                 <span className="dshav-groupTitle">{t('groupStats')}</span>
                 <UsageStats t={t} />

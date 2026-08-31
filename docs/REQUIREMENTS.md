@@ -54,6 +54,16 @@
 | D15 | 本地 ASR 引擎 | **不做专用本地引擎**（OpenAI-compatible 端点天然兼容本地服务，如 local-ai） |
 | D16 | 转写后 UX | **默认直接填优化文本；LLM 优化耗时时先展示 原始→优化 预览卡** |
 
+### 第四轮（实时语音对话）
+| # | 决策 | 结论 |
+|---|---|---|
+| D17 | 对话形态 | 豆包式闭环：连续字幕 → 停顿即发起回合 → 回复朗读 → 自动还麦。**同座位第二个按钮**（`conversation.input.right`，order 11），随 `realtime.enabled` 即时注册/注销，不重载页面 |
+| D18 | 轮次边界 | 浏览器 Web Speech 不给 VAD/轮次信号：**以转写文字静默判完**（`turn.settleMs` + `turn.tailMs` 宽限接住最后一个词的迟到结果）。整段模式那一次点击在这里不存在 |
+| D19 | 双工 | **半双工**：朗读期间 `pause()` 收音，回声不会被当成输入。打断只有按钮 / 快捷键 / 提示条三处入口——浏览器回声消除能否吃掉自己外放的合成语音**未实测**，实测通过前不做语音插话 |
+| D20 | 播报通路 | **浏览器 `speechSynthesis`**：Chrome/Edge/Safari 交集内唯一零配置、零密钥、零依赖的播放通路。经 `SpeakSink` 接缝（云 TTS 可换实现而调用方不动）；`utterance.onend` 不可信 → **每句挂看门狗**，否则麦克风被永久扣住 |
+| D21 | 回复读取与取消 | 不加新槽位：owner share（`InputZone`）的 `session.partial.blocks` 就是逐 chunk 累积正文，`running` 是官方发送↔停止信号。`InputActions` 不含 cancel → 打断走 `sessions.scope(id).get('conversation').cancel()`，**不**把 `conversation` 加进插件硬依赖 |
+| D22 | 实时路径的优化 | **不做提示词优化**：对话要的是即时；`optimize.*` 只作用于整段录音模式 |
+
 ## 设计蓝图（待确认）
 
 ### 架构：host + client 双半区

@@ -10,24 +10,20 @@
  * 两者都带：最长录音上限、interim 文本回调、状态回调；cloud 引擎可选静音自动停止
  * （默认关 = 手动关麦，点停止整段去 ASR，见 behavior.silenceStop）。
  */
-
-/** 录音最长时长（毫秒）。 */
-export const MAX_RECORD_MS = 120_000
+import {
+  PCM_SAMPLE_RATE, downmixToMono, encodeWav16MonoPcm, isSilentPeak, normaliseGain,
+  peakAbs, resampleLinear, rmsFromByteTimeDomain,
+} from './pcm.ts'
+import type { RecordBehavior } from './config.ts'
 
 /** 云端转写请求超时（毫秒）：上游不可达/卡住时不把 UI 永远钉在「识别中」。 */
 const TRANSCRIBE_TIMEOUT_MS = 60_000
-
-/** 静音判定阈值（RMS，0~1）。 */
-const SILENCE_RMS = 0.02
-
-/** 静音持续多久自动停止（毫秒）。 */
-const SILENCE_MS = 2500
 
 /** 录音状态。 */
 export type RecordState = 'recording' | 'transcribing'
 
 /** 浏览器语音识别的最小接口面（webkitSpeechRecognition）。 */
-interface SpeechRecognitionLike {
+export interface SpeechRecognitionLike {
   lang: string
   continuous: boolean
   interimResults: boolean
@@ -102,8 +98,32 @@ function resolveLang(language: string): string | undefined {
   return language
 }
 
+/**
+ * 装饰性电平：Web Speech 引擎不暴露音频流，用平滑随机波形近似语音起伏驱动频谱条。
+ * 只用于视觉反馈，绝不参与任何静音/回合判定。返回幂等的停止函数。
+ */
+export function startLevelSimulation(emit: (level: number) => void): () => void {
+  let raf = 0
+  let level = 0.05
+  let phase = Math.random() * Math.PI * 2
+  const loop = (): void => {
+    phase += 0.16 + Math.random() * 0.12
+    const base = 0.24 + 0.16 * Math.sin(phase)
+    const burst = Math.random() < 0.07 ? Math.random() * 0.45 : 0
+    const next = Math.min(1, Math.max(0.02, base + burst + Math.random() * 0.12))
+    level += (next - level) * 0.32
+    emit(level)
+    raf = requestAnimationFrame(loop)
+  }
+  raf = requestAnimationFrame(loop)
+  return () => {
+    if (raf) cancelAnimationFrame(raf)
+    raf = 0
+  }
+}
+
 /** 浏览器引擎：Web Speech API。 */
-function createBrowserRecorder(language: string, onError: (msg: string) => void): VoiceRecorder {
+function createBrowserRecorder(language: string, onError: (msg: string) => void, behavior: RecordBehavior): VoiceRecorder {
   const Ctor = (window as unknown as { webkitSpeechRecognition: new () => SpeechRecognitionLike }).webkitSpeechRecognition
   if (!Ctor) {
     throw new Error('browser: webkitSpeechRecognition unavailable')
@@ -122,9 +142,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   let delivered = false
   let endResolve: ((text: string) => void) | null = null
   let maxTimer: ReturnType<typeof setTimeout> | null = null
-  let levelRaf = 0
-  let simLevel = 0.05
-  let levelPhase = Math.random() * Math.PI * 2
+  let stopLevelSim: (() => void) | null = null
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recorder: VoiceRecorder = { onInterim: null, onState: null, onLevel: null, onDone: null, onFail: null } as any
@@ -138,21 +156,11 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
 
   /** 浏览器引擎无音频流，用平滑的模拟能量驱动频谱（装饰性，视觉近似语音起伏）。 */
   const startLevelSim = (): void => {
-    const loop = (): void => {
-      if (stopped) { levelRaf = 0; return }
-      levelPhase += 0.16 + Math.random() * 0.12
-      const base = 0.24 + 0.16 * Math.sin(levelPhase)
-      const burst = Math.random() < 0.07 ? Math.random() * 0.45 : 0
-      const next = Math.min(1, Math.max(0.02, base + burst + Math.random() * 0.12))
-      simLevel += (next - simLevel) * 0.32
-      recorder.onLevel?.(simLevel)
-      levelRaf = requestAnimationFrame(loop)
-    }
-    levelRaf = requestAnimationFrame(loop)
+    stopLevelSim ??= startLevelSimulation((level) => { recorder.onLevel?.(level) })
   }
-  const stopLevelSim = (): void => {
-    if (levelRaf) cancelAnimationFrame(levelRaf)
-    levelRaf = 0
+  const stopLevelSimNow = (): void => {
+    stopLevelSim?.()
+    stopLevelSim = null
   }
 
   const emitInterim = (): void => {
@@ -163,7 +171,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   const settle = (): void => {
     if (stopped) return
     stopped = true
-    stopLevelSim()
+    stopLevelSimNow()
     if (maxTimer) clearTimeout(maxTimer)
     // 被 abort（打断）时不送结果；正常结束时经 onDone 把文本送回 UI，
     // 让「手动停止 / 自动停止」两条路径都能收敛到同一处消费。
@@ -219,7 +227,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void)
   recorder.start = () => {
     if (stopped) return
     startLevelSim()
-    maxTimer = setTimeout(() => { try { recognition.stop() } catch { /* noop */ } }, MAX_RECORD_MS)
+    maxTimer = setTimeout(() => { try { recognition.stop() } catch { /* noop */ } }, behavior.maxRecordMs)
     try {
       recognition.start()
     } catch {
@@ -288,7 +296,7 @@ function stopLevelMeter(): void {
 }
 
 /** 云端引擎：MediaRecorder 采集 → host 代理转写。 */
-function createCloudRecorder(language: string, onError: (msg: string) => void, silenceStop: boolean): VoiceRecorder {
+function createCloudRecorder(language: string, onError: (msg: string) => void, behavior: RecordBehavior): VoiceRecorder {
   const recorder: VoiceRecorder = {
     onInterim: null, onState: null, onLevel: null, onDone: null, onFail: null,
     start: () => {}, stop: () => Promise.resolve(''), abort: () => {},
@@ -320,11 +328,11 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
 
   /**
    * 实时音量电平（驱动频谱条）。始终启用（能直观看出麦克风是否采到声）；
-   * 仅当 silenceStop 开启时附带静音自动停止逻辑。
+   * 仅当 behavior.silenceStop 开启时附带静音自动停止逻辑。
    * 注意：静音判定不依赖此处（Web Audio 双消费/挂起会误读），改由 onstop 里
    * 基于「转换后 WAV 的真实峰值」判定，此处只做实时反馈。
    */
-  const startLevelMeter = (withSilenceStop: boolean): void => {
+  const startLevelMeter = (): void => {
     try {
       const audioCtx = getMeterCtx()
       if (audioCtx === null || stream === null) return
@@ -344,18 +352,13 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
       const loop = (): void => {
         if (!active) { raf = 0; return }
         analyser.getByteTimeDomainData(data)
-        let sum = 0
-        for (let i = 0; i < data.length; i++) {
-          const v = (data[i]! - 128) / 128
-          sum += v * v
-        }
-        const rms = Math.sqrt(sum / data.length)
+        const rms = rmsFromByteTimeDomain(data)
         // 实时音量（0~1，放大到可视范围）
         recorder.onLevel?.(Math.min(1, rms * 4))
-        if (withSilenceStop) {
-          if (rms < SILENCE_RMS) {
+        if (behavior.silenceStop) {
+          if (rms < behavior.silenceRms) {
             if (silentSince === null) silentSince = performance.now()
-            else if (performance.now() - silentSince > SILENCE_MS) {
+            else if (performance.now() - silentSince > behavior.silenceMs) {
               raf = 0
               void recorder.stop().catch(() => {})
               return
@@ -444,7 +447,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
           }
           // 静音守卫（ground truth）：转换后的 WAV 真实峰值趋零 → MediaRecorder 确实没录到声，
           // 不发 ASR（避免对静音幻觉出 "yeah"/"no text"）；原始录音也抓一份供诊断对比。
-          if (wavPeak >= 0 && wavPeak < 0.005) {
+          if (isSilentPeak(wavPeak)) {
             if (blob.size > 0) {
               void fetch('/api/asr-voice/transcribe?capture=1', {
                 method: 'POST',
@@ -518,8 +521,8 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, s
     mediaRecorder.start(250)
     recorder.onState?.('recording')
     // 电平表始终启用（频谱反馈 + 可选静音自动停止）。
-    startLevelMeter(silenceStop)
-    maxTimer = setTimeout(() => { void recorder.stop().catch(() => {}) }, MAX_RECORD_MS)
+    startLevelMeter()
+    maxTimer = setTimeout(() => { void recorder.stop().catch(() => {}) }, behavior.maxRecordMs)
   }
 
   recorder.stop = () => {
@@ -580,56 +583,13 @@ async function blobToWav16k(blob: Blob): Promise<{ wav: Blob; peak: number }> {
   const arrayBuffer = await blob.arrayBuffer()
   try {
     const audio = await ctx.decodeAudioData(arrayBuffer)
-    const channels = audio.numberOfChannels
-    const srcLen = audio.length
-    // 多声道混成单声道
-    const mono = new Float32Array(srcLen)
-    for (let ch = 0; ch < channels; ch++) {
-      const data = audio.getChannelData(ch)
-      for (let i = 0; i < srcLen; i++) mono[i] = (mono[i] ?? 0) + data[i]! / channels
-    }
-    // 线性插值重采样到 16kHz
-    const targetRate = 16000
-    const sourceRate = audio.sampleRate
-    const outLen = Math.max(1, Math.round(srcLen * targetRate / sourceRate))
-    const out = new Float32Array(outLen)
-    const ratio = sourceRate / targetRate
-    for (let i = 0; i < outLen; i++) {
-      const pos = i * ratio
-      const i0 = Math.floor(pos)
-      const i1 = Math.min(i0 + 1, srcLen - 1)
-      const frac = pos - i0
-      out[i] = mono[i0]! * (1 - frac) + mono[i1]! * frac
-    }
-    // 峰值归一化：麦克风录音幅度普遍偏低，先放大到接近满幅再写 WAV，
-    // 避免上游把轻声/远距离录音当作噪音忽略（增益上限 4x，防噪声底被过度放大）。
-    let peak = 0
-    for (let i = 0; i < outLen; i++) {
-      const a = Math.abs(out[i]!)
-      if (a > peak) peak = a
-    }
-    const gain = peak > 0.0001 ? Math.min(4, 0.9 / peak) : 1
-    // 16-bit PCM WAV（增益在写入时一并应用，省去独立增益遍历——长录音
-    // outLen 可达数十万采样，减一遍循环在解码后是真实的 CPU 收益）。
-    const dataLen = outLen * 2
-    const wav = new ArrayBuffer(44 + dataLen)
-    const view = new DataView(wav)
-    const writeStr = (off: number, s: string): void => {
-      for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i))
-    }
-    writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataLen, true); writeStr(8, 'WAVE')
-    writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true)
-    view.setUint16(22, 1, true)
-    view.setUint32(24, targetRate, true)
-    view.setUint32(28, targetRate * 2, true)
-    view.setUint16(32, 2, true)
-    view.setUint16(34, 16, true)
-    writeStr(36, 'data'); view.setUint32(40, dataLen, true)
-    for (let i = 0; i < outLen; i++) {
-      const s = Math.max(-1, Math.min(1, out[i]! * gain))
-      view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-    }
-return { wav: new Blob([wav], { type: 'audio/wav' }), peak }
+    const channels: Float32Array[] = []
+    for (let ch = 0; ch < audio.numberOfChannels; ch++) channels.push(audio.getChannelData(ch))
+    const mono = downmixToMono(channels, audio.length)
+    const pcm = resampleLinear(mono, audio.sampleRate, PCM_SAMPLE_RATE)
+    const peak = peakAbs(pcm)
+    const bytes = encodeWav16MonoPcm(pcm, PCM_SAMPLE_RATE, normaliseGain(peak))
+    return { wav: new Blob([bytes], { type: 'audio/wav' }), peak }
   } catch (error) {
     // 共享 context 解码失败（可能被用户手动关闭）：重建一个再试一次。
     if (sharedAudioCtx !== null) {
@@ -683,14 +643,14 @@ async function transcribeViaHost(blob: Blob, language: string, externalSignal?: 
  * @param engine - browser | cloud。
  * @param language - auto / zh-CN / en-US 等。
  * @param onError - 错误回调（错误码字符串）。
- * @param silenceStop - 云端引擎是否启用静音自动停止（默认关 = 手动关麦）。
+ * @param behavior - 时长与静音参数（来自 settings，见 config.recordBehavior）。
  */
 export function createVoiceRecorder(
   engine: 'browser' | 'cloud',
   language: string,
   onError: (code: string) => void,
-  silenceStop = false,
+  behavior: RecordBehavior,
 ): VoiceRecorder {
-  if (engine === 'cloud') return createCloudRecorder(language, onError, silenceStop)
-  return createBrowserRecorder(language, onError)
+  if (engine === 'cloud') return createCloudRecorder(language, onError, behavior)
+  return createBrowserRecorder(language, onError, behavior)
 }

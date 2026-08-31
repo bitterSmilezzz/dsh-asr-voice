@@ -22,6 +22,7 @@ import { CSS } from './styles.ts'
 import { bindConfigScope, bindCredentialsApi, config, subscribeConfig, type CredentialsApiLike, type SettingsBinderLike } from './config.ts'
 import { VoiceSettingsCard } from './settings-card.tsx'
 import { VoiceButton, voiceController } from './voice-button.tsx'
+import { VoiceChatButton, voiceChatController } from './voice-chat-button.tsx'
 import { matchHotkey, parseHotkey, type HotkeySpec } from './hotkey.ts'
 
 export { zh, en }
@@ -34,7 +35,7 @@ export const inject = [
   'locale',
 ]
 
-/** 快捷键处理（按住说话 / 点击切换），随 fiber 生命周期注册。 */
+/** 快捷键处理（按住说话 / 点击切换 / 实时对话进出），随 fiber 生命周期注册。 */
 function applyHotkey(): () => void {
   let held = false
   // -------- 快捷键规格缓存：keydown 是高频路径，只有 hotkey 字符串变化才重解析 --------
@@ -48,7 +49,26 @@ function applyHotkey(): () => void {
     }
     return cachedSpec
   }
+  let cachedChatHotkey = ''
+  let cachedChatSpec: HotkeySpec | null = null
+  /** 对话快捷键（realtime.hotkey）：关掉总开关即失效，两个键撞在一起时对话优先。 */
+  const chatHotkeySpec = (): HotkeySpec | null => {
+    if (!config.realtime.enabled) return null
+    const hk = config.realtime.hotkey
+    if (hk !== cachedChatHotkey) {
+      cachedChatHotkey = hk
+      cachedChatSpec = parseHotkey(hk)
+    }
+    return cachedChatSpec
+  }
   const onKeyDown = (e: KeyboardEvent): void => {
+    const chatSpec = chatHotkeySpec()
+    if (chatSpec !== null && matchHotkey(e, chatSpec)) {
+      e.preventDefault()
+      e.stopPropagation()
+      voiceChatController.toggle()
+      return
+    }
     const spec = hotkeySpec()
     if (spec === null) return
     if (!matchHotkey(e, spec)) return
@@ -110,6 +130,50 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: (sessionId: string) => ({ sessionId, t }),
   }, (props) => jsxRuntime.jsx(VoiceButton, props)))
+
+  /** 打断当前回合：InputActions 只有 5 个成员、不含 cancel，取消只能走会话作用域的 conversation 服务。 */
+  let cancelTurn: (sessionId: string) => void = () => {}
+  ctx.inject(['sessions'], (raw) => {
+    const sessions = (raw as { sessions?: {
+      scope(id: string): { get(name: string): unknown } | undefined
+    } }).sessions
+    cancelTurn = (sessionId: string): void => {
+      try {
+        const scoped = sessions?.scope(sessionId)
+        const conversation = scoped?.get('conversation') as { cancel?(): Promise<void> } | undefined
+        void conversation?.cancel?.()?.catch?.(() => { /* 取消失败会体现在快照里 */ })
+      } catch { /* 无会话作用域：打断退化成「止住播报 + 继续听」 */ }
+    }
+  })
+
+  // 语音对话按钮：同一座位的第二个 entry，随 realtime.enabled 出现/消失。
+  // inject 的工厂在声明已存在时同步执行，返回幂等 disposer——正好用来做「开关一拨就
+  // 注册/注销」，而不是等到下次冷启动才生效。
+  ctx.effect(() => {
+    let off: (() => void) | undefined
+    const sync = (): void => {
+      const want = config.realtime.enabled
+      if (want && off === undefined) {
+        off = ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+          name: 'conversation.input.right',
+          id: 'dsh-asr-voice-realtime-button',
+          order: 11,
+          locale: NS,
+          inject: (sessionId: string) => ({ sessionId, t, cancelTurn }),
+        }, (props) => jsxRuntime.jsx(VoiceChatButton, props)))
+      } else if (!want && off !== undefined) {
+        const dispose = off
+        off = undefined
+        dispose()
+      }
+    }
+    sync()
+    const unsub = subscribeConfig(sync)
+    return () => {
+      unsub()
+      off?.()
+    }
+  }, 'asr-voice: realtime button')
 
   // 快捷键（默认 Ctrl+Shift+Space；可选按住说话）。
   ctx.effect(applyHotkey, 'asr-voice: hotkey')

@@ -29,6 +29,13 @@ voice input.*
   Groq, SiliconFlow, Qwen-ASR) can coexist. Settings is a three-step wizard: pick the engine,
   click a provider, check the key — “Test connection” self-checks and lists real models.*
 
+- **开口即对话 — Talk to the agent, not at a text box**
+  开启实时对话后：边说边上字幕，停顿即发起回合，agent 回复按句朗读，念完自动把麦克风还回来
+  听下一句。**半双工**——朗读期间不收音，按钮 / 快捷键 / 提示条 `×` 三处都能打断；零 key 零配置。
+  *Speak, see live captions, and a pause sends the turn; the reply is read back sentence by
+  sentence, then the mic comes back. Half-duplex — capture is gated while it speaks, and three
+  affordances interrupt. No key, no setup.*
+
 - **优化润于无声 — Polished without interrupting**
   停止录音，约一秒即把清洗版填入草稿；LLM 优化在**后台**润色，完成自动替换，**不覆盖你的编辑**。
   *Stop recording and the cleaned draft lands in about a second, while LLM polish happens in the
@@ -56,6 +63,8 @@ voice input.*
   点停止即整段去识别；可选静音自动停止），可选按住说话
 - 默认快捷键 **Ctrl+Shift+Space**（可配置，支持 macOS 的 Cmd 兼容）
 - 识别后**填入草稿**待确认；可选「识别后自动发送」（push-to-talk 风格）
+- **语音对话**（默认关，开 `realtime.enabled` 后与麦克风并列第二个按钮）：边说边上字幕 →
+  停顿即发起 agent 回合 → 回复按句朗读 → 念完自动回到聆听，半双工、点按可打断
 - 设置卡片：「设置 → 插件 → 配置 → 语音输入」= **三步向导** + 默认折叠的「高级」（BaseURL /
   模型 / 通道 / 多服务商 / 语言 / 优化 / 快捷键 / 用量）；改动先进本地草稿，点「保存」才写回，
   写回后按段读回校验
@@ -113,6 +122,17 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 行为 | `behavior.textMode` | `replace` | 文本输入模式：`replace`（完整替换草稿）/ `append`（在已有文字后追加） |
 | 行为 | `behavior.copyToClipboard` | `true` | 识别/优化后自动把结果复制到剪贴板 |
 | 行为 | `behavior.hotkey` | `Ctrl+Shift+Space` | 快捷键（空 = 关闭） |
+| 行为 | `behavior.maxRecordMs` | `120000` | 单次录音上限（毫秒，5s~600s）：到点自动结束并送识别 |
+| 行为 | `behavior.silenceMs` | `2500` | 静音判定时长（毫秒，200~60000）：连续安静这么久即判定说完，需开 `silenceStop` |
+| 行为 | `behavior.silenceRms` | `0.02` | 静音阈值（0~1 响度比例）：低于它算安静 |
+| 实时 | `realtime.enabled` | `false` | 语音对话总开关：开了才出现第二个按钮与 `realtime.hotkey`（改动即时生效，无需重载页面） |
+| 实时 | `realtime.tts` | `browser` | 回复播报：`browser`（浏览器 `speechSynthesis`，零配置）/ `off`（只出字不出声） |
+| 实时 | `realtime.hotkey` | 空 | 进出实时对话的快捷键（空 = 不用快捷键）；与 `behavior.hotkey` 撞键时**对话优先** |
+| 实时 | `realtime.turn.settleMs` | `900` | 转写文字静默多久算「说完了」（毫秒，200~10000）：到点即提交并发起回合 |
+| 实时 | `realtime.turn.tailMs` | `300` | 判完之后再宽限这么久才提交（毫秒，0~5000）：接住最后一个词的迟到结果，0 = 不等 |
+| 实时 | `realtime.maxSessionMs` | `600000` | 单次对话上限（毫秒，30s~3600s）：到点自动结束并交还麦克风 |
+| 实时 | `realtime.speech.firstSentenceMinChars` | `12` | 首句最少字数：太短就与后句并成一段再起音，避免「好的。」这类碎片开头 |
+| 实时 | `realtime.speech.utteranceWatchdogMs` | `60000` | 单句朗读看门狗（毫秒）：浏览器不回 `onend` 时按念完处理，防止麦克风被永久扣住 |
 | 统计 | `/api/asr-voice/stats` | — | ASR 用量统计（次数/字符/最近时间，进程内） |
 
 **API key 不在上表里。** 它存于 DSH 凭据服务，按引用名读取：预置供应商直接用
@@ -120,6 +140,24 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 `MIMO_API_KEY` / `DASHSCOPE_API_KEY`）——与官方 LLM 凭据同名，因此**配过该服务商 LLM 的人
 零输入即可用**；自定义供应商用 `ASR_VOICE_<显示名>_API_KEY`。解析顺序：过渡期 settings 里的
 残留明文 → `credentials.resolve(ref)` → 环境变量 `ref`。
+
+## 实时语音对话 Realtime voice chat
+
+`realtime.enabled` 打开后，输入行多出第二个按钮（快捷键 `realtime.hotkey`）。一轮闭环：
+
+说 → 字幕逐字上屏 → 静默 `turn.settleMs`（再宽限 `turn.tailMs`）判定说完 → **填入草稿并直接
+发送** → agent 回复按句朗读 → 念完自动把麦克风还回来听下一句。
+
+- **停顿即发起回合**：实时模式恒等于「自动发送」，与 `behavior.autoSend` 无关——那一次点击
+  换成了每句的静默判定，草稿框里的内容会真的被提交执行。`behavior.textMode` 仍然生效：
+  `append` 保留你已敲的文字，`replace` 覆盖草稿。
+- **引擎是浏览器 Web Speech**：不新增任何本机 host 请求、不需要云商 key；识别由浏览器自己的
+  语音服务完成（音频出机方式见下节披露），因此它同样受 Firefox 无 Web Speech 的限制。
+- **半双工**：朗读期间不收音，回声不会被当成你说的话。打断有三处入口——再按一次按钮、
+  再按一次快捷键、点提示条上的 `×`——任一都会立刻止住朗读、取消在途回合、回到聆听。
+  不支持用说话声打断（见下节）。
+- **不做提示词优化**：对话要的是即时，转写文本原样上屏；`optimize.*` 只作用于整段录音模式。
+- **到点自己收**：`realtime.maxSessionMs` 上限到即结束会话并释放麦克风，麦克风不会无人值守常开。
 
 ## 云端 ASR 预置 Presets
 
@@ -155,8 +193,9 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 
 | 权限 | 等级 | 说明 |
 |---|---|---|
-| 麦克风 | 高 | 浏览器 `getUserMedia` 需要用户授权；录音仅在点击/快捷键触发时进行 |
+| 麦克风 | 高 | 浏览器 `getUserMedia` 需要用户授权；采集只由点击/快捷键发起。整段模式在点击停止或静音判定时结束；**实时对话会持续占用麦克风**，直到你结束会话，或 `realtime.maxSessionMs` 到点自动结束 |
 | 网络 | 中 | 云端 ASR/LLM 时，本机 host 向**你配置的** baseUrl 发起 HTTPS 请求 |
+| 音频输出 | 低 | 实时对话用浏览器 `speechSynthesis` 经**系统默认输出设备外放** agent 回复：周围人听得到，且没有单独的音量/静音路由（止声用打断入口） |
 | 设置读写 | 中 | 读写自有 namespace `asr-voice`（**不含密钥**：两个 `apiKey` 字段标了 `role('secret')`，过线即被脱敏） |
 | 凭据读写 | 中 | 只按**自己派生的引用名**读写：`OPENAI_API_KEY` / `GROQ_API_KEY` / `SILICONFLOW_API_KEY` / `MIMO_API_KEY` / `DASHSCOPE_API_KEY` / `ASR_VOICE_*_API_KEY`。预置引用名与官方 LLM 凭据**同名**（刻意复用，代价是共用同一把 key 与配额）。页面上输入的 key 仅在保存那一次经 connection RPC 送到 host 落库；**已存的值永不回传浏览器**，设置页只看得到「已配置 / 未配置」 |
 | 文件（诊断落盘） | 中 | 转写失败 / 识别结果异常短 / 显式诊断抓取时，将原始录音写入 `~/.dsh/asr-voice-debug/`（可用 `DSH_ASR_DEBUG_DIR` 重定向，自动裁剪至 100 个）；不执行命令、不读取其他凭据 |
@@ -174,6 +213,23 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   varies by browser and provider.*
 - 云端转写会把你的语音上传到所配置的服务商，请确认其隐私政策。
   *Audio is uploaded to your configured provider for transcription — review their privacy policy.*
+- **实时对话会在你没有再点击的情况下发起回合。** 每句的静默判定就是提交点，草稿里的内容
+  直接进 agent；若该会话配了工具或审批，你说出的每一句都可能真的触发执行。共享终端上、
+  或开着高权限工具时，不要把 `realtime.enabled` 打开。
+  *Realtime chat starts agent turns without another click — the pause is the send. Keep it off on
+  shared machines or when high-privilege tools are armed.*
+- 实时对话期间麦克风**持续**流经浏览器自己的在线语音识别服务（Chrome / Edge / Safari 各自的
+  后端，非本插件的服务器），比整段模式的占用时长长得多。本插件不经手、不落盘这段音频。
+  *While a realtime session is open, audio streams continuously to the browser's own speech
+  service — not to this plugin's servers, which neither handle nor store it.*
+- **半双工，不支持语音插话**：朗读期间不收音，只能用按钮 / 快捷键 / 提示条的 `×` 打断。
+  浏览器回声消除能否吃掉我们自己外放的合成语音尚未在本机实测，实测通过前不做声学打断。
+  *Half-duplex: no barge-in by speaking. Whether browser echo cancellation suppresses our own
+  synthesized speech is unmeasured, so acoustic interruption is deliberately absent.*
+- 播报音色与断句取决于操作系统装了什么语音，长句可能出现机械停顿；不接受就 `realtime.tts = off`，
+  字幕与自动提交照常。云端实时（PCM 流 + 服务端轮次判定）本插件不提供。
+  *Voice quality depends on installed system voices; set `realtime.tts = off` for captions only.
+  Cloud realtime is not offered.*
 - API key 存于 DSH 凭据服务（落盘位置与格式由 host 的凭据策略决定），仅本机回环可访问代理路由
   （信任围栏防 CSRF）。
   *Keys live in the DSH credential store (where and how they are persisted is the host's policy);

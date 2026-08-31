@@ -94,6 +94,40 @@ export const AsrVoiceSettingsSchema: any = z.object({
     textMode: z.string().default('replace'),
     /** 生成内容自动加入剪贴板（默认开）。 */
     copyToClipboard: z.boolean().default(true),
+    /** 单次录音最长时长（毫秒），到点自动停止并送去识别。 */
+    maxRecordMs: z.natural().min(5_000).max(600_000).default(120_000),
+    /** 静音判定阈值（RMS，0~1）：低于它算无声，供静音自动停止与静音守卫使用。 */
+    silenceRms: z.percent().default(0.02),
+    /** 静音持续多久即自动停止（毫秒，仅在 silenceStop 开启时生效）。 */
+    silenceMs: z.natural().min(200).max(60_000).default(2_500),
+  }),
+  /**
+   * 实时语音对话：边说边出字 → 停顿即发起 agent 回合 → 把回复读出来。
+   * 与整段模式共用同一条 setDraft/submit 上通路，只是不再需要手动关麦。
+   */
+  realtime: z.object({
+    /** 总开关（默认关）：关掉时实时按钮不注册，一切行为回到整段模式。 */
+    enabled: z.boolean().default(false),
+    /** 回复播报：browser（speechSynthesis，零配置）/ off（只出字不读）。 */
+    tts: z.string().default('browser'),
+    /** 进出实时模式的快捷键（默认关，避免与官方快捷键相撞）。 */
+    hotkey: z.string().default(''),
+    /** 回合边界判定（本地兜底：实时引擎不给回合终点时由文字稳定性决定）。 */
+    turn: z.object({
+      /** 转写文字静默多久算「说完了」（毫秒）。 */
+      settleMs: z.natural().min(200).max(10_000).default(900),
+      /** 静音窗口之后再宽限这么久才提交（毫秒）：接住最后一个词的迟到结果；0 = 不等。 */
+      tailMs: z.natural().min(0).max(5_000).default(300),
+    }),
+    /** 单次对话上限（毫秒）：麦克风不能无人值守常开，到点自动结束会话。 */
+    maxSessionMs: z.natural().min(30_000).max(3_600_000).default(600_000),
+    /** 回复朗读。 */
+    speech: z.object({
+      /** 首句最少字数：短句先合并再读，避免逐词起句。 */
+      firstSentenceMinChars: z.natural().min(1).max(200).default(12),
+      /** 朗读看门狗（毫秒）：speechSynthesis 的 onend 不可信，超时按播完处理。 */
+      utteranceWatchdogMs: z.natural().min(1_000).max(300_000).default(60_000),
+    }),
   }),
 })
 
@@ -141,6 +175,34 @@ export interface AsrVoiceSettings {
     hotkey: string
     textMode: string
     copyToClipboard: boolean
+    /** 单次录音最长时长（毫秒）。 */
+    maxRecordMs: number
+    /** 静音判定阈值（RMS，0~1）。 */
+    silenceRms: number
+    /** 静音持续多久即自动停止（毫秒）。 */
+    silenceMs: number
+  }
+  realtime: {
+    /** 实时语音对话总开关。 */
+    enabled: boolean
+    /** 回复播报：browser | off。 */
+    tts: string
+    /** 进出实时模式的快捷键（'' = 关闭）。 */
+    hotkey: string
+    turn: {
+      /** 转写文字静默多久算「说完了」（毫秒）。 */
+      settleMs: number
+      /** 静音窗口之后再宽限这么久才提交（毫秒）。 */
+      tailMs: number
+    }
+    /** 单次对话上限（毫秒）：到点自动结束，麦克风不无人值守常开。 */
+    maxSessionMs: number
+    speech: {
+      /** 首句最少字数。 */
+      firstSentenceMinChars: number
+      /** 朗读看门狗（毫秒）。 */
+      utteranceWatchdogMs: number
+    }
   }
 }
 
@@ -149,5 +211,6 @@ export const DEFAULT_SETTINGS: AsrVoiceSettings = {
   asr: { provider: 'auto', cloud: { providers: [], active: '', preset: 'openai', baseUrl: '', apiKey: '', model: '', mode: 'auto' } },
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
-  behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true },
+  behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
+  realtime: { enabled: false, tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }

@@ -1,20 +1,26 @@
-# dsh-asr-voice — 语音输入 + 提示词优化 bundle patch
+# dsh-asr-voice — 语音输入 + 实时对话 + 提示词优化 bundle patch
 #
 # 功能：
 # - 语音输入：输入框工具行麦克风按钮。引擎 auto（默认）：浏览器 Web Speech API
 #   优先（免费免 key，Chrome/Edge 双平台），Web Speech 不可用/被网络屏蔽时自动
 #   回落到已配置的云端 OpenAI-compatible ASR（OpenAI / Groq / 硅基流动 /
 #   通义 Qwen-ASR，可自定义 baseUrl + model）；也可手动固定 browser / cloud。
+# - 实时语音对话（默认关，realtime.enabled）：同座位第二个按钮，边说边上字幕 →
+#   停顿即发起 agent 回合 → 回复按句朗读 → 念完自动还麦。半双工，浏览器 Web Speech
+#   + speechSynthesis 实现：不需要任何 key，也不新增 host 路由。
 # - 提示词优化：本地启发式（zh/en 清洗）或可选 LLM 重写（默认，走 DSH 当前所选
 #   模型的官方 LLM 通道，host 代理）。
 # - 设置页卡片：「设置 → 插件 → 配置」→「语音输入」（settings.plugin.item,
 #   key: asr-voice；host 注册同名 settings namespace 让配置 tab 枚举到卡片）。
-# - 所有 API key 只存 host settings（服务端），浏览器经 /api/asr-voice/* 代理，
-#   key 不进前端。纯 Node HTTP 实现，macOS / Windows 双平台。
+# - API key 只进 **DSH 凭据服务**（预置引用名与官方 LLM 凭据同名），settings 与浏览器
+#   都不持有密钥；音频与转写请求经 /api/asr-voice/* 私有 JSON 代理。纯 Node HTTP 实现，
+#   macOS / Windows 双平台。
 #
 # host inject 只列硬依赖（webServer/llm）；settings 走 scoped inject（可选，
 # 缺失时仅云端 ASR 无 key、不影响挂载），agentDefaultModel 在优化路由内
-# ctx.get 可选读取。注意：inject 项是 Cordis 服务名（非 entry id）。
+# ctx.get 可选读取。client 侧 settingsScope / connection / sessions 同样是可选
+# ctx.inject（缺失只让对应能力退化：配置绑定 / 密钥 / 回合打断，不影响挂载）。
+# 注意：inject 项是 Cordis 服务名（非 entry id）。
 #
 # Install:   dsh plugin --profile <profile> add <path-or-github>
 

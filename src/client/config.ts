@@ -65,18 +65,50 @@ export interface AsrVoiceConfig {
     hotkey: string
     textMode: 'replace' | 'append'
     copyToClipboard: boolean
+    /** 单次录音最长时长（毫秒）。 */
+    maxRecordMs: number
+    /** 静音判定阈值（RMS，0~1）。 */
+    silenceRms: number
+    /** 静音持续多久即自动停止（毫秒）。 */
+    silenceMs: number
+  }
+  realtime: {
+    /** 实时语音对话总开关。 */
+    enabled: boolean
+    /** 回复播报：browser（speechSynthesis）/ off（只出字）。 */
+    tts: 'browser' | 'off'
+    /** 进出实时模式的快捷键（'' = 关闭）。 */
+    hotkey: string
+    turn: {
+      /** 转写文字静默多久算「说完了」（毫秒）。 */
+      settleMs: number
+      /** 静音窗口之后再宽限这么久才提交（毫秒）。 */
+      tailMs: number
+    }
+    /** 单次对话上限（毫秒）。 */
+    maxSessionMs: number
+    speech: {
+      /** 首句最少字数。 */
+      firstSentenceMinChars: number
+      /** 朗读看门狗（毫秒）。 */
+      utteranceWatchdogMs: number
+    }
   }
 }
 
 /** 顶层可写段（`settings.mutate` 按顶层路径寻址，写回也按这一段一段来）。 */
-export type ConfigSection = 'asr' | 'optimize' | 'language' | 'behavior'
+export type ConfigSection = 'asr' | 'optimize' | 'language' | 'behavior' | 'realtime'
+
+/** 对象形态的顶层段（language 是标量，走 withLanguage）。 */
+export type ConfigObjectSection = Exclude<ConfigSection, 'language'>
 
 /** 配置默认值（与 host schema 的 default 一致）。 */
 export const DEFAULTS: AsrVoiceConfig = {
   asr: { provider: 'auto', cloud: { providers: [], active: '', preset: 'openai', baseUrl: '', model: '', mode: 'auto' } },
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
-  behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true },
+  behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
+  realtime: { enabled: false, tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与写回共同维护。 */
@@ -140,6 +172,11 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+/** 数值字段：非有限数（NaN/Infinity/字符串/缺省）一律退回本地值。 */
+function num(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
 /** 逐字段重建供应商行：只取本客户端认识的字段（宿主多出来的键一律不带走）。 */
 function normalizeProvider(row: unknown): CloudProviderConfig {
   const src = isPlainObject(row) ? row : {}
@@ -166,6 +203,10 @@ export function mergeHostValue(value: Partial<AsrVoiceConfig>): void {
       const next = src[key]
       if (next === undefined) continue
       const current = target[key]
+      if (typeof current === 'number') {
+        target[key] = num(next, current)
+        continue
+      }
       if (Array.isArray(next)) {
         target[key] = key === 'providers' ? next.map(normalizeProvider) : structuredClone(next)
         continue
@@ -233,11 +274,62 @@ export function newDraft(): AsrVoiceConfig {
   return structuredClone(config)
 }
 
-/** 浅并一层段（asr / optimize / behavior 都是对象段），返回新草稿。 */
-export function withSection<K extends 'asr' | 'optimize' | 'behavior'>(
+/** 浅并一层对象段，返回新草稿。 */
+export function withSection<K extends ConfigObjectSection>(
   draft: AsrVoiceConfig, key: K, patch: Partial<AsrVoiceConfig[K]>,
 ): AsrVoiceConfig {
   return { ...draft, [key]: { ...draft[key], ...patch } }
+}
+
+/** 整段录音链路的时长与静音参数（从配置快照取，recorder 不认 settings 层）。 */
+export interface RecordBehavior {
+  /** 单次录音最长时长（毫秒）。 */
+  maxRecordMs: number
+  /** 是否静音自动停止。 */
+  silenceStop: boolean
+  /** 静音判定阈值（RMS，0~1）。 */
+  silenceRms: number
+  /** 静音持续多久即自动停止（毫秒）。 */
+  silenceMs: number
+}
+
+/** 取当前配置的录音参数快照（配置 → recorder 的唯一搬运处）。 */
+export function recordBehavior(source: AsrVoiceConfig = config): RecordBehavior {
+  const { maxRecordMs, silenceStop, silenceRms, silenceMs } = source.behavior
+  return { maxRecordMs, silenceStop, silenceRms, silenceMs }
+}
+
+/** 实时语音对话参数（会话、引擎、播报共用同一份快照）。 */
+export interface RealtimeTuning {
+  /** 按钮是否存在。 */
+  enabled: boolean
+  /** 回复播报方式。 */
+  tts: 'browser' | 'off'
+  /** 对话快捷键（'' = 关闭）。 */
+  hotkey: string
+  /** 转写静默多久算说完（毫秒）。 */
+  settleMs: number
+  /** 说完后再宽限这么久才提交（毫秒）。 */
+  tailMs: number
+  /** 单次对话上限（毫秒）。 */
+  maxSessionMs: number
+  /** 首句最少字数。 */
+  firstSentenceMinChars: number
+  /** 单句朗读看门狗（毫秒）。 */
+  utteranceWatchdogMs: number
+  /** 识别语言（同时用于挑选朗读音色）。 */
+  language: string
+}
+
+/** 取当前配置的实时对话快照（配置 → 会话/引擎/播报的唯一搬运处）。 */
+export function realtimeTuning(source: AsrVoiceConfig = config): RealtimeTuning {
+  const { enabled, tts, hotkey, turn, maxSessionMs, speech } = source.realtime
+  return {
+    enabled, tts, hotkey, maxSessionMs, language: source.language,
+    settleMs: turn.settleMs, tailMs: turn.tailMs,
+    firstSentenceMinChars: speech.firstSentenceMinChars,
+    utteranceWatchdogMs: speech.utteranceWatchdogMs,
+  }
 }
 
 /** 改识别语言（顶层标量段）。 */

@@ -17,7 +17,7 @@
 import * as react from 'react'
 // Type-only: pulls the ui-conversation SlotMap merge (input seats + standard kit).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { cloudConfigured, config } from './config.ts'
+import { cloudConfigured, config, recordBehavior } from './config.ts'
 import { heuristicOptimize, llmOptimize } from './optimize.ts'
 import { createVoiceRecorder, isWebSpeechSupported, type VoiceRecorder } from './recorder.ts'
 import { fromTo } from './animate.ts'
@@ -70,21 +70,21 @@ function MicIcon(): react.ReactElement {
 }
 
 /** 录音状态图标（实心圆点，带呼吸）。 */
-function RecDot(): react.ReactElement {
+export function RecDot(): react.ReactElement {
   return <span className="dshav-rec-dot" />
 }
 
 /** 转圈（transcribing / optimizing）。 */
-function Spinner(): react.ReactElement {
+export function Spinner(): react.ReactElement {
   return <span className="dshav-spinner" aria-hidden="true" />
 }
 
 /**
  * 频谱条（12 根柱，CSS 变量 --bar 错落）：memo 化——interim 文本每次变化
- * 重渲染 VoiceButton 时柱子的虚拟 DOM 不再重建（柱形是静态的，仅高度
- * 由 CSS 变量 --level 在帧循环驱动）。
+ * 重渲染按钮（麦克风按钮与对话按钮共用）时柱子的虚拟 DOM 不再重建（柱形是
+ * 静态的，仅高度由 CSS 变量 --level 在帧循环驱动）。
  */
-const SpectrumBars = react.memo((): react.ReactElement => (
+export const SpectrumBars = react.memo((): react.ReactElement => (
   <react.Fragment>
     {Array.from({ length: SPECTRUM_BARS }, (_, i) => (
       <span key={i} className="dshav-bar" style={{ '--bar': String(0.35 + (i / (SPECTRUM_BARS - 1)) * 0.65) } as react.CSSProperties} />
@@ -229,7 +229,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           return
         }
         showError(code)
-      }, config.behavior.silenceStop)
+      }, recordBehavior())
     } catch {
       if (engine === 'browser' && config.asr.provider === 'auto' && cloudConfigured()) {
         setNotice(t('fallbackToCloud'))

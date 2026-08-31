@@ -7,7 +7,7 @@ globalThis.window = { dispatchEvent() {} }
 const {
   DEFAULTS, config, mergeHostValue, newDraft, patchProvider, pickPreset, addProvider, removeProvider,
   withProviders, withLegacyMaterialized, draftActiveProvider, bindConfigScope, bindCredentialsApi,
-  writeDraft, readKeyState, saveKey, keyRefOf,
+  writeDraft, readKeyState, saveKey, keyRefOf, recordBehavior,
 } = await import('../src/client/config.ts')
 const { keyRefFor } = await import('../src/key-ref.ts')
 
@@ -154,6 +154,32 @@ test('keyRefFor：预置与官方 LLM 凭据同名，自定义按显示名派生
   assert.match(cjk1, refPattern)
   assert.notEqual(cjk1, cjk2)
   assert.equal(keyRefFor({ preset: 'custom', name: '', id: '' }), 'ASR_VOICE_CUSTOM_API_KEY')
+})
+
+test('数值设置：宿主快照里的非法值不得污染计时（NaN 会让 setTimeout 立即触发）', () => {
+  mergeHostValue(hostSnapshot())
+  const before = recordBehavior()
+  assert.ok(Number.isFinite(before.silenceMs) && before.silenceMs > 0, '默认计时必须是可用数字')
+
+  mergeHostValue(hostSnapshot({
+    behavior: { maxRecordMs: '120000', silenceStop: true, silenceRms: [0.5], silenceMs: Number.NaN },
+    realtime: { enabled: true, tts: 'browser', hotkey: '', turn: { settleMs: { nested: true }, tailMs: -1 }, speech: { firstSentenceMinChars: '12', utteranceWatchdogMs: null } },
+  }))
+
+  assert.deepEqual(
+    recordBehavior(),
+    { ...before, silenceStop: true },
+    '字符串/数组/NaN 都不算数字，三项计时应原样保留（silenceStop 是合法布尔，照写）',
+  )
+  assert.ok(Number.isFinite(config.realtime.turn.settleMs), '断句计时不能变成 NaN')
+  assert.equal(config.realtime.turn.tailMs, -1, '负数是合法数字，范围由宿主 schema 把关')
+  assert.equal(config.realtime.speech.utteranceWatchdogMs, DEFAULTS.realtime.speech.utteranceWatchdogMs, 'null 不是数字，保留本地值')
+
+  // 快照脱离：录音进行中改设置，不能把这一段的计时换掉
+  const taken = recordBehavior()
+  mergeHostValue(hostSnapshot({ behavior: { ...structuredClone(DEFAULTS.behavior), silenceMs: 9_000 } }))
+  assert.equal(taken.silenceMs, before.silenceMs, 'recordBehavior 返回的是当时的拷贝')
+  assert.equal(recordBehavior().silenceMs, 9_000)
 })
 
 test('readKeyState / saveKey：只经 credentials 通道，值不回流 config', async () => {

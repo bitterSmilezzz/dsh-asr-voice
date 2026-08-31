@@ -79,6 +79,29 @@ export const CSS = `
   cursor: default;
 }
 
+/* ── 语音对话按钮（复用上面的按钮壳，只有状态色不同） ─────────────── */
+.dshav-chat-button[data-state='listening'] {
+  color: var(--dshav-danger);
+  background: color-mix(in srgb, var(--dshav-danger) 12%, transparent);
+}
+.dshav-chat-button[data-state='listening'] .dshav-rec-dot {
+  animation: dshav-blink 1.1s ease-in-out infinite;
+}
+.dshav-chat-button[data-state='thinking'] {
+  color: var(--dshav-accent);
+}
+.dshav-chat-button[data-state='speaking'] {
+  color: var(--dshav-accent);
+  background: var(--dshav-accent-soft);
+}
+/* 字幕行：这里上屏的文字就是主角，给它比状态提示更宽的可视区（截断在 JS 做）。 */
+.dshav-hotkey-hint[data-kind='caption'] {
+  max-width: min(520px, calc(100vw - 120px));
+}
+.dshav-hotkey-hint[data-kind='caption'][data-state='speaking'] .dshav-hint-text {
+  color: var(--dshav-accent);
+}
+
 /* 录音实心点（呼吸）。 */
 .dshav-rec-dot {
   width: 10px;

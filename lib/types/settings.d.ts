@@ -111,6 +111,34 @@ export interface AsrVoiceSettings {
         hotkey: string;
         textMode: string;
         copyToClipboard: boolean;
+        /** 单次录音最长时长（毫秒）。 */
+        maxRecordMs: number;
+        /** 静音判定阈值（RMS，0~1）。 */
+        silenceRms: number;
+        /** 静音持续多久即自动停止（毫秒）。 */
+        silenceMs: number;
+    };
+    realtime: {
+        /** 实时语音对话总开关。 */
+        enabled: boolean;
+        /** 回复播报：browser | off。 */
+        tts: string;
+        /** 进出实时模式的快捷键（'' = 关闭）。 */
+        hotkey: string;
+        turn: {
+            /** 转写文字静默多久算「说完了」（毫秒）。 */
+            settleMs: number;
+            /** 静音窗口之后再宽限这么久才提交（毫秒）。 */
+            tailMs: number;
+        };
+        /** 单次对话上限（毫秒）：到点自动结束，麦克风不无人值守常开。 */
+        maxSessionMs: number;
+        speech: {
+            /** 首句最少字数。 */
+            firstSentenceMinChars: number;
+            /** 朗读看门狗（毫秒）。 */
+            utteranceWatchdogMs: number;
+        };
     };
 }
 /** 设置默认值（与 schema default 一致；client 侧也用同一份，避免双源漂移）。 */
