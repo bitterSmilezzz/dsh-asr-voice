@@ -1,37 +1,79 @@
 /**
  * dsh-asr-voice — client 词典（zh / en）。
+ *
+ * 键按「三步向导 → 高级 → 录音链路」分块。设置卡片改成 draft + 保存后，
+ * 旧的即时写回文案（saveFailed / configSaveFailed）与「获取模型」按钮组已删除。
  */
 
 /** 词典键（设置卡片 + 录音按钮 + 预览卡共用）。 */
 export type LocaleKey =
+  // 卡片抬头
   | 'cardTitle'
   | 'cardCopy'
-  | 'groupAsr'
-  | 'asrProviderLabel'
-  | 'asrProviderAuto'
-  | 'asrProviderBrowser'
-  | 'asrProviderCloud'
-  | 'cloudPresetLabel'
+  | 'readOnlyDoc'
+  | 'howTo'
+  // ① 识别方式
+  | 'stepEngineTitle'
+  | 'engineAuto'
+  | 'engineBrowser'
+  | 'engineCloud'
+  | 'engineHintAuto'
+  | 'engineHintBrowser'
+  | 'engineHintCloud'
+  // ② 服务商
+  | 'stepProviderTitle'
+  | 'stepProviderHint'
   | 'cloudPresetCustom'
-  | 'cloudBaseUrlLabel'
-  | 'cloudApiKeyLabel'
-  | 'cloudModelLabel'
-  | 'cloudModelHint'
-  | 'cloudModeLabel'
-  | 'cloudModeAuto'
-  | 'cloudModeTranscriptions'
-  | 'cloudModeChat'
   | 'addProvider'
   | 'removeProvider'
   | 'providersEmpty'
-  | 'activeProvider'
-  | 'providerInactive'
-  | 'fetchModels'
-  | 'fetchModelsLoading'
+  // ③ 密钥与自检
+  | 'stepKeyTitle'
+  | 'keyChecking'
+  | 'keyQueryFailed'
+  | 'keyConfigured'
+  | 'keyNeedsValue'
+  | 'keyNameNeeded'
+  | 'keySave'
+  | 'keySaving'
+  | 'keySavedHint'
+  | 'keySaveFailed'
+  | 'keyKeepHint'
+  | 'keyKeepPlaceholder'
+  | 'keyPastePlaceholder'
+  | 'testConnection'
+  | 'testAndSave'
+  | 'testBusy'
+  | 'testOk'
+  | 'testFail'
+  // 保存条
+  | 'save'
+  | 'savingHint'
+  | 'savedHint'
+  | 'saveNotApplied'
+  | 'unsavedHint'
+  | 'discard'
+  // 高级
+  | 'advancedTitle'
+  | 'advancedHint'
+  | 'advancedCollapse'
+  | 'groupAsr'
+  | 'providerNameLabel'
+  | 'providerNameDesc'
+  | 'providerListLabel'
+  | 'providerListDesc'
+  | 'cloudBaseUrlLabel'
+  | 'cloudBaseUrlDesc'
+  | 'cloudModelLabel'
+  | 'cloudModelDesc'
+  | 'cloudModelPicked'
+  | 'cloudModeLabel'
+  | 'cloudModeDesc'
+  | 'cloudModeAuto'
+  | 'cloudModeTranscriptions'
+  | 'cloudModeChat'
   | 'fetchModelsPick'
-  | 'fetchModelsCurrent'
   | 'fetchModelsEmpty'
-  | 'fetchModelsFail'
   | 'groupOptimize'
   | 'optimizeModeLabel'
   | 'optimizeHeuristic'
@@ -46,7 +88,6 @@ export type LocaleKey =
   | 'llmProviderLabel'
   | 'llmModelLabel'
   | 'llmCurrentDefault'
-  | 'llmCustomHint'
   | 'llmModelsEmpty'
   | 'languageLabel'
   | 'languageAuto'
@@ -67,10 +108,8 @@ export type LocaleKey =
   | 'hotkeyDesc'
   | 'hotkeyPlaceholder'
   | 'hotkeyClear'
+  // 录音链路 / 预览卡
   | 'dismiss'
-  | 'save'
-  | 'saveFailed'
-  | 'configSaveFailed'
   | 'loadFailed'
   | 'micTitle'
   | 'recordingTitle'
@@ -90,7 +129,6 @@ export type LocaleKey =
   | 'previewOptimized'
   | 'previewConfirm'
   | 'previewCancel'
-  | 'autoSendHint'
   | 'groupStats'
   | 'statsTitle'
   | 'statsCount'
@@ -107,32 +145,71 @@ export type LocaleT = (key: LocaleKey, vars?: Record<string, string | number>) =
 export const zh: LocaleDict = {
   cardTitle: '语音输入',
   cardCopy: '开口成文：识别、优化、填入草稿。',
-  groupAsr: '识别引擎',
-  asrProviderLabel: 'ASR 引擎',
-  asrProviderAuto: '自动（浏览器优先，云端兜底）',
-  asrProviderBrowser: '浏览器（Web Speech，免费免 key）',
-  asrProviderCloud: '云端（OpenAI-compatible）',
-  cloudPresetLabel: '服务商预置',
+  readOnlyDoc: '宿主当前不接受配置写入（文档只读或连接未就绪），下面的控件已禁用。',
+  howTo: '怎么办：① 选「云端」→ ② 点一个服务商 → ③ 按密钥那行的提示走，就完事了。',
+
+  stepEngineTitle: '识别方式',
+  engineAuto: '自动（推荐）',
+  engineBrowser: '仅浏览器（无需配置）',
+  engineCloud: '云端（更准，需要 key）',
+  engineHintAuto: '先用浏览器内置识别，不可用时自动切到云端。什么都没配过就选这个。',
+  engineHintBrowser: '完全在浏览器里识别：免费、不需要任何 key。准确率一般，且只有 Chrome / Edge 支持。',
+  engineHintCloud: '调用 OpenAI-compatible 云端识别：准确率和多语种更好，需要一把 API key（下一步起）。',
+
+  stepProviderTitle: '服务商',
+  stepProviderHint: '点一个即选中，BaseURL、模型和调用通道会自动填好。「自定义」可接任意 OpenAI-compatible 端点。',
   cloudPresetCustom: '自定义',
+  addProvider: '＋ 自定义服务商',
+  removeProvider: '删除',
+  providersEmpty: '还没有云端服务商，点「＋ 自定义服务商」加一行。',
+
+  stepKeyTitle: '密钥与自检',
+  keyChecking: '正在查询本机凭据…',
+  keyQueryFailed: '凭据状态查询失败',
+  keyConfigured: '已使用 DSH 凭据 {ref}，不用再填。',
+  keyNeedsValue: '尚未配置密钥：把 {ref} 粘贴到下面并保存。',
+  keyNameNeeded: '先给这个服务商起个显示名——密钥引用名由它派生。',
+  keySave: '保存密钥',
+  keySaving: '保存中…',
+  keySavedHint: '密钥已写入 DSH 凭据 {ref}。',
+  keySaveFailed: '密钥保存失败',
+  keyKeepHint: '密钥只写入 DSH 凭据：不进配置文件、不回显、不经过这个页面读取。',
+  keyKeepPlaceholder: '留空即不改动',
+  keyPastePlaceholder: '粘贴 API key',
+  testConnection: '测试连接',
+  testAndSave: '保存并测试',
+  testBusy: '测试中…',
+  testOk: '连接正常，取到 {n} 个模型。',
+  testFail: '测试失败',
+
+  save: '保存',
+  savingHint: '保存中…',
+  savedHint: '已保存。',
+  saveNotApplied: '「{section}」写回后读回不一致，可能没落盘：请重试或看宿主日志。',
+  unsavedHint: '有未保存的更改。',
+  discard: '放弃更改',
+
+  advancedTitle: '高级',
+  advancedHint: '展开：BaseURL / 模型 / 通道 / 多服务商 / 语言 / 优化 / 快捷键 / 用量',
+  advancedCollapse: '已展开，点这里收起',
+  groupAsr: '识别引擎',
+  providerNameLabel: '显示名',
+  providerNameDesc: '这个服务商的密钥存在 DSH 凭据 {ref} 下。自定义服务商的引用名由显示名派生——改名等于换一把 key。',
+  providerListLabel: '全部服务商',
+  providerListDesc: '选中即切换当前使用的供应商；删除只移除这一行配置，不会动 DSH 凭据。',
   cloudBaseUrlLabel: 'Base URL',
-  cloudApiKeyLabel: 'API Key（仅存本机服务端）',
+  cloudBaseUrlDesc: 'OpenAI-compatible 根地址，通常以 /v1 结尾。预置已填好，改这里即接入自建或代理端点。',
   cloudModelLabel: '模型',
-  cloudModelHint: '预置自动填充，可自行修改；自定义端点可填任意 OpenAI-compatible 模型。',
+  cloudModelDesc: '识别模型名。想知道端点里到底有哪些模型，用第 ③ 步的「测试连接」。',
+  cloudModelPicked: '「测试连接」成功后，这里会列出该端点真实可用的模型。',
   cloudModeLabel: '调用通道',
+  cloudModeDesc: '音频走哪条协议：whisper 式转写接口，或 chat + input_audio。选「自动」按模型名判定。',
   cloudModeAuto: '自动（按模型名判定）',
   cloudModeTranscriptions: 'whisper 式 /audio/transcriptions',
   cloudModeChat: 'chat + input_audio（MiMo/Qwen-ASR）',
-  addProvider: '＋ 添加供应商',
-  removeProvider: '删除',
-  providersEmpty: '尚未配置云端供应商，点「添加供应商」开始。',
-  activeProvider: '当前使用',
-  providerInactive: '备选',
-  fetchModels: '获取模型',
-  fetchModelsLoading: '获取中…',
   fetchModelsPick: '选择模型',
-  fetchModelsCurrent: '当前模型',
-  fetchModelsEmpty: '该供应商暂无 ASR 模型',
-  fetchModelsFail: '获取模型失败',
+  fetchModelsEmpty: '该端点没有返回可用模型，请检查 Base URL、密钥和模型名。',
+
   groupOptimize: '提示词优化',
   optimizeModeLabel: '优化方式',
   optimizeHeuristic: '本地启发式（免费、离线）',
@@ -147,17 +224,17 @@ export const zh: LocaleDict = {
   llmProviderLabel: '模型提供方',
   llmModelLabel: '模型',
   llmCurrentDefault: '当前所选（默认）',
-  llmCustomHint: '如需自定义模型，请到 DSH 模型列表添加后再选择。',
   llmModelsEmpty: '该提供方暂无可用模型',
   languageLabel: '识别语言',
   languageAuto: '自动（跟随浏览器/系统）',
+
   groupBehavior: '交互行为',
   autoSendLabel: '识别后自动发送',
   autoSendDesc: '开启后说完即发（push-to-talk 风格），关闭则填入草稿待确认。',
   silenceStopLabel: '静音自动停止',
   silenceStopDesc: '关闭（默认）：只有手动点击/快捷键结束录音，点停止即整段去识别；开启：静音持续 2.5 秒自动结束。',
   holdToTalkLabel: '按住说话',
-holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击开始、再点结束（静音自动结束由「静音自动停止」开关决定）。',
+  holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击开始、再点结束（静音自动结束由「静音自动停止」开关决定）。',
   textModeLabel: '文本输入',
   textModeDesc: '完整替换：清空草稿后填入；末尾追加：在已有文字后插入。',
   textModeReplace: '完整替换（默认）',
@@ -168,10 +245,8 @@ holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击
   hotkeyDesc: '点击后按新组合键（如 Ctrl+Shift+Space）；留空关闭。',
   hotkeyPlaceholder: '点击录制快捷键',
   hotkeyClear: '清除',
+
   dismiss: '关闭',
-  save: '保存',
-  saveFailed: '保存失败',
-  configSaveFailed: '配置写回宿主失败——改动可能在重启后丢失，请检查宿主状态后重试',
   loadFailed: '加载失败',
   micTitle: '语音输入',
   recordingTitle: '录音中…点击结束',
@@ -181,7 +256,7 @@ holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击
   errNoSound: '未检测到声音：录音为静音，未发送识别。请检查麦克风权限、系统输入音量，并在浏览器地址栏站点设置/授权弹窗中把输入设备选为「内置麦克风」（虚拟音频设备常被误选导致静音）',
   errNoSpeechSupport: '当前浏览器不支持 Web Speech，请改用云端 ASR（Chrome/Edge 均支持）。',
   errWebSpeechNetwork: '浏览器语音识别网络不可用（服务可能被网络屏蔽），已请改用云端 ASR。',
-  errCloudNotConfigured: '云端 ASR 未配置：请到设置填写 Base URL 与 API Key。',
+  errCloudNotConfigured: '云端 ASR 未配置：到设置选服务商、填 Base URL，密钥放在 DSH 凭据里。',
   noSpeechDetected: '未检测到语音',
   fallbackToCloud: '浏览器语音识别不可用，已自动切换云端 ASR',
   errTranscribe: '识别失败',
@@ -191,7 +266,6 @@ holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击
   previewOptimized: '优化后',
   previewConfirm: '填入并发送',
   previewCancel: '取消',
-  autoSendHint: '识别后将自动发送',
   groupStats: '用量统计',
   statsTitle: 'ASR 用量',
   statsCount: '已识别 {n} 次',
@@ -203,32 +277,71 @@ holdToTalkDesc: '开启后按住快捷键说话、松开结束；关闭为点击
 export const en: LocaleDict = {
   cardTitle: 'Voice Input',
   cardCopy: 'Speak to prompt — recognized, optimized, delivered.',
-  groupAsr: 'Recognition engine',
-  asrProviderLabel: 'ASR engine',
-  asrProviderAuto: 'Auto (browser first, cloud fallback)',
-  asrProviderBrowser: 'Browser (Web Speech, free, no key)',
-  asrProviderCloud: 'Cloud (OpenAI-compatible)',
-  cloudPresetLabel: 'Provider preset',
+  readOnlyDoc: 'The host is not accepting config writes right now (read-only document or connection not ready), so the controls below are disabled.',
+  howTo: 'What to do: ① pick Cloud → ② click a provider → ③ follow the hint on the key row. That is all.',
+
+  stepEngineTitle: 'Recognition engine',
+  engineAuto: 'Auto (recommended)',
+  engineBrowser: 'Browser only (no setup)',
+  engineCloud: 'Cloud (more accurate, needs a key)',
+  engineHintAuto: 'Tries the built-in browser recognition first and falls back to cloud when it is unavailable. Pick this if you have configured nothing yet.',
+  engineHintBrowser: 'Runs entirely in the browser: free, no key at all. Average accuracy, and only Chrome / Edge support it.',
+  engineHintCloud: 'Calls an OpenAI-compatible cloud recognizer: better accuracy and languages, and it needs an API key (next step).',
+
+  stepProviderTitle: 'Provider',
+  stepProviderHint: 'Click to select — Base URL, model and endpoint mode fill themselves. “Custom” takes any OpenAI-compatible endpoint.',
   cloudPresetCustom: 'Custom',
+  addProvider: '+ Custom provider',
+  removeProvider: 'Remove',
+  providersEmpty: 'No cloud provider yet — click “+ Custom provider” to add one.',
+
+  stepKeyTitle: 'Key & self-test',
+  keyChecking: 'Checking local credentials…',
+  keyQueryFailed: 'Credential status query failed',
+  keyConfigured: 'Using DSH credential {ref} — nothing to fill in.',
+  keyNeedsValue: 'No key yet: paste {ref} below and save.',
+  keyNameNeeded: 'Give this provider a display name first — the credential ref is derived from it.',
+  keySave: 'Save key',
+  keySaving: 'Saving…',
+  keySavedHint: 'Key written to DSH credential {ref}.',
+  keySaveFailed: 'Failed to save the key',
+  keyKeepHint: 'The key is written only into DSH credentials: never into the settings document, never echoed back to this page.',
+  keyKeepPlaceholder: 'Leave blank to keep it',
+  keyPastePlaceholder: 'Paste API key',
+  testConnection: 'Test connection',
+  testAndSave: 'Save & test',
+  testBusy: 'Testing…',
+  testOk: 'Connection OK — {n} models listed.',
+  testFail: 'Test failed',
+
+  save: 'Save',
+  savingHint: 'Saving…',
+  savedHint: 'Saved.',
+  saveNotApplied: '“{section}” did not match after the write-back — it may not have persisted. Retry or check the host log.',
+  unsavedHint: 'Unsaved changes.',
+  discard: 'Discard',
+
+  advancedTitle: 'Advanced',
+  advancedHint: 'Expand: Base URL / model / endpoint mode / providers / language / optimization / hotkey / usage',
+  advancedCollapse: 'Expanded — click to collapse',
+  groupAsr: 'Recognition engine',
+  providerNameLabel: 'Display name',
+  providerNameDesc: 'This provider reads its key from DSH credential {ref}. For a custom provider the ref is derived from the display name — renaming it means a different key.',
+  providerListLabel: 'All providers',
+  providerListDesc: 'Select one to make it current; removing a row only deletes that config entry, never the DSH credential.',
   cloudBaseUrlLabel: 'Base URL',
-  cloudApiKeyLabel: 'API key (stored on this machine, server-side)',
+  cloudBaseUrlDesc: 'OpenAI-compatible root, usually ending in /v1. Presets fill it; edit here to point at a self-hosted or proxied endpoint.',
   cloudModelLabel: 'Model',
-  cloudModelHint: 'Pre-filled from the preset; editable. Custom endpoints accept any OpenAI-compatible model.',
+  cloudModelDesc: 'Recognition model name. Use “Test connection” in step ③ to see what the endpoint actually offers.',
+  cloudModelPicked: 'After a successful “Test connection”, the models really available on this endpoint are listed here.',
   cloudModeLabel: 'Endpoint mode',
+  cloudModeDesc: 'Which protocol the audio goes over: Whisper-style transcriptions, or chat + input_audio. “Auto” decides by model name.',
   cloudModeAuto: 'Auto (by model name)',
   cloudModeTranscriptions: 'Whisper-style /audio/transcriptions',
   cloudModeChat: 'Chat + input_audio (MiMo/Qwen-ASR)',
-  addProvider: '+ Add provider',
-  removeProvider: 'Remove',
-  providersEmpty: 'No cloud provider configured — click “Add provider” to begin.',
-  activeProvider: 'Active',
-  providerInactive: 'Standby',
-  fetchModels: 'Fetch models',
-  fetchModelsLoading: 'Fetching…',
   fetchModelsPick: 'Pick a model',
-  fetchModelsCurrent: 'Current model',
-  fetchModelsEmpty: 'No ASR models from this provider',
-  fetchModelsFail: 'Failed to fetch models',
+  fetchModelsEmpty: 'The endpoint returned no usable model. Check Base URL, key and model name.',
+
   groupOptimize: 'Prompt optimization',
   optimizeModeLabel: 'Optimization mode',
   optimizeHeuristic: 'Local heuristic (free, offline)',
@@ -243,17 +356,17 @@ export const en: LocaleDict = {
   llmProviderLabel: 'Provider',
   llmModelLabel: 'Model',
   llmCurrentDefault: 'Current model (default)',
-  llmCustomHint: 'To use a custom model, add it to the DSH model list first, then pick it here.',
   llmModelsEmpty: 'No models available for this provider',
   languageLabel: 'Recognition language',
   languageAuto: 'Auto (follows browser/system)',
+
   groupBehavior: 'Behavior',
   autoSendLabel: 'Auto-send after recognition',
   autoSendDesc: 'When on, the prompt is submitted right after recognition (push-to-talk style). When off, it fills the draft for confirmation.',
   silenceStopLabel: 'Auto-stop on silence',
   silenceStopDesc: 'Off (default): recording ends only when you stop it manually — everything you said goes to recognition at once. On: ends automatically after 2.5s of silence.',
   holdToTalkLabel: 'Hold to talk',
-holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off, click to start and click again to stop (silence auto-stop is controlled by its own toggle).',
+  holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off, click to start and click again to stop (silence auto-stop is controlled by its own toggle).',
   textModeLabel: 'Text insertion',
   textModeDesc: 'Replace: clear the draft then fill. Append: insert after existing text.',
   textModeReplace: 'Replace draft (default)',
@@ -264,10 +377,8 @@ holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off,
   hotkeyDesc: 'Click, then press a new combo (e.g. Ctrl+Shift+Space). Clear to disable.',
   hotkeyPlaceholder: 'Click to record hotkey',
   hotkeyClear: 'Clear',
+
   dismiss: 'Dismiss',
-  save: 'Save',
-  saveFailed: 'Save failed',
-  configSaveFailed: 'Failed to persist config to host — changes may be lost on restart. Check host status and retry.',
   loadFailed: 'Load failed',
   micTitle: 'Voice input',
   recordingTitle: 'Recording… click to stop',
@@ -277,7 +388,7 @@ holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off,
   errNoSound: 'No sound detected: the recording was silent and was not sent. Check the mic permission, system input volume, and pick the built-in microphone as the input device in the browser site settings / permission prompt (virtual audio devices are often selected by mistake and record silence)',
   errNoSpeechSupport: 'Web Speech is not supported by this browser; switch to cloud ASR (Chrome/Edge support it).',
   errWebSpeechNetwork: 'Browser speech recognition network is unavailable (the service may be blocked); switch to cloud ASR.',
-  errCloudNotConfigured: 'Cloud ASR is not configured: set Base URL and API key in settings.',
+  errCloudNotConfigured: 'Cloud ASR is not configured: pick a provider and set the Base URL in settings; the key lives in DSH credentials.',
   noSpeechDetected: 'No speech detected',
   fallbackToCloud: 'Browser speech unavailable; switched to cloud ASR',
   errTranscribe: 'Transcription failed',
@@ -287,7 +398,6 @@ holdToTalkDesc: 'When on, hold the hotkey to talk and release to stop. When off,
   previewOptimized: 'Optimized',
   previewConfirm: 'Fill & send',
   previewCancel: 'Cancel',
-  autoSendHint: 'Will auto-send after recognition',
   groupStats: 'Usage stats',
   statsTitle: 'ASR usage',
   statsCount: '{n} transcriptions',

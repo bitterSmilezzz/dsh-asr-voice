@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import * as jsxRuntime from 'react/jsx-runtime'
 import { zh, en } from './locales.ts'
 import { CSS } from './styles.ts'
-import { bindConfigScope, config, subscribeConfig, type SettingsBinderLike } from './config.ts'
+import { bindConfigScope, bindCredentialsApi, config, subscribeConfig, type CredentialsApiLike, type SettingsBinderLike } from './config.ts'
 import { VoiceSettingsCard } from './settings-card.tsx'
 import { VoiceButton, voiceController } from './voice-button.tsx'
 import { matchHotkey, parseHotkey, type HotkeySpec } from './hotkey.ts'
@@ -28,7 +28,7 @@ export { zh, en }
 
 const NS = 'asr-voice'
 
-/** 只依赖实际存在的硬服务；settingsScope 走 scoped inject（可选）。 */
+/** 只依赖实际存在的硬服务；设置卡所需的 settingsScope / connection 走 scoped inject。 */
 export const inject = [
   'slots',
   'locale',
@@ -115,9 +115,14 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(applyHotkey, 'asr-voice: hotkey')
 
   // 设置卡片（settings.plugin.item, key: asr-voice）+ 配置绑定。
-  // settingsScope 为可选服务：用 scoped inject 拿到 binder，未挂载则只跳过卡片。
-  ctx.inject(['settingsScope'], (raw) => {
-    const c = raw as ClientContext & { settingsScope?: SettingsBinderLike }
+  // settingsScope / connection 都是既有的客户端服务：前者给配置读写通道，后者的
+  // credentials 域是 API key 的唯一去处（key 不进 settings、不进浏览器 DOM）。
+  ctx.inject(['settingsScope', 'connection'], (raw) => {
+    const c = raw as ClientContext & {
+      settingsScope?: SettingsBinderLike
+      connection?: { api?: { credentials?: CredentialsApiLike } }
+    }
+    bindCredentialsApi(c.connection?.api?.credentials)
     const binder = c.settingsScope
     if (binder === undefined) return
     c.effect(() => bindConfigScope(binder), 'asr-voice: settings scope sync')

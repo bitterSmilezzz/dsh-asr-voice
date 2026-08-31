@@ -417,7 +417,8 @@ export const CSS = `
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
 }
-.dshav-toggle input[type='checkbox'] {
+.dshav-toggle input[type='checkbox'],
+.dshav-toggle input[type='radio'] {
   flex: none;
   width: 16px;
   height: 16px;
@@ -464,6 +465,105 @@ export const CSS = `
 .dshav-status { font-size: 12px; color: var(--dshav-text-2); min-height: 16px; }
 .dshav-status[data-kind='err'] { color: var(--dshav-danger); }
 .dshav-status[data-kind='ok'] { color: var(--dshav-accent); }
+
+/* ── 三步向导 ─────────────────────────────────────────────────────── */
+.dshav-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0 16px;
+}
+.dshav-step-head { display: flex; align-items: center; gap: 8px; }
+.dshav-step-index {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--dshav-accent) 14%, transparent);
+  color: var(--dshav-accent);
+  font-size: 12px;
+  line-height: 1;
+}
+.dshav-step-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+/* chip 单选行：换行排布，选中态用主色描边 + 浅底（不靠颜色单独表意） */
+.dshav-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dshav-chip {
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 15px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.dshav-chip:hover:not(:disabled) { border-color: var(--dsw-alias-label-dimmed); color: var(--dsw-alias-label-primary); }
+.dshav-chip[data-selected='true'] {
+  border-color: var(--dshav-accent);
+  background: color-mix(in srgb, var(--dshav-accent) 10%, transparent);
+  color: var(--dshav-accent);
+  font-weight: 600;
+}
+.dshav-chip:disabled { opacity: .5; cursor: default; }
+.dshav-chip:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+/* 密钥已就绪的一行（绿色 ✓ 文案，非输入态） */
+.dshav-ok-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dshav-accent);
+}
+/* 保存条：状态文案在左，按钮在右，常驻避免用户以为没生效 */
+.dshav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+}
+.dshav-actions > p { flex: 1; min-width: 0; }
+/* 高级折叠：整行可点，展开后列出全部既有字段 */
+.dshav-advanced-toggle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0 10px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.dshav-advanced-toggle:hover { color: var(--dsw-alias-label-primary); }
+.dshav-advanced-toggle:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.dshav-provider-list { display: flex; flex-direction: column; gap: 8px; }
+.dshav-provider-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dshav-provider-row > label { flex: 1; min-width: 0; }
 
 @keyframes dshav-blink {
   0%, 100% { opacity: 1; }
