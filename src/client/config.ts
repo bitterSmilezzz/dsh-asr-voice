@@ -198,24 +198,26 @@ function normalizeProvider(row: unknown): CloudProviderConfig {
  */
 export function mergeHostValue(value: Partial<AsrVoiceConfig>): void {
   if (!isPlainObject(value)) return
+  // 铁律：本地默认的形状永不被外来快照顶掉。realtimeTuning() 这类消费方直接解构
+  // turn / speech，一个 null 或形状漂移的字段顶进默认值就是整条链路崩溃；
+  // 类型不符（含 null）一律视为「宿主没写这一项」，沿用本地值。
   const assign = (target: Record<string, unknown>, src: Record<string, unknown>): void => {
     for (const key of Object.keys(target)) {
       const next = src[key]
-      if (next === undefined) continue
       const current = target[key]
+      if (isPlainObject(current)) {
+        if (isPlainObject(next)) assign(current, next)
+        continue
+      }
+      if (Array.isArray(current)) {
+        if (Array.isArray(next)) target[key] = key === 'providers' ? next.map(normalizeProvider) : structuredClone(next)
+        continue
+      }
       if (typeof current === 'number') {
         target[key] = num(next, current)
         continue
       }
-      if (Array.isArray(next)) {
-        target[key] = key === 'providers' ? next.map(normalizeProvider) : structuredClone(next)
-        continue
-      }
-      if (isPlainObject(current) && isPlainObject(next)) {
-        assign(current, next)
-        continue
-      }
-      target[key] = isPlainObject(next) ? structuredClone(next) : next
+      if (typeof next === typeof current) target[key] = next
     }
   }
   assign(config as unknown as Record<string, unknown>, value as unknown as Record<string, unknown>)

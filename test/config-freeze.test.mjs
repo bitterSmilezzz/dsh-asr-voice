@@ -7,7 +7,7 @@ globalThis.window = { dispatchEvent() {} }
 const {
   DEFAULTS, config, mergeHostValue, newDraft, patchProvider, pickPreset, addProvider, removeProvider,
   withProviders, withLegacyMaterialized, draftActiveProvider, bindConfigScope, bindCredentialsApi,
-  writeDraft, readKeyState, saveKey, keyRefOf, recordBehavior,
+  writeDraft, readKeyState, saveKey, keyRefOf, recordBehavior, realtimeTuning,
 } = await import('../src/client/config.ts')
 const { keyRefFor } = await import('../src/key-ref.ts')
 
@@ -180,6 +180,48 @@ test('数值设置：宿主快照里的非法值不得污染计时（NaN 会让 
   mergeHostValue(hostSnapshot({ behavior: { ...structuredClone(DEFAULTS.behavior), silenceMs: 9_000 } }))
   assert.equal(taken.silenceMs, before.silenceMs, 'recordBehavior 返回的是当时的拷贝')
   assert.equal(recordBehavior().silenceMs, 9_000)
+})
+
+test('null / 形状漂移不得顶掉本地默认（realtimeTuning 必须是全函数）', () => {
+  mergeHostValue(hostSnapshot())
+  // 宿主旧文档 / 手工改过的 settings 会把 null 留在原位：曾直接崩在解构 turn 之后。
+  mergeHostValue(deepFreeze({ realtime: { turn: null, speech: null, hotkey: null, enabled: null, tts: null, maxSessionMs: null } }))
+  const tuning = realtimeTuning()
+  assert.equal(tuning.settleMs, DEFAULTS.realtime.turn.settleMs)
+  assert.equal(tuning.firstSentenceMinChars, DEFAULTS.realtime.speech.firstSentenceMinChars)
+  assert.equal(tuning.hotkey, '', '快捷键位上的 null 会被 parseHotkey 当成字符串炸掉')
+  assert.equal(tuning.enabled, false, '开关位上的 null 不能变成任意真值')
+
+  mergeHostValue(deepFreeze({
+    realtime: { turn: [1, 2], speech: 'x', maxSessionMs: { nested: 1 }, enabled: 'true', hotkey: 5, tts: ['off'] },
+    behavior: null, optimize: 'nope',
+  }))
+  assert.deepEqual(realtimeTuning(), tuning, '类型漂移一律视为宿主没写这一项')
+  assert.equal(typeof config.behavior, 'object', '整段被顶成字符串会让 recordBehavior 直接崩')
+  assert.equal(typeof config.optimize, 'object')
+
+  // 一个坏字段不能拖垮整段：同段里的合法值照写（宿主文档只会写出部分缺省的形状）。
+  mergeHostValue(deepFreeze({ realtime: { turn: null, maxSessionMs: 30_000, hotkey: 'Ctrl+Alt+V' } }))
+  assert.equal(config.realtime.maxSessionMs, 30_000)
+  assert.equal(config.realtime.hotkey, 'Ctrl+Alt+V')
+  assert.equal(realtimeTuning().settleMs, DEFAULTS.realtime.turn.settleMs)
+
+  // 数组段同理：对象顶进 providers 位之后每次 .map 都是运行时炸点。
+  mergeHostValue(deepFreeze({ asr: { cloud: { providers: { id: 'a' } } } }))
+  assert.ok(Array.isArray(config.asr.cloud.providers), 'providers 必须仍是数组')
+})
+
+test('宿主文档早于 realtime 段：整段缺省仍要给出可用快照', () => {
+  // config 是模块级单例，本文件所有用例共用：先复位再验，否则断言变成测试顺序的函数。
+  mergeHostValue(structuredClone(DEFAULTS))
+  const legacy = structuredClone(DEFAULTS)
+  delete legacy.realtime
+  mergeHostValue(deepFreeze({ ...legacy, behavior: { ...legacy.behavior, autoSend: true } }))
+  const tuning = realtimeTuning()
+  assert.equal(tuning.enabled, false)
+  assert.equal(tuning.settleMs, 900)
+  assert.equal(tuning.maxSessionMs, 600_000)
+  assert.equal(config.behavior.autoSend, true, '合法标量照写，缺的那一段不能连带吞掉')
 })
 
 test('readKeyState / saveKey：只经 credentials 通道，值不回流 config', async () => {

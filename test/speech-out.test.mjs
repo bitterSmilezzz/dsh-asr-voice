@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 // speech-out.ts 顶层不碰 DOM（window / speechSynthesis 只在工厂函数里取），
 // 按 pcm.test.mjs 的做法直接用 node 的类型剥离跑源码。
-const { createSentencePump, createSpeechSynthesisSink, isSpeechSynthesisSupported } = await import('../src/client/speech-out.ts')
+const { createSentencePump, createSpeechSynthesisSink, isSpeechSynthesisSupported, MAX_UTTERANCE_CHARS } = await import('../src/client/speech-out.ts')
 
 /**
  * 按「流式回复逐块到达」喂泵：deltas 是新增片段，feed 收的是**累积全文**
@@ -190,6 +190,15 @@ test('cancel() 吞掉本轮 drain：打断后何时还麦由调用方决定', as
   })
 })
 
+/** 等条件成立（有界）：看门狗是 10ms 一拍的链式计时，满载下固定 sleep 会先于第二拍醒来。 */
+async function waitFor(label, predicate) {
+  const deadline = Date.now() + 3000
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`超时：${label}`)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
+
 test('onend 不回时看门狗按播完处理，麦克风不会被永久扣住', async () => {
   await withFakeSynth(async (fake) => {
     const sink = sinkOf({ utteranceWatchdogMs: 10 })
@@ -197,7 +206,7 @@ test('onend 不回时看门狗按播完处理，麦克风不会被永久扣住',
     sink.onDrain = () => { drains += 1 }
     sink.enqueue('卡住的一句。')
     sink.enqueue('下一句。')
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    await waitFor('看门狗推进到第二句并排空', () => fake.spoken.length === 2 && drains === 1)
     assert.deepEqual(fake.spoken.map((u) => u.text), ['卡住的一句。', '下一句。'])
     assert.equal(drains, 1)
     sink.dispose()
@@ -221,4 +230,58 @@ test('能力探测：node 里没有 speechSynthesis，装了假实现即为真',
     assert.equal(isSpeechSynthesisSupported(), true)
   })
   assert.equal(isSpeechSynthesisSupported(), false)
+})
+
+/** 确定性伪随机（种子固定，红的时候能原样复现）。 */
+function mulberry32(seed) {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** 覆盖断句规则的全部料：中日韩句读、拉丁句末符、小数点、缩写点、引号闭合、换行、超长无标点段、纯空白串。 */
+const FUZZ_FRAGMENTS = [
+  '今天天气不错。', '我们继续说吧！', '然后呢？', '再后面……', '顺便说一句；',
+  'The reply is ready. ', 'It costs 3.14 tokens. ', 'e.g. use a plugin. ', 'Done!\n',
+  'no punctuation at all', 'x'.repeat(260), '，未尽的一节', '"quoted ending."', '”尾巴）',
+  ' ', '\n\n', '   ', '短。', '第二段话真的很长一点好让首句并入规则生效。',
+  ' '.repeat(210), '\n'.repeat(215),
+]
+
+test('句子泵随机化性质：不丢字、不重字、顺序不变、每段可念', () => {
+  const strip = (s) => s.replace(/\s+/g, '')
+  for (let seed = 1; seed <= 300; seed++) {
+    const rnd = mulberry32(seed)
+    const pieces = []
+    const count = 3 + Math.floor(rnd() * 14)
+    for (let i = 0; i < count; i++) pieces.push(FUZZ_FRAGMENTS[Math.floor(rnd() * FUZZ_FRAGMENTS.length)] ?? '兜底。')
+    const text = pieces.join(rnd() < 0.3 ? ' ' : '')
+    const pump = createSentencePump(12)
+    const spoken = []
+    let at = 0
+    while (at < text.length) {
+      at = Math.min(text.length, at + 1 + Math.floor(rnd() * (1 + rnd() * 40)))
+      spoken.push(...pump.feed(text.slice(0, at)))
+    }
+    spoken.push(...pump.finish())
+    const where = `seed=${seed} text=${JSON.stringify(text.slice(0, 60))}…`
+    assert.equal(spoken.join('').replace(/\s+/g, ''), strip(text), `丢字/重字/乱序 ${where}`)
+    for (const s of spoken) {
+      assert.notEqual(s, '', `吐出空段 ${where}`)
+      assert.equal(s, s.trim(), `段首尾留白 ${where}`)
+      assert.ok(s.length <= MAX_UTTERANCE_CHARS, `超出一块上限，看门狗配不上 ${where}`)
+    }
+  }
+})
+
+test('整刀落在空白里的硬切不产出空块（空 utterance 会白占一个看门狗位）', () => {
+  for (const pad of [' '.repeat(210), '\n'.repeat(215), ' \n'.repeat(120)]) {
+    const pump = createSentencePump(12)
+    const spoken = [...pump.feed(`${pad}好。`), ...pump.finish()]
+    assert.deepEqual(spoken, ['好。'], JSON.stringify(pad.slice(0, 3)))
+  }
 })

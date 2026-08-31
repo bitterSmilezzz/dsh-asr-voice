@@ -148,6 +148,9 @@ export function createBrowserRealtime(
       }
       if (!active || paused) return
       const chunk = finalChunk.trim()
+      const fresh = interimChunk.trim()
+      // 这条事件什么也没说（只有空白）：不动字幕、不冲掉在手候选、不重排静默计时。
+      if (chunk === '' && fresh === '') return
       // 重启后重复上报同一句：丢掉，否则字幕会念两遍、回合会提交两遍。
       if (chunk !== '' && segment === '' && chunk === lastTurn) {
         interim = ''
@@ -155,7 +158,7 @@ export function createBrowserRealtime(
         return
       }
       if (chunk !== '') segment = joinText(segment, chunk)
-      interim = interimChunk.trim()
+      interim = fresh
       emitPartial()
       armSettle()
     }

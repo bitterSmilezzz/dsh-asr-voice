@@ -39,7 +39,7 @@ export function isSpeechSynthesisSupported(): boolean {
  * 内念完，否则会被看门狗误判成「播完」而截断。正常句长远小于此，只有全程无标点的
  * 退化回复才会撞上。
  */
-const MAX_UTTERANCE_CHARS = 200
+export const MAX_UTTERANCE_CHARS = 200
 
 /** 中日韩句读：出现即断句，不需要后接空白。 */
 const CJK_STOP = '。！？…；'
@@ -116,9 +116,11 @@ export function createSentencePump(firstSentenceMinChars: number): {
       }
       if (buffer.length >= MAX_UTTERANCE_CHARS) {
         // 只切固定长度：一次喂进 500 字无标点长文时，整段吐出会让看门狗盖不住。
-        out.push(buffer.slice(0, MAX_UTTERANCE_CHARS).trim())
+        const head = buffer.slice(0, MAX_UTTERANCE_CHARS).trim()
         buffer = buffer.slice(MAX_UTTERANCE_CHARS)
         pos = 0
+        if (head === '') continue // 整刀落在空白里：没有可念内容，不产出空块
+        out.push(head)
         started = true
         continue
       }

@@ -8,6 +8,20 @@ const { createBrowserRealtime } = await import('../src/client/realtime.ts')
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
+ * 等某个异步事实发生（有界）。回合交出是 settle→tail 两拍链式计时，满载下两拍都会
+ * 被拖后，固定 sleep 会变成和测试自己赛跑。反向断言（「还不到时候」）继续用固定
+ * sleep：定时器只会晚到、不会早到，那半边不会因抖动而红。
+ */
+async function until(label, predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`超时：${label}`)
+    await sleep(5)
+  }
+}
+
+
+/**
  * 造一个可控的 webkitSpeechRecognition：start/abort 只计数，结果与 onend 由测试手动投喂，
  * 把「Chrome 什么时候自己结束会话、什么时候重复上报上一句」这些不可控行为变成确定性路径。
  * 计时留了大余量（settle/tail 各 80/40ms，断言点至少差 40ms），避免事件循环抖动造成偶发红。
@@ -96,7 +110,7 @@ test('静默 settleMs + 宽限 tailMs 才交出回合；期间字幕跟手', asy
     instances[0].emit([{ text: '今天天气不错。', final: true }])
     await sleep(40)
     assert.deepEqual(events.turns, [], 'settleMs 未到不得收尾')
-    await sleep(120)
+    await until('交出整句', () => events.turns.length >= 1)
     assert.deepEqual(events.turns, ['今天天气不错。'])
     session.stop()
   })
@@ -114,7 +128,7 @@ test('还在出字就重新计时：连续说话不会被半路切成两句', as
     rec.emit([{ text: '第一段 第二段 第三段', final: false }])
     assert.deepEqual(events.turns, [], '每次新结果都应把 settle 推后')
     assert.deepEqual(events.partial, ['第一段', '第一段 第二段', '第一段 第二段 第三段'])
-    await sleep(200)
+    await until('只交出一句', () => events.turns.length >= 1)
     assert.deepEqual(events.turns, ['第一段 第二段 第三段'])
     session.stop()
   })
@@ -129,7 +143,7 @@ test('tailMs 宽限期内来的迟到结果并入本句，而不是另起一句'
     await sleep(100)
     assert.deepEqual(events.turns, [], 'tail 未到时不得提交')
     rec.emit([{ text: '开会', final: true }])
-    await sleep(300)
+    await until('迟到结果并入本句', () => events.turns.length >= 1)
     assert.deepEqual(events.turns, ['帮我记一下 开会'], '迟到结果必须并进同一句，只交一次')
     session.stop()
   }, { settleMs: 80, tailMs: 120 })
@@ -140,7 +154,7 @@ test('半双工门控：pause 后不收音、不交出回合，resume 从干净�
     session.start()
     const first = instances[0]
     first.emit([{ text: '说一句', final: true }])
-    await sleep(160)
+    await until('第一句交出', () => events.turns.length >= 1)
     assert.deepEqual(events.turns, ['说一句'])
 
     session.pause()
@@ -155,7 +169,7 @@ test('半双工门控：pause 后不收音、不交出回合，resume 从干净�
     assert.equal(session.listening, true)
     assert.equal(instances.length, 2, 'resume 装一个新识别器，避免旧实例残留错误态')
     instances[1].emit([{ text: '下一句', final: true }])
-    await sleep(160)
+    await until('第二句交出', () => events.turns.length >= 2)
     assert.deepEqual(events.turns, ['说一句', '下一句'])
     session.stop()
   })
@@ -166,8 +180,7 @@ test('识别器自己结束（Chrome 静音收摊）后悄悄续上，用户不�
     session.start()
     instances[0].endSession()
     assert.equal(instances.length, 1, '重启要隔一小会儿，紧接着 start() 会撞 InvalidStateError')
-    await sleep(300)
-    assert.equal(instances.length, 2)
+    await until('识别器悄悄续上', () => instances.length >= 2)
     assert.equal(instances[1].started, 1)
     session.stop()
   })
@@ -177,7 +190,7 @@ test('重启后重复上报同一整句：不二次提交、字幕不跳字', as
   await withFakeSpeech(async ({ session, events, instances }) => {
     session.start()
     instances[0].emit([{ text: '你好世界', final: true }])
-    await sleep(160)
+    await until('整句交出', () => events.turns.length >= 1)
     assert.deepEqual(events.turns, ['你好世界'])
     instances[0].emit([{ text: '你好世界', final: true }])
     await sleep(160)
@@ -227,5 +240,69 @@ test('start 幂等；stop 之后不再有任何回调', async () => {
     assert.deepEqual(events.turns, [])
     assert.deepEqual(events.partial, ['一句'], 'stop 后不得再来任何回调')
     assert.equal(session.listening, false)
+  })
+})
+
+test('纯空白结果永不交出回合；随后的真实文本照交', async () => {
+  await withFakeSpeech(async ({ session, events, instances }) => {
+    session.start()
+    const rec = instances[0]
+    rec.emit([{ text: '   ', final: true }])
+    rec.emit([{ text: ' \n ', final: true }])
+    await sleep(240)
+    assert.deepEqual(events.turns, [], '空白不是「说完了」，是一次都没开口')
+    assert.deepEqual(events.partial, [], '没有文本就没有字幕')
+    rec.emit([{ text: '在手', final: false }])
+    rec.emit([{ text: ' ', final: true }])
+    assert.deepEqual(events.partial.at(-1), '在手', '一条空白事件不该把在手的候选从字幕上抹掉')
+    rec.emit([{ text: '真话', final: true }])
+    await until('空白之后的整句交出', () => events.turns.length >= 1)
+    assert.deepEqual(events.turns, ['真话'], '空格归一不能把后面这句一起吞掉')
+    session.stop()
+  })
+})
+
+test('tail 窗口内 pause() 取消交出；暂停期结果全丢', async () => {
+  await withFakeSpeech(async ({ session, events, instances }) => {
+    session.start()
+    const first = instances[0]
+    first.emit([{ text: '你好', final: true }])
+    await sleep(100) // settle 已触发、tail 还在跑（交出点在 ~120ms）
+    assert.deepEqual(events.turns, [], '前置条件：交出前一刻才动手，否则测不到窗口')
+    session.pause()
+    first.emit([{ text: '你好', final: true }])
+    await sleep(240)
+    assert.deepEqual(events.turns, [], '播报期间不得再攒出第二个回合')
+    assert.deepEqual(events.partial, ['你好'], '暂停期间连字幕都不该动')
+    assert.equal(session.listening, false)
+    session.stop()
+  })
+})
+
+test('整句交出后 pause/resume，再说同一句必须再算一次（去重只记当期）', async () => {
+  await withFakeSpeech(async ({ session, events, instances }) => {
+    session.start()
+    instances[0].emit([{ text: '再来一次', final: true }])
+    await until('第一次交出', () => events.turns.length >= 1)
+    assert.deepEqual(events.turns, ['再来一次'])
+    // 真实链路里 commitTurn 在 onTurn 内立刻 pause（半双工门控），念完才 resume。
+    session.pause()
+    session.resume()
+    assert.equal(instances.length, 2, 'resume 必须换新识别器（旧实例的错误态会残留）')
+    instances[1].emit([{ text: '再来一次', final: true }])
+    await until('第二次交出', () => events.turns.length >= 2)
+    assert.deepEqual(events.turns, ['再来一次', '再来一次'], '去重不得跨期生效，否则这句话永远说不出口')
+    session.stop()
+  })
+})
+
+test('tail 窗口内 stop() 同样取消交出', async () => {
+  await withFakeSpeech(async ({ session, events, instances }) => {
+    session.start()
+    instances[0].emit([{ text: '半句', final: true }])
+    await sleep(100)
+    session.stop()
+    await sleep(240)
+    assert.deepEqual(events.turns, [])
   })
 })
