@@ -16,8 +16,9 @@
 import * as react from 'react'
 // Type-only: pulls the ui-conversation SlotMap merge (input seats + standard kit).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { config, realtimeTuning, type RealtimeTuning } from './config.ts'
-import { createBrowserRealtime, type RealtimeSession } from './realtime.ts'
+import { cloudConfigured, config, realtimeTuning, type RealtimeTuning } from './config.ts'
+import { createRealtime, type RealtimeSession } from './realtime.ts'
+import { isPcmCaptureSupported } from './capture.ts'
 import { createSentencePump, createSpeechSynthesisSink, isSpeechSynthesisSupported, type SpeakSink } from './speech-out.ts'
 import { isWebSpeechSupported } from './recorder.ts'
 import { RecDot, SpectrumBars, Spinner } from './voice-button.tsx'
@@ -203,18 +204,28 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
   }
 
   const failByCode = (code: string): void => {
-    const msg = code === 'no-mic' || code === 'mic-denied'
+    const msg = code === 'no-mic' || code === 'mic-denied' || code === 'silent-device' || code === 'no-audio-context'
       ? t('errNoMic')
       : code === 'network'
         ? t('errWebSpeechNetwork')
-        : t('errNoSpeechSupport')
+        : code === 'provider-unreachable'
+          ? t('errSegmentedUnreachable')
+          : code === 'no-worklet' || code === 'capture-failed'
+            ? t('errSegmentedUnsupported')
+            : t('errNoSpeechSupport')
     endSession(undefined, msg)
   }
 
   /** 开始一次对话。必须在点击回调里调用（Safari 的发声权限只认用户激活上下文）。 */
   const begin = (): void => {
-    if (!isWebSpeechSupported()) { setError(t('errNoSpeechSupport')); setNotice(null); return }
     const tuning = realtimeTuning()
+    // 前置检查按引擎分：segmented 不用 Web Speech，但每句都要过一次已配置的云端转写。
+    if (tuning.engine === 'segmented') {
+      if (!isPcmCaptureSupported()) { setError(t('errSegmentedUnsupported')); setNotice(null); return }
+      if (!cloudConfigured()) { setError(t('errSegmentedNeedsCloud')); setNotice(null); return }
+    } else if (!isWebSpeechSupported()) {
+      setError(t('errNoSpeechSupport')); setNotice(null); return
+    }
     const ttsReady = isSpeechSynthesisSupported()
     tuningRef.current = tuning
     setError(null)
@@ -230,7 +241,7 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
       sinkRef.current = sink
       sink.prime()
     }
-    engineRef.current = createBrowserRealtime(tuning.language, { settleMs: tuning.settleMs, tailMs: tuning.tailMs }, {
+    engineRef.current = createRealtime(tuning.engine, tuning.language, tuning.segmented, {
       onPartial: (text) => { if (phaseRef.current === 'listening') setLive(text) },
       onTurn: (text) => { commitTurn(text) },
       onLevel: (level) => {
@@ -241,6 +252,7 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
         }
       },
       onFail: (code) => { failByCode(code) },
+      onGap: () => { setNotice(t('chatGap')) },
     })
     // 到点自己收：麦克风不能因为人去倒杯水就一直开着。
     capRef.current = setTimeout(() => { endSession(t('chatEndedLimit')) }, tuning.maxSessionMs)

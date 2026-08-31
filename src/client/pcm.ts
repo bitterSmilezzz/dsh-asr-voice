@@ -122,3 +122,18 @@ export function rmsFromByteTimeDomain(bytes: Uint8Array): number {
   }
   return Math.sqrt(sum / bytes.length)
 }
+
+/**
+ * Float32 采样的 RMS（0~1）。本地 VAD 判的是 AudioWorklet 直出的采样，不是
+ * AnalyserNode 的 8-bit 缓冲——两者的判据不能互抄，否则同一个阈值在电平表和
+ * 切段器上会给出不同的「有没有在说话」。
+ */
+export function rmsOfFloat(src: Float32Array): number {
+  if (src.length === 0) return 0
+  let sum = 0
+  for (let i = 0; i < src.length; i++) {
+    const v = src[i] ?? 0
+    sum += v * v
+  }
+  return Math.sqrt(sum / src.length)
+}

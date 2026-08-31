@@ -126,6 +126,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 行为 | `behavior.silenceMs` | `2500` | 静音判定时长（毫秒，200~60000）：连续安静这么久即判定说完，需开 `silenceStop` |
 | 行为 | `behavior.silenceRms` | `0.02` | 静音阈值（0~1 响度比例）：低于它算安静 |
 | 实时 | `realtime.enabled` | `false` | 语音对话总开关：开了才出现第二个按钮与 `realtime.hotkey`（改动即时生效，无需重载页面） |
+| 实时 | `realtime.engine` | `browser` | 出字来源：`browser`（浏览器 Web Speech，逐字上屏、零 key、不新增本机请求）/ `segmented`（本地能量 VAD 按句切段，每句走一次已有的云端整段转写，需先配好 ASR 服务商） |
 | 实时 | `realtime.tts` | `browser` | 回复播报：`browser`（浏览器 `speechSynthesis`，零配置）/ `off`（只出字不出声） |
 | 实时 | `realtime.hotkey` | 空 | 进出实时对话的快捷键（空 = 不用快捷键）；与 `behavior.hotkey` 撞键时**对话优先** |
 | 实时 | `realtime.turn.settleMs` | `900` | 转写文字静默多久算「说完了」（毫秒，200~10000）：到点即提交并发起回合 |
@@ -133,6 +134,13 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 实时 | `realtime.maxSessionMs` | `600000` | 单次对话上限（毫秒，30s~3600s）：到点自动结束并交还麦克风 |
 | 实时 | `realtime.speech.firstSentenceMinChars` | `12` | 首句最少字数：太短就与后句并成一段再起音，避免「好的。」这类碎片开头 |
 | 实时 | `realtime.speech.utteranceWatchdogMs` | `60000` | 单句朗读看门狗（毫秒）：浏览器不回 `onend` 时按念完处理，防止麦克风被永久扣住 |
+| 实时切段 | `realtime.vad.frameMs` | `40` | 采集帧长（毫秒，10~500，仅 `engine=segmented`）：越小越省延迟，越大越省调度开销 |
+| 实时切段 | `realtime.vad.rms` | `0.02` | RMS 判有声阈值（0~1）：它是**设备噪声底**的函数——偏低则呼吸/键盘成句，偏高则轻声句尾被切掉 |
+| 实时切段 | `realtime.vad.silenceMs` | `700` | 连续静音多久切一段（毫秒，200~5000）：也是每句上屏的固定延迟 |
+| 实时切段 | `realtime.vad.prerollMs` | `200` | 段前多保留多久音频（毫秒，0~1000）：不留就会切掉第一个音节 |
+| 实时切段 | `realtime.vad.minSpeechMs` | `250` | 实际语音短于此不成为一段（毫秒，100~3000）：杂音不该花一次上游配额 |
+| 实时切段 | `realtime.vad.maxSegmentMs` | `8000` | 单段语音长度上限（毫秒，1000~30000）：说不停也强制轮换，同时是单次上传体大小的上限 |
+| 实时切段 | `realtime.vad.maxPending` | `3` | 排队段数上限（1~20）：转写慢过说话时丢最旧并提示字幕断裂 |
 | 统计 | `/api/asr-voice/stats` | — | ASR 用量统计（次数/字符/最近时间，进程内） |
 
 **API key 不在上表里。** 它存于 DSH 凭据服务，按引用名读取：预置供应商直接用
@@ -151,8 +159,14 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 - **停顿即发起回合**：实时模式恒等于「自动发送」，与 `behavior.autoSend` 无关——那一次点击
   换成了每句的静默判定，草稿框里的内容会真的被提交执行。`behavior.textMode` 仍然生效：
   `append` 保留你已敲的文字，`replace` 覆盖草稿。
-- **引擎是浏览器 Web Speech**：不新增任何本机 host 请求、不需要云商 key；识别由浏览器自己的
-  语音服务完成（音频出机方式见下节披露），因此它同样受 Firefox 无 Web Speech 的限制。
+- **两种引擎，回合判据同源**：`browser` 用浏览器 Web Speech 连续识别，逐字上屏，不新增任何本机
+  host 请求、不需要云商 key（识别由浏览器自己的语音服务完成，音频出机方式见下节披露，因此同样受
+  Firefox 无 Web Speech 的限制）。`segmented` 用本地能量 VAD 把连续麦克风切成句，每句走一次已有的
+  云端整段转写：要先配好 ASR 服务商，出字节奏是「说完 `vad.silenceMs` + 一个往返」而非逐字，
+  换来的是不依赖浏览器语音服务、且电平表由真实麦克风电平驱动。
+  两者共用同一套 `realtime.turn.*` 静默判定，切换引擎只改段边界的**来源**，不改「什么时候算说完」。
+  `segmented` 连续三次转写失败即判死并结束会话；转写慢过说话时丢最旧的段并提示字幕断裂，
+  而不是让字幕越拖越长。
 - **半双工**：朗读期间不收音，回声不会被当成你说的话。打断有三处入口——再按一次按钮、
   再按一次快捷键、点提示条上的 `×`——任一都会立刻止住朗读、取消在途回合、回到聆听。
   不支持用说话声打断（见下节）。
@@ -180,7 +194,8 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 
 ## 外部依赖 External Dependencies
 
-- 浏览器：Web Speech API（Chrome/Edge；Safari 部分支持）、`getUserMedia` + `MediaRecorder`
+- 浏览器：Web Speech API（Chrome/Edge；Safari 部分支持）、`getUserMedia` + `MediaRecorder`；
+  `realtime.engine = segmented` 另需 `AudioWorklet`（16k PCM 采集，Chrome/Edge/Safari 交集内）
 - 云端 ASR / LLM：你配置的 OpenAI-compatible 服务（网络请求由本机 host 发起）
 - 运行时**不依赖任何第三方 DSH 插件**（与 dsh-ui-tweaks 等完全独立，可单独用、可组合用）
 
@@ -218,10 +233,17 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   或开着高权限工具时，不要把 `realtime.enabled` 打开。
   *Realtime chat starts agent turns without another click — the pause is the send. Keep it off on
   shared machines or when high-privilege tools are armed.*
-- 实时对话期间麦克风**持续**流经浏览器自己的在线语音识别服务（Chrome / Edge / Safari 各自的
-  后端，非本插件的服务器），比整段模式的占用时长长得多。本插件不经手、不落盘这段音频。
-  *While a realtime session is open, audio streams continuously to the browser's own speech
+- **`engine=browser`（默认）**：实时对话期间麦克风**持续**流经浏览器自己的在线语音识别服务
+  （Chrome / Edge / Safari 各自的后端，非本插件的服务器），比整段模式的占用时长长得多。
+  本插件不经手、不落盘这段音频。
+  *While a browser-engine session is open, audio streams continuously to the browser's own speech
   service — not to this plugin's servers, which neither handle nor store it.*
+- **`engine=segmented`**：每说完一句，该句音频就作为一次独立转写请求上传到**你配置的**云端 ASR
+  （与整段模式同一服务商、同一凭据），并按句消耗其配额；一次对话 = N 次请求，而不是 1 次。
+  VAD 只认响度，安静环境里的呼吸、键盘声若超过 `vad.rms` 也会照发一次（调高它即可，趋零的段
+  由静音守卫当场拦下、不上游）。
+  *With the segmented engine, every utterance becomes one upload to your configured cloud ASR and
+  consumes quota per sentence; raise `vad.rms` if breaths or keystrokes are being billed.*
 - **半双工，不支持语音插话**：朗读期间不收音，只能用按钮 / 快捷键 / 提示条的 `×` 打断。
   浏览器回声消除能否吃掉我们自己外放的合成语音尚未在本机实测，实测通过前不做声学打断。
   *Half-duplex: no barge-in by speaking. Whether browser echo cancellation suppresses our own

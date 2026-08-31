@@ -128,6 +128,24 @@ export type LocaleKey =
   | 'realtimeSettleMsDesc'
   | 'realtimeTailMsLabel'
   | 'realtimeTailMsDesc'
+  | 'realtimeEngineLabel'
+  | 'realtimeEngineDesc'
+  | 'realtimeEngineBrowser'
+  | 'realtimeEngineSegmented'
+  | 'vadFrameMsLabel'
+  | 'vadFrameMsDesc'
+  | 'vadRmsLabel'
+  | 'vadRmsDesc'
+  | 'vadSilenceMsLabel'
+  | 'vadSilenceMsDesc'
+  | 'vadPrerollMsLabel'
+  | 'vadPrerollMsDesc'
+  | 'vadMinSpeechMsLabel'
+  | 'vadMinSpeechMsDesc'
+  | 'vadMaxSegmentMsLabel'
+  | 'vadMaxSegmentMsDesc'
+  | 'vadMaxPendingLabel'
+  | 'vadMaxPendingDesc'
   | 'realtimeMaxSessionLabel'
   | 'realtimeMaxSessionDesc'
   | 'realtimeFirstSentenceLabel'
@@ -145,6 +163,10 @@ export type LocaleKey =
   | 'chatEndedLimit'
   | 'chatNoReply'
   | 'chatNoTts'
+  | 'chatGap'
+  | 'errSegmentedNeedsCloud'
+  | 'errSegmentedUnsupported'
+  | 'errSegmentedUnreachable'
   // 录音链路 / 预览卡
   | 'dismiss'
   | 'loadFailed'
@@ -302,6 +324,24 @@ export const zh: LocaleDict = {
   realtimeSettleMsDesc: '单位毫秒。识别文字停止变化这么久，就认为这句说完并上屏。',
   realtimeTailMsLabel: '收尾延时',
   realtimeTailMsDesc: '单位毫秒。上屏前再多等一会儿，接住最后一个词的迟到结果；0 表示不等。',
+  realtimeEngineLabel: '实时引擎',
+  realtimeEngineDesc: 'Web Speech 逐字出字、不花配额；按句转写用本地静音检测切句，每句走一次已配置的云端转写，出字会慢一拍。',
+  realtimeEngineBrowser: 'Web Speech（逐字，免费）',
+  realtimeEngineSegmented: '按句转写（本地切句 + 云端识别）',
+  vadFrameMsLabel: '采集帧长',
+  vadFrameMsDesc: '单位毫秒。每帧的时长，越小越省延迟、越大越省调度。',
+  vadRmsLabel: '有声阈值',
+  vadRmsDesc: '0~1 的 RMS。按你的设备噪声底调：偏低会把键盘呼吸当话，偏高会切掉轻声句尾。',
+  vadSilenceMsLabel: '切句静音',
+  vadSilenceMsDesc: '单位毫秒。安静这么久算一句说完，也是每句上屏的固定延迟。',
+  vadPrerollMsLabel: '段前缓冲',
+  vadPrerollMsDesc: '单位毫秒。把开口前的一小段一起送上去，否则第一个音节必被切掉。',
+  vadMinSpeechMsLabel: '最短语音',
+  vadMinSpeechMsDesc: '单位毫秒。实际发声短于此不成为一句，不该为咳嗽花一次配额。',
+  vadMaxSegmentMsLabel: '最长单句',
+  vadMaxSegmentMsDesc: '单位毫秒。说个不停也到这个长度就出字，同时封顶单次上传大小。',
+  vadMaxPendingLabel: '待转写队列',
+  vadMaxPendingDesc: '最多攒几句待转写。转写慢过说话时丢最早的一句。',
   realtimeMaxSessionLabel: '单次对话上限',
   realtimeMaxSessionDesc: '单位毫秒。到点自动结束这次对话并交还麦克风，避免忘了关而一直听。',
   realtimeFirstSentenceLabel: '首句最少字数',
@@ -319,6 +359,10 @@ export const zh: LocaleDict = {
   chatEndedLimit: '已达单次对话上限，对话自动结束',
   chatNoReply: '这句没有发起回合，继续听',
   chatNoTts: '当前浏览器不支持语音播报，只显示字幕',
+  chatGap: '转写跟不上，已丢掉最早的一句，字幕可能不完整',
+  errSegmentedNeedsCloud: '按句转写需要先配好云端 ASR（设置 → 语音转文字 → 云端供应商）',
+  errSegmentedUnsupported: '当前浏览器不支持实时音频采集（需支持 AudioWorklet），请改用 Web Speech 引擎',
+  errSegmentedUnreachable: '转写服务连续失败，本次对话已结束',
 
   dismiss: '关闭',
   loadFailed: '加载失败',
@@ -471,6 +515,24 @@ export const en: LocaleDict = {
   realtimeSettleMsDesc: 'Milliseconds. Once the transcript stops changing for this long, the turn is considered finished and put on screen.',
   realtimeTailMsLabel: 'Turn tail delay',
   realtimeTailMsDesc: 'Milliseconds. Waits a bit longer before submitting so the last word\'s late result still makes it in. 0 means no extra wait.',
+  realtimeEngineLabel: 'Realtime engine',
+  realtimeEngineDesc: 'Web Speech streams words as you speak and costs nothing; per-sentence mode segments on local silence and sends each sentence to your configured cloud ASR, so captions land one round trip late.',
+  realtimeEngineBrowser: 'Web Speech (word by word, free)',
+  realtimeEngineSegmented: 'Per-sentence (local segmentation + cloud ASR)',
+  vadFrameMsLabel: 'Capture frame',
+  vadFrameMsDesc: 'Milliseconds per captured audio frame. Smaller is snappier, larger is cheaper to schedule.',
+  vadRmsLabel: 'Speech threshold',
+  vadRmsDesc: 'RMS from 0 to 1, tuned to your device noise floor. Too low turns keyboard clicks into sentences; too high clips quiet sentence endings.',
+  vadSilenceMsLabel: 'Segment silence',
+  vadSilenceMsDesc: 'Milliseconds of silence that end a sentence — also the fixed delay before each caption appears.',
+  vadPrerollMsLabel: 'Pre-roll',
+  vadPrerollMsDesc: 'Milliseconds kept from before speech starts. Without it the first syllable is always cut off.',
+  vadMinSpeechMsLabel: 'Min speech',
+  vadMinSpeechMsDesc: 'Milliseconds of actual voicing a segment needs to count. Coughs should not spend ASR quota.',
+  vadMaxSegmentMsLabel: 'Max sentence length',
+  vadMaxSegmentMsDesc: 'Milliseconds. An endless monologue still gets captions at this length, and it caps the upload size.',
+  vadMaxPendingLabel: 'Transcription queue',
+  vadMaxPendingDesc: 'How many sentences may wait for transcription. When ASR falls behind, the oldest is dropped.',
   realtimeMaxSessionLabel: 'Max conversation length',
   realtimeMaxSessionDesc: 'Milliseconds. The conversation ends on its own at the limit and the microphone is handed back, so an unattended session cannot keep listening.',
   realtimeFirstSentenceLabel: 'First sentence min length',
@@ -488,6 +550,10 @@ export const en: LocaleDict = {
   chatEndedLimit: 'Reached the max conversation length — the chat ended by itself',
   chatNoReply: 'That line did not start a turn, still listening',
   chatNoTts: 'This browser cannot speak replies — captions only',
+  chatGap: 'Transcription fell behind — the oldest sentence was dropped, captions may be incomplete',
+  errSegmentedNeedsCloud: 'Per-sentence mode needs a configured cloud ASR provider (Settings → Voice → Cloud providers)',
+  errSegmentedUnsupported: 'This browser cannot capture live audio (AudioWorklet is required) — switch back to the Web Speech engine',
+  errSegmentedUnreachable: 'Transcription failed repeatedly, this conversation ended',
 
   dismiss: 'Dismiss',
   loadFailed: 'Load failed',

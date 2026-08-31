@@ -185,15 +185,17 @@ test('数值设置：宿主快照里的非法值不得污染计时（NaN 会让 
 test('null / 形状漂移不得顶掉本地默认（realtimeTuning 必须是全函数）', () => {
   mergeHostValue(hostSnapshot())
   // 宿主旧文档 / 手工改过的 settings 会把 null 留在原位：曾直接崩在解构 turn 之后。
-  mergeHostValue(deepFreeze({ realtime: { turn: null, speech: null, hotkey: null, enabled: null, tts: null, maxSessionMs: null } }))
+  mergeHostValue(deepFreeze({ realtime: { turn: null, speech: null, hotkey: null, enabled: null, tts: null, engine: null, vad: null, maxSessionMs: null } }))
   const tuning = realtimeTuning()
   assert.equal(tuning.settleMs, DEFAULTS.realtime.turn.settleMs)
   assert.equal(tuning.firstSentenceMinChars, DEFAULTS.realtime.speech.firstSentenceMinChars)
   assert.equal(tuning.hotkey, '', '快捷键位上的 null 会被 parseHotkey 当成字符串炸掉')
   assert.equal(tuning.enabled, false, '开关位上的 null 不能变成任意真值')
+  assert.equal(tuning.engine, 'browser', '引擎位上的 null 会把会话装配成 undefined 引擎')
+  assert.equal(tuning.segmented.vad.silenceMs, DEFAULTS.realtime.vad.silenceMs, '整段 vad 顶成 null 时解构 vad.frameMs 直接炸')
 
   mergeHostValue(deepFreeze({
-    realtime: { turn: [1, 2], speech: 'x', maxSessionMs: { nested: 1 }, enabled: 'true', hotkey: 5, tts: ['off'] },
+    realtime: { turn: [1, 2], speech: 'x', maxSessionMs: { nested: 1 }, enabled: 'true', hotkey: 5, tts: ['off'], engine: 5, vad: [1, 2] },
     behavior: null, optimize: 'nope',
   }))
   assert.deepEqual(realtimeTuning(), tuning, '类型漂移一律视为宿主没写这一项')
@@ -205,6 +207,12 @@ test('null / 形状漂移不得顶掉本地默认（realtimeTuning 必须是全�
   assert.equal(config.realtime.maxSessionMs, 30_000)
   assert.equal(config.realtime.hotkey, 'Ctrl+Alt+V')
   assert.equal(realtimeTuning().settleMs, DEFAULTS.realtime.turn.settleMs)
+
+  mergeHostValue(deepFreeze({ realtime: { engine: 'segmented', vad: { frameMs: 60, rms: 'loud', silenceMs: null } } }))
+  assert.equal(realtimeTuning().segmented.frameMs, 60, 'vad 里的合法字段照写')
+  assert.equal(realtimeTuning().segmented.vad.rms, DEFAULTS.realtime.vad.rms, '同段的坏字段只作废自己')
+  assert.equal(realtimeTuning().segmented.vad.silenceMs, DEFAULTS.realtime.vad.silenceMs)
+  assert.equal(realtimeTuning().engine, 'segmented')
 
   // 数组段同理：对象顶进 providers 位之后每次 .map 都是运行时炸点。
   mergeHostValue(deepFreeze({ asr: { cloud: { providers: { id: 'a' } } } }))
@@ -222,6 +230,24 @@ test('宿主文档早于 realtime 段：整段缺省仍要给出可用快照', (
   assert.equal(tuning.settleMs, 900)
   assert.equal(tuning.maxSessionMs, 600_000)
   assert.equal(config.behavior.autoSend, true, '合法标量照写，缺的那一段不能连带吞掉')
+
+  // 上一版插件写过的文档：有 realtime 段，但没有 engine / vad。
+  const prev = structuredClone(DEFAULTS)
+  delete prev.realtime.engine
+  delete prev.realtime.vad
+  mergeHostValue(deepFreeze(prev))
+  const upgraded = realtimeTuning()
+  assert.equal(upgraded.engine, 'browser', '旧文档没写的引擎位不能变成 undefined')
+  const { vad: vadDefaults } = DEFAULTS.realtime
+  assert.deepEqual(upgraded.segmented.vad, {
+    rms: vadDefaults.rms,
+    silenceMs: vadDefaults.silenceMs,
+    prerollMs: vadDefaults.prerollMs,
+    minSpeechMs: vadDefaults.minSpeechMs,
+    maxSegmentMs: vadDefaults.maxSegmentMs,
+  })
+  assert.equal(upgraded.segmented.frameMs, vadDefaults.frameMs)
+  assert.equal(upgraded.segmented.maxPending, vadDefaults.maxPending)
 })
 
 test('readKeyState / saveKey：只经 credentials 通道，值不回流 config', async () => {

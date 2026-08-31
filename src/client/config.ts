@@ -17,6 +17,7 @@
  */
 // Type-only: pulls the settings domain's Context merge (ctx.settingsScope).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SegmentedTuning } from './realtime.ts'
 import { keyRefFor, type KeyRefSource } from '../key-ref.ts'
 import { DEFAULT_PRESET_ID, presetById } from '../presets.ts'
 
@@ -75,6 +76,8 @@ export interface AsrVoiceConfig {
   realtime: {
     /** 实时语音对话总开关。 */
     enabled: boolean
+    /** 实时引擎：browser（Web Speech 逐字）/ segmented（本地 VAD 按句 + 整段转写通道）。 */
+    engine: 'browser' | 'segmented'
     /** 回复播报：browser（speechSynthesis）/ off（只出字）。 */
     tts: 'browser' | 'off'
     /** 进出实时模式的快捷键（'' = 关闭）。 */
@@ -84,6 +87,23 @@ export interface AsrVoiceConfig {
       settleMs: number
       /** 静音窗口之后再宽限这么久才提交（毫秒）。 */
       tailMs: number
+    }
+    /** 声学切段参数（仅 engine=segmented）。 */
+    vad: {
+      /** 采集帧长（毫秒）。 */
+      frameMs: number
+      /** RMS 有声阈值（0~1）。 */
+      rms: number
+      /** 连续静音多久切一段（毫秒）。 */
+      silenceMs: number
+      /** 段前保留（毫秒）。 */
+      prerollMs: number
+      /** 短于此不成为一段（毫秒）。 */
+      minSpeechMs: number
+      /** 单段长度上限（毫秒）。 */
+      maxSegmentMs: number
+      /** 待转写队列上限（不含在途那段）。 */
+      maxPending: number
     }
     /** 单次对话上限（毫秒）。 */
     maxSessionMs: number
@@ -108,7 +128,7 @@ export const DEFAULTS: AsrVoiceConfig = {
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
-  realtime: { enabled: false, tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
+  realtime: { enabled: false, engine: 'browser', tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与写回共同维护。 */
@@ -305,6 +325,8 @@ export function recordBehavior(source: AsrVoiceConfig = config): RecordBehavior 
 export interface RealtimeTuning {
   /** 按钮是否存在。 */
   enabled: boolean
+  /** 实时引擎。 */
+  engine: 'browser' | 'segmented'
   /** 回复播报方式。 */
   tts: 'browser' | 'off'
   /** 对话快捷键（'' = 关闭）。 */
@@ -321,16 +343,31 @@ export interface RealtimeTuning {
   utteranceWatchdogMs: number
   /** 识别语言（同时用于挑选朗读音色）。 */
   language: string
+  /** 引擎参数（两引擎共用同一份回合判定，segmented 另有声学切段）。 */
+  segmented: SegmentedTuning
 }
 
 /** 取当前配置的实时对话快照（配置 → 会话/引擎/播报的唯一搬运处）。 */
 export function realtimeTuning(source: AsrVoiceConfig = config): RealtimeTuning {
-  const { enabled, tts, hotkey, turn, maxSessionMs, speech } = source.realtime
+  const { enabled, engine, tts, hotkey, turn, vad, maxSessionMs, speech } = source.realtime
   return {
-    enabled, tts, hotkey, maxSessionMs, language: source.language,
+    enabled, engine, tts, hotkey, maxSessionMs, language: source.language,
     settleMs: turn.settleMs, tailMs: turn.tailMs,
     firstSentenceMinChars: speech.firstSentenceMinChars,
     utteranceWatchdogMs: speech.utteranceWatchdogMs,
+    segmented: {
+      settleMs: turn.settleMs,
+      tailMs: turn.tailMs,
+      frameMs: vad.frameMs,
+      maxPending: vad.maxPending,
+      vad: {
+        rms: vad.rms,
+        silenceMs: vad.silenceMs,
+        prerollMs: vad.prerollMs,
+        minSpeechMs: vad.minSpeechMs,
+        maxSegmentMs: vad.maxSegmentMs,
+      },
+    },
   }
 }
 

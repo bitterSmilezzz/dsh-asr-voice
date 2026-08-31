@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 // realtime.ts 顶层不碰 DOM（识别器构造在工厂里），按 pcm.test.mjs 的做法
 // 直接用 node 的类型剥离跑源码。
-const { createBrowserRealtime } = await import('../src/client/realtime.ts')
+const { createBrowserRealtime, createSegmentedRealtime } = await import('../src/client/realtime.ts')
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -305,4 +305,235 @@ test('tail 窗口内 stop() 同样取消交出', async () => {
     await sleep(240)
     assert.deepEqual(events.turns, [])
   })
+})
+
+const SR = 16_000
+/** 一帧 `ms` 毫秒、定幅 `amp` 的 16k 采样。 */
+const frame = (ms, amp) => new Float32Array(Math.round(SR * ms / 1000)).fill(amp)
+
+/**
+ * 按句转写引擎：注入采集与转写，于是真 VAD、真队列、真回合判定都能在 node 里跑。
+ * 转写请求由测试手动放行——上游往返什么时候回来不可控，这里必须可控。
+ */
+async function withSegmented(run, opts = {}) {
+  const events = { partial: [], turns: [], fails: [], gaps: 0, levels: [] }
+  const sinks = []
+  const mutes = []
+  const requests = []
+  let stops = 0
+  const capture = async (options) => {
+    sinks.push(options)
+    return {
+      stop: () => { stops += 1 },
+      setMuted: (muted) => { mutes.push(muted) },
+    }
+  }
+  const transcribe = async (pcm, language, signal) => {
+    let resolve
+    let reject
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+    requests.push({ pcm, language, signal, resolve, reject })
+    return promise
+  }
+  const session = createSegmentedRealtime(
+    opts.language ?? 'zh-CN',
+    {
+      settleMs: opts.settleMs ?? 60,
+      tailMs: opts.tailMs ?? 20,
+      frameMs: 40,
+      maxPending: opts.maxPending ?? 8,
+      vad: {
+        rms: opts.rms ?? 0.05,
+        silenceMs: opts.vadSilenceMs ?? 100,
+        prerollMs: 0,
+        minSpeechMs: 20,
+        maxSegmentMs: 5_000,
+      },
+    },
+    {
+      onPartial: (text) => { events.partial.push(text) },
+      onTurn: (text) => { events.turns.push(text) },
+      onLevel: (level) => { events.levels.push(level) },
+      onFail: (code) => { events.fails.push(code) },
+      onGap: () => { events.gaps += 1 },
+    },
+    { capture, transcribe },
+  )
+  /** 把声音直接灌进采集回调。 */
+  const feed = (ms, amp) => { sinks.at(-1)?.onFrame(frame(ms, amp)) }
+  /** 说一句（4 窗有声）+ 足够切段的静音。 */
+  const speak = (ms = 80) => { feed(ms, 0.2); feed(120, 0) }
+  try {
+    await run({ session, events, requests, feed, speak, mutes, stopCount: () => stops })
+  } finally {
+    session.stop()
+  }
+}
+
+test('一句语音 → 一次上游 → 一个回合，电平是真的', async () => {
+  await withSegmented(async ({ session, events, requests, speak }) => {
+    session.start()
+    speak()
+    await until('段被送去转写', () => requests.length === 1)
+    assert.equal(new Set(requests.map((r) => r.language)).size, 1)
+    requests[0].resolve('帮我记一下')
+    await until('回合交出', () => events.turns.length === 1)
+    assert.deepEqual(events.turns, ['帮我记一下'])
+    assert.deepEqual(events.partial, ['帮我记一下'])
+    assert.ok(events.levels.some((l) => l > 0.1), '电平表由真实麦克风电平驱动，不是模拟')
+  })
+})
+
+test('两句在 settle 内先后落地：合成一个回合，只交一次', async () => {
+  await withSegmented(async ({ session, events, requests, speak }) => {
+    session.start()
+    speak()
+    await until('第一段在途', () => requests.length === 1)
+    requests[0].resolve('第一段')
+    await until('字幕落地', () => events.partial.length === 1)
+    speak()
+    await until('第二段在途', () => requests.length === 2)
+    requests[1].resolve('第二段')
+    await until('回合交出', () => events.turns.length === 1)
+    await sleep(160)
+    assert.deepEqual(events.turns, ['第一段 第二段'], 'settle 内到的文字属于同一回合')
+  }, { settleMs: 200, tailMs: 0 })
+})
+
+test('还在出声时不交出回合：先落地的半句字幕不把一句话说成两半', async () => {
+  await withSegmented(async ({ session, events, requests, speak, feed }) => {
+    session.start()
+    speak()
+    await until('第一段在途', () => requests.length === 1)
+    feed(80, 0.2)
+    requests[0].resolve('前半句')
+    await sleep(120)
+    assert.deepEqual(events.turns, [], 'vad 仍在有声窗内，交出必须被按住')
+    assert.deepEqual(events.partial, ['前半句'], '但字幕照常更新')
+    feed(40, 0.2)
+    assert.deepEqual(events.turns, [], '继续出声：不是一次性错过，而是每次都按住')
+    feed(120, 0)
+    // 收尾静音让第二段当场入队（transcribe 同步被调用），立刻放行才不会让它晚于计时。
+    requests[1].resolve('后半句')
+    await until('回合交出', () => events.turns.length === 1)
+    assert.deepEqual(events.turns, ['前半句 后半句'])
+  }, { settleMs: 40, tailMs: 0 })
+})
+
+test('pause 静音轨道并作废在途结果，resume 从干净的一句开始', async () => {
+  await withSegmented(async ({ session, events, requests, speak, mutes }) => {
+    session.start()
+    speak()
+    await until('第一段在途', () => requests.length === 1)
+    session.pause()
+    assert.deepEqual(mutes, [true], '播报期间轨道直接静音')
+    assert.equal(requests[0].signal.aborted, true, '在途请求要 abort，否则白烧一次配额')
+    requests[0].resolve('播报里的回声')
+    await sleep(200)
+    assert.deepEqual(events.turns, [])
+    assert.deepEqual(events.partial, [])
+    session.resume()
+    assert.deepEqual(mutes, [true, false])
+    speak()
+    await until('第二段在途', () => requests.length === 2)
+    requests[1].resolve('下一句')
+    await until('回合交出', () => events.turns.length === 1)
+    assert.deepEqual(events.turns, ['下一句'])
+  }, { settleMs: 40, tailMs: 0 })
+})
+
+/**
+ * 作废在途结果不能只靠 `paused` 标志：resume 可能发生在旧请求回来**之前**，那时会话
+ * 已经在听下一句，`active && !paused` 全线放行——只有代际能把上一期的字挡在门外。
+ */
+test('在途结果晚过 resume 才回来：一个字都不能漏进新回合', async () => {
+  await withSegmented(async ({ session, events, requests, speak }) => {
+    session.start()
+    speak()
+    await until('第一段在途', () => requests.length === 1)
+    session.pause()
+    session.resume()
+    requests[0].resolve('上一期的回声')
+    await sleep(200)
+    assert.deepEqual(events.partial, [], '过期结果不该动字幕')
+    assert.deepEqual(events.turns, [], '过期结果不该交出回合')
+    speak()
+    await until('第二段在途', () => requests.length === 2)
+    requests[1].resolve('这一句')
+    await until('回合交出', () => events.turns.length === 1)
+    assert.deepEqual(events.turns, ['这一句'], '新回合只含本期的文字')
+  }, { settleMs: 40, tailMs: 0 })
+})
+
+test('VAD 被噪声底顶开的段，过不了静音守卫就不发上游', async () => {
+  await withSegmented(async ({ session, requests, feed }) => {
+    session.start()
+    // rms 阈值压到 0.001：0.002 幅度的段算「有声」，但峰值低于 SILENCE_PEAK_FLOOR。
+    feed(80, 0.002)
+    feed(160, 0)
+    await sleep(120)
+    assert.deepEqual(requests, [], '趋零的段发上去只会换来幻觉字')
+  }, { rms: 0.001 })
+})
+
+test('连续三次转写失败 → 判死，之后不再发上游', async () => {
+  await withSegmented(async ({ session, events, requests, speak }) => {
+    session.start()
+    for (let i = 0; i < 3; i++) {
+      speak()
+      await until(`第 ${i + 1} 段在途`, () => requests.length === i + 1)
+      requests[i].reject(new Error('boom'))
+    }
+    await until('判死', () => events.fails.length === 1)
+    assert.deepEqual(events.fails, ['provider-unreachable'])
+    assert.equal(session.listening, false)
+    speak()
+    await sleep(160)
+    assert.equal(requests.length, 3, '判死后新的语音段不该再打上游')
+  })
+})
+
+test('转写慢过说话：队列超上限丢最旧并报告断裂', async () => {
+  await withSegmented(async ({ session, events, requests, speak }) => {
+    session.start()
+    // 首段占住在途，其后每多一段就挤掉最旧的一段（丢段在入队当场发生）。
+    for (let i = 0; i < 4; i++) speak()
+    assert.equal(requests.length, 1, '只有一段真正在途')
+    assert.equal(events.gaps, 2, '4 段里最旧的两段被丢掉')
+    await sleep(50)
+    assert.equal(events.gaps, 2, '丢段是一次性的，不该反复报')
+  }, { maxPending: 1 })
+})
+
+test('stop() 之后回来的结果既不交回合也不动字幕', async () => {
+  await withSegmented(async ({ session, events, requests, speak, stopCount }) => {
+    session.start()
+    speak()
+    await until('第一段在途', () => requests.length === 1)
+    session.stop()
+    assert.equal(stopCount(), 1, 'stop 必须真的关掉采集')
+    requests[0].resolve('迟到的句子')
+    await sleep(200)
+    assert.deepEqual(events.turns, [])
+    assert.deepEqual(events.partial, [])
+  })
+})
+
+test('采集报 no-worklet → 会话级失败并关麦', async () => {
+  const events = { fails: [], turns: [], partial: [] }
+  let stopped = 0
+  const session = createSegmentedRealtime(
+    'zh-CN',
+    { settleMs: 60, tailMs: 0, frameMs: 40, maxPending: 3, vad: { rms: 0.05, silenceMs: 100, prerollMs: 0, minSpeechMs: 20, maxSegmentMs: 5_000 } },
+    { onPartial: () => {}, onTurn: () => {}, onLevel: () => {}, onFail: (code) => { events.fails.push(code) } },
+    {
+      capture: async (options) => { options.onFail('no-worklet'); return { stop: () => { stopped += 1 }, setMuted: () => {} } },
+      transcribe: async () => '',
+    },
+  )
+  session.start()
+  await until('失败上报', () => events.fails.length === 1)
+  assert.deepEqual(events.fails, ['no-worklet'])
+  assert.equal(session.listening, false)
+  assert.equal(stopped, 1)
 })

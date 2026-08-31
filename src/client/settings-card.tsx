@@ -747,6 +747,16 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                 <span className="dshav-groupTitle">{t('groupRealtime')}</span>
                 <ToggleRow title={t('realtimeEnableLabel')} desc={t('realtimeEnableDesc')} checked={draft.realtime.enabled} onChange={() => edit((c) => withSection(c, 'realtime', { enabled: !c.realtime.enabled }))} />
                 <SelectRow
+                  title={t('realtimeEngineLabel')}
+                  desc={t('realtimeEngineDesc')}
+                  value={draft.realtime.engine}
+                  options={[
+                    { value: 'browser', label: t('realtimeEngineBrowser') },
+                    { value: 'segmented', label: t('realtimeEngineSegmented') },
+                  ]}
+                  onChange={(v) => edit((c) => withSection(c, 'realtime', { engine: v === 'segmented' ? 'segmented' : 'browser' }))}
+                />
+                <SelectRow
                   title={t('realtimeTtsLabel')}
                   desc={t('realtimeTtsDesc')}
                   value={draft.realtime.tts}
@@ -759,6 +769,13 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                 <Field title={t('realtimeHotkeyLabel')} desc={t('realtimeHotkeyDesc')} control={<HotkeyRecorder value={draft.realtime.hotkey} onChange={(v) => edit((c) => withSection(c, 'realtime', { hotkey: v }))} t={t} />} />
                 <NumberRow title={t('realtimeSettleMsLabel')} desc={t('realtimeSettleMsDesc')} value={draft.realtime.turn.settleMs} min={200} max={10_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, settleMs: v } }))} />
                 <NumberRow title={t('realtimeTailMsLabel')} desc={t('realtimeTailMsDesc')} value={draft.realtime.turn.tailMs} min={0} max={5_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, tailMs: v } }))} />
+                <NumberRow title={t('vadFrameMsLabel')} desc={t('vadFrameMsDesc')} value={draft.realtime.vad.frameMs} min={10} max={500} step={10} onChange={(v) => edit((c) => withSection(c, 'realtime', { vad: { ...c.realtime.vad, frameMs: v } }))} />
+                <NumberRow title={t('vadRmsLabel')} desc={t('vadRmsDesc')} value={draft.realtime.vad.rms} min={0} max={1} step={0.005} onChange={(v) => edit((c) => withSection(c, 'realtime', { vad: { ...c.realtime.vad, rms: v } }))} />
+                <NumberRow title={t('vadSilenceMsLabel')} desc={t('vadSilenceMsDesc')} value={draft.realtime.vad.silenceMs} min={200} max={5_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { vad: { ...c.realtime.vad, silenceMs: v } }))} />
+                <NumberRow title={t('vadPrerollMsLabel')} desc={t('vadPrerollMsDesc')} value={draft.realtime.vad.prerollMs} min={0} max={1_000} step={50} onChange={(v) => edit((c) => withSection(c, 'realtime', { vad: { ...c.realtime.vad, prerollMs: v } }))} />
+                <NumberRow title={t('vadMinSpeechMsLabel')} desc={t('vadMinSpeechMsDesc')} value={draft.realtime.vad.minSpeechMs} min={100} max={3_000} step={50} onChange={(v) => edit((c) => withSection(c, 'realtime', { vad: { ...c.realtime.vad, minSpeechMs: v } }))} />
+                <NumberRow title={t('vadMaxSegmentMsLabel')} desc={t('vadMaxSegmentMsDesc')} value={draft.realtime.vad.maxSegmentMs} min={1_000} max={30_000} step={500} onChange={(v) => edit((c) => withSection(c, 'realtime', { vad: { ...c.realtime.vad, maxSegmentMs: v } }))} />
+                <NumberRow title={t('vadMaxPendingLabel')} desc={t('vadMaxPendingDesc')} value={draft.realtime.vad.maxPending} min={1} max={20} onChange={(v) => edit((c) => withSection(c, 'realtime', { vad: { ...c.realtime.vad, maxPending: v } }))} />
                 <NumberRow title={t('realtimeMaxSessionLabel')} desc={t('realtimeMaxSessionDesc')} value={draft.realtime.maxSessionMs} min={30_000} max={3_600_000} step={30_000} onChange={(v) => edit((c) => withSection(c, 'realtime', { maxSessionMs: v }))} />
                 <NumberRow title={t('realtimeFirstSentenceLabel')} desc={t('realtimeFirstSentenceDesc')} value={draft.realtime.speech.firstSentenceMinChars} min={1} max={200} onChange={(v) => edit((c) => withSection(c, 'realtime', { speech: { ...c.realtime.speech, firstSentenceMinChars: v } }))} />
                 <NumberRow title={t('realtimeWatchdogLabel')} desc={t('realtimeWatchdogDesc')} value={draft.realtime.speech.utteranceWatchdogMs} min={1_000} max={300_000} step={1_000} onChange={(v) => edit((c) => withSection(c, 'realtime', { speech: { ...c.realtime.speech, utteranceWatchdogMs: v } }))} />

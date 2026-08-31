@@ -108,6 +108,11 @@ export const AsrVoiceSettingsSchema: any = z.object({
   realtime: z.object({
     /** 总开关（默认关）：关掉时实时按钮不注册，一切行为回到整段模式。 */
     enabled: z.boolean().default(false),
+    /**
+     * 实时引擎：browser（Web Speech 连续会话，逐字出字、零配额）/ segmented
+     * （本地能量 VAD 按句切段，走已配置的整段转写通道；每句一次上游调用）。
+     */
+    engine: z.string().default('browser'),
     /** 回复播报：browser（speechSynthesis，零配置）/ off（只出字不读）。 */
     tts: z.string().default('browser'),
     /** 进出实时模式的快捷键（默认关，避免与官方快捷键相撞）。 */
@@ -118,6 +123,23 @@ export const AsrVoiceSettingsSchema: any = z.object({
       settleMs: z.natural().min(200).max(10_000).default(900),
       /** 静音窗口之后再宽限这么久才提交（毫秒）：接住最后一个词的迟到结果；0 = 不等。 */
       tailMs: z.natural().min(0).max(5_000).default(300),
+    }),
+    /** 声学切段（仅 engine=segmented 生效）：只看 RMS，阈值是设备噪声底的函数。 */
+    vad: z.object({
+      /** 采集帧长（毫秒）：越小越省延迟，越大越省调度开销。 */
+      frameMs: z.natural().min(10).max(500).default(40),
+      /** RMS 高于此值算有声。偏低→杂音成句；偏高→轻声句尾被切掉。 */
+      rms: z.percent().default(0.02),
+      /** 连续静音多久切一段（毫秒）：也是每句上屏的固定延迟。 */
+      silenceMs: z.natural().min(200).max(5_000).default(700),
+      /** 段前保留（毫秒）：不留就会切掉第一个音节。 */
+      prerollMs: z.natural().min(0).max(1_000).default(200),
+      /** 实际语音短于此不成为一段：咳嗽、键盘、门响不该花一次上游配额。 */
+      minSpeechMs: z.natural().min(100).max(3_000).default(250),
+      /** 单段语音长度上限（毫秒）：说个不停也要定期出字，同时封顶上传体大小。 */
+      maxSegmentMs: z.natural().min(1_000).max(30_000).default(8_000),
+      /** 待转写队列上限（不含在途那段）：转写慢过说话时丢最旧。 */
+      maxPending: z.natural().min(1).max(20).default(3),
     }),
     /** 单次对话上限（毫秒）：麦克风不能无人值守常开，到点自动结束会话。 */
     maxSessionMs: z.natural().min(30_000).max(3_600_000).default(600_000),

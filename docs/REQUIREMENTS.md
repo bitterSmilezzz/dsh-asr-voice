@@ -63,6 +63,7 @@
 | D20 | 播报通路 | **浏览器 `speechSynthesis`**：Chrome/Edge/Safari 交集内唯一零配置、零密钥、零依赖的播放通路。经 `SpeakSink` 接缝（云 TTS 可换实现而调用方不动）；`utterance.onend` 不可信 → **每句挂看门狗**，否则麦克风被永久扣住 |
 | D21 | 回复读取与取消 | 不加新槽位：owner share（`InputZone`）的 `session.partial.blocks` 就是逐 chunk 累积正文，`running` 是官方发送↔停止信号。`InputActions` 不含 cancel → 打断走 `sessions.scope(id).get('conversation').cancel()`，**不**把 `conversation` 加进插件硬依赖 |
 | D22 | 实时路径的优化 | **不做提示词优化**：对话要的是即时；`optimize.*` 只作用于整段录音模式 |
+| D23 | 出字引擎 | 两引擎共用一个 `RealtimeSession` 接缝，按 `realtime.engine` 分派：`browser`（Web Speech 逐字流式，零 key、零新协议）与 `segmented`（本地能量 VAD 切句 + **已有**整段转写通道）。选后者的唯一前提：不新增云商协议、不新增 key 也能端到端验证闭环。两者共用同一份 `turn.*` 静默判定——切换引擎只改段边界的**来源**，不改「什么时候算说完」。VAD 判据是设备噪声底的函数，故 `vad.rms`/`silenceMs`/`minSpeechMs` 等一律开放为设置，不硬编码；分析窗长（20ms）不是偏好项，不开放。真·流式云通道（PCM 上行 + SSE 下行 + `RealtimeProvider` 接缝）是后续阶段，`capture.ts` 已为它备好采集原语 |
 
 ## 设计蓝图（待确认）
 

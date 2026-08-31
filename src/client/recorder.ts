@@ -604,8 +604,8 @@ async function blobToWav16k(blob: Blob): Promise<{ wav: Blob; peak: number }> {
   }
 }
 
-/** 上传音频到 host 转写代理（带超时，防上游卡死钉住 UI）。 */
-async function transcribeViaHost(blob: Blob, language: string, externalSignal?: AbortSignal): Promise<string> {
+/** 上传音频到 host 转写代理（带超时，防上游卡死钉住 UI）。实时按句引擎共用这一条通道。 */
+export async function transcribeViaHost(blob: Blob, language: string, externalSignal?: AbortSignal): Promise<string> {
   const lang = resolveLang(language)
   const query = lang ? `?language=${encodeURIComponent(lang)}` : ''
   const controller = new AbortController()
