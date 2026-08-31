@@ -8,10 +8,12 @@
  *   - /api/asr-voice/models      —— 枚举 DSH 已配置模型（优化模型选择器）
  *   - /api/asr-voice/asr-models  —— 动态获取某供应商的 ASR 模型（设置页「获取模型」）
  *   - /api/asr-voice/stats       —— ASR 用量统计（计费相关，低优先级）
+ *   - 启动时一次性迁移：settings 里的遗留明文 key → DSH credentials，随后抹掉明文
  *
  * LLM 优化默认走 DSH 当前所选 LLM（ctx.agentDefaultModel + ctx.llm），无需
- * 插件单独配 key。云端 ASR 支持多供应商（asr.cloud.providers + active）。
- * API key 全程在服务端，浏览器只经私有 JSON 路由调用。
+ * 插件单独配 key。云端 ASR 支持多供应商（asr.cloud.providers + active），但
+ * settings 里只有 baseUrl / model / mode 等无密钥元数据：API key 存 DSH
+ * credentials（引用名见 src/key-ref.ts），浏览器只经私有 JSON 路由调用，拿不到 key。
  * 纯 Node HTTP + 官方 LLM 通道，无平台专属二进制 → macOS / Windows 双平台。
  */
 import type { Context } from '@deepseek-ai/cordis';
@@ -22,6 +24,7 @@ import type {} from '@deepseek-ai/dsh-llm';
 // Type-only: pulls ctx.settings (SettingsProvider) merge for scoped inject.
 import type {} from '@deepseek-ai/dsh-settings';
 import { ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema, type AsrVoiceSettings } from './settings.ts';
+import { keyRefFor } from './key-ref.ts';
 import { registerTranscribeRoute, type CloudAsrConfig } from './transcribe.ts';
 import { registerOptimizeRoute, registerModelsRoute } from './optimize.ts';
 import { registerAsrModelsRoute, type CloudProviderLike } from './asr-models.ts';
@@ -45,6 +48,8 @@ function resolveCloudProvider(v: AsrVoiceSettings | undefined): CloudAsrConfig |
     const active = cloud.providers.find((p) => p.id === cloud.active) ?? cloud.providers[0]!
     return {
       id: active.id || 'provider',
+      preset: active.preset ?? 'openai',
+      name: active.name ?? '',
       baseUrl: active.baseUrl ?? '',
       apiKey: active.apiKey ?? '',
       model: active.model ?? '',
@@ -54,6 +59,8 @@ function resolveCloudProvider(v: AsrVoiceSettings | undefined): CloudAsrConfig |
   // 旧单配置（v0.1 遗留）
   return {
     id: 'legacy',
+    preset: cloud.preset ?? 'openai',
+    name: '',
     baseUrl: cloud.baseUrl ?? '',
     apiKey: cloud.apiKey ?? '',
     model: cloud.model ?? '',
@@ -68,7 +75,8 @@ function listProviders(v: AsrVoiceSettings | undefined): CloudProviderLike[] {
   if (Array.isArray(cloud.providers) && cloud.providers.length > 0) {
     return cloud.providers.map((p) => ({
       id: p.id || 'provider',
-      preset: p.preset ?? 'custom',
+      preset: p.preset ?? 'openai',
+      name: p.name ?? '',
       baseUrl: p.baseUrl ?? '',
       apiKey: p.apiKey ?? '',
       model: p.model ?? '',
@@ -78,7 +86,8 @@ function listProviders(v: AsrVoiceSettings | undefined): CloudProviderLike[] {
   if (cloud.baseUrl) {
     return [{
       id: 'legacy',
-      preset: cloud.preset ?? 'custom',
+      preset: cloud.preset ?? 'openai',
+      name: '',
       baseUrl: cloud.baseUrl,
       apiKey: cloud.apiKey ?? '',
       model: cloud.model ?? '',
@@ -88,16 +97,71 @@ function listProviders(v: AsrVoiceSettings | undefined): CloudProviderLike[] {
   return []
 }
 
+/** DSH credentials 服务的最小面（可选服务，本插件不把它列为硬依赖）。 */
+interface CredentialsLike {
+  set(ref: unknown, value: string): Promise<void>
+}
+
+/**
+ * 一次性迁移：把 settings 里遗留的明文 API key 搬进 DSH credentials，全部搬成功后抹掉明文。
+ *
+ * 任一条搬不动（凭据服务缺席、该引用被只读来源拒绝）就整批原样留着——抹掉一把无处可寻的
+ * key 比留一份本机明文更糟。{@link resolveApiKey} 始终先读 settings，所以未迁移状态下功能
+ * 不降级；迁移成功后 settings 里的 key 恒为空，密钥只剩 credentials 一个来源。
+ */
+async function migrateLegacyKeys(
+  scope: { get(): AsrVoiceSettings; update(patch: object): Promise<void> },
+  credentials: CredentialsLike | undefined,
+  log: { warn(message: string): void; info(message: string): void },
+): Promise<void> {
+  if (credentials === undefined) return
+  // scope.get() 交回来的是深度冻结的解析快照，改之前必须先脱冻。
+  const cloud = structuredClone(scope.get().asr.cloud)
+  const pending: Array<{ ref: string; key: string }> = []
+  for (const row of cloud.providers) {
+    const key = (row.apiKey ?? '').trim()
+    if (key === '') continue
+    pending.push({ ref: keyRefFor(row), key })
+    row.apiKey = ''
+  }
+  const legacyKey = (cloud.apiKey ?? '').trim()
+  if (legacyKey !== '') {
+    pending.push({ ref: keyRefFor({ preset: cloud.preset, name: '', id: 'legacy' }), key: legacyKey })
+  }
+  if (pending.length === 0) return
+  for (const item of pending) {
+    try {
+      await credentials.set(item.ref, item.key)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      log.warn(`credentials.set(${item.ref}) refused: ${reason}; legacy keys left in place`)
+      return
+    }
+  }
+  const patch: Record<string, unknown> = { providers: cloud.providers }
+  if (legacyKey !== '') patch.apiKey = ''
+  await scope.update({ asr: { cloud: patch } })
+  log.info(`moved ${pending.length} API key(s) from plugin settings into DSH credentials`)
+}
+
 export function apply(ctx: AsrVoiceHostContext): void {
   // 插件配置 namespace：设置统一存 host settings 服务（namespace `asr-voice`）。
-  let settingsScope: { get(): AsrVoiceSettings } | undefined
+  let settingsScope: { get(): AsrVoiceSettings; update(patch: object): Promise<void> } | undefined
   ctx.inject(['settings'], (sctx) => {
-    settingsScope = sctx.settings.register<typeof ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettings>(ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema);
+    const scope = sctx.settings.register<typeof ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettings>(ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema);
+    settingsScope = scope
+    // 遗留明文 key → credentials：启动时跑一次，迁移完成后每次都是空转早退。
+    const logger = sctx.logger('asr-voice')
+    sctx.effect(() => {
+      const migrating = migrateLegacyKeys(scope, sctx.get('credentials') as CredentialsLike | undefined, logger)
+        .catch((error: unknown) => { logger.warn(`legacy key migration stopped: ${error instanceof Error ? error.message : String(error)}`) })
+      return async () => { await migrating }
+    }, 'asr-voice: migrate legacy api keys')
   });
 
   const getCloudConfig = (): CloudAsrConfig => {
     const cfg = resolveCloudProvider(settingsScope?.get());
-    return cfg ?? { id: '', baseUrl: '', apiKey: '', model: '', mode: 'auto' };
+    return cfg ?? { id: '', preset: 'openai', name: '', baseUrl: '', apiKey: '', model: '', mode: 'auto' };
   };
   const getProviders = (): CloudProviderLike[] => listProviders(settingsScope?.get());
   const stats = createAsrStats();

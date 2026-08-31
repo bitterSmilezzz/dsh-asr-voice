@@ -8,13 +8,13 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { keyRefFor } from './key-ref.ts';
+import type { KeyRefSource } from './key-ref.ts';
 import { isTrusted, sendJson } from './http.ts';
 import { resolveApiKey } from './transcribe.ts';
 
 /** 单个供应商配置面（来自 settings providers 列表）。 */
-export interface CloudProviderLike {
-  id: string
-  preset: string
+export interface CloudProviderLike extends KeyRefSource {
   baseUrl: string
   apiKey: string
   model: string
@@ -69,9 +69,10 @@ export function registerAsrModelsRoute(
         if (!provider) return sendJson(res, 400, { ok: false, reason: `provider not found: ${providerId || '(none configured)'}` });
         if (!provider.baseUrl.trim()) return sendJson(res, 400, { ok: false, reason: 'provider baseUrl not set' });
         const apiKey = await resolveApiKey(ctx, {
-          id: provider.id, baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model, mode: provider.mode,
+          id: provider.id, preset: provider.preset, name: provider.name,
+          baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model, mode: provider.mode,
         });
-        if (!apiKey) return sendJson(res, 400, { ok: false, reason: 'provider API key not set' });
+        if (!apiKey) return sendJson(res, 400, { ok: false, reason: `no API key: set the credential ${keyRefFor(provider)} in DSH` });
         const base = provider.baseUrl.replace(/\/+$/, '');
         const upstream = await fetch(`${base}/models`, {
           headers: { Authorization: `Bearer ${apiKey}` },

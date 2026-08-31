@@ -1,5 +1,6 @@
 {
-  // Client half: browser sources only (src/client/** + shared src/presets.ts).
+  // Client half: browser sources only (src/client/** + shared src/presets.ts
+  // and src/key-ref.ts, both dependency-free so both halves compile them).
   // JSX via react-jsx, DOM libs, no node ambient types — matches the official
   // client base shape.
   "compilerOptions": {
@@ -28,5 +29,5 @@
     "rootDir": "src",
     "outDir": "lib/types/client"
   },
-  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "src/presets.ts"]
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "src/presets.ts", "src/key-ref.ts"]
 }
