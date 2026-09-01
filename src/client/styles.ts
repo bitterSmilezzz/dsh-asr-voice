@@ -36,6 +36,37 @@ export const CSS = `
   align-items: center;
   justify-content: center;
 }
+/* 悬停气泡：不依赖浏览器原生 title（自动化/嵌入浏览器会禁用它），
+   文案由组件按系统语言提供；hover/focus 都显示，键盘可达。 */
+.dshav-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(260px, calc(100vw - 40px));
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-layer-3, var(--dshav-bg-layer));
+  border: 1px solid var(--dsw-alias-border-l2, var(--dshav-border));
+  box-shadow: var(--dsw-shadow-lv3, 0 4px 16px rgba(0, 0, 0, .12));
+  color: var(--dsw-alias-label-secondary, var(--dshav-text-2));
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .14s ease, visibility .14s ease;
+}
+.dshav-mic-wrap:hover .dshav-tooltip,
+.dshav-mic-wrap:focus-within .dshav-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dshav-tooltip { transition: none; }
+}
 .dshav-mic-button {
   position: relative;
   width: 28px;

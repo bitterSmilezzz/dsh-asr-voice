@@ -504,13 +504,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           type="button"
           className="dshav-mic-button"
           data-state={state}
-          title={title}
           aria-label={title}
           aria-pressed={state === 'recording'}
           disabled={disabled}
           onClick={() => { if (state === 'idle') { void begin() } else if (state === 'recording') { void finish() } else { cancel() } }}
         >
           {state === 'recording' ? <RecDot /> : <MicIcon />}
+          {/* 悬停气泡：不依赖浏览器原生 title（自动化浏览器会禁用），文案随系统语言 */}
+          <span className="dshav-tooltip" role="tooltip">{title}</span>
           <span className="dshav-wave" aria-hidden="true">
             <span className="dshav-wave-ring" data-ring="1" />
             <span className="dshav-wave-ring" data-ring="2" />

@@ -353,7 +353,6 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
         type="button"
         className="dshav-mic-button dshav-chat-button"
         data-state={phase}
-        title={title}
         aria-label={title}
         aria-pressed={busy}
         disabled={disabled}
@@ -361,6 +360,8 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
       >
         {phase === 'listening' ? <RecDot /> : <ChatIcon />}
       </button>
+      {/* 悬停气泡：不依赖浏览器原生 title（自动化浏览器会禁用），文案随系统语言 */}
+      <span className="dshav-tooltip" role="tooltip">{title}</span>
       {error !== null && (
         <span className="dshav-hotkey-hint" data-kind="err" role="status">
           <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
