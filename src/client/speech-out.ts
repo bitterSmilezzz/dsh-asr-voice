@@ -300,6 +300,10 @@ export function createCloudTtsSink(tuning: { language: string; voice?: string })
   let pending = false
   let drain: (() => void) | null = null
   let disposed = false
+  /** 句子代际：cancel()/dispose() 递增，in-flight 合成链在起播前按代作废（打断后不得再出声）。 */
+  let generation = 0
+  /** 合成请求超时：host 挂起时不能让 playing 永真（半双工门挂在 onDrain，麦克风永不归还）。 */
+  const TTS_TIMEOUT_MS = 30_000
 
   const getCtx = (): AudioContext | null => {
     if (ctx === null) {
@@ -313,6 +317,7 @@ export function createCloudTtsSink(tuning: { language: string; voice?: string })
 
   /** 合成并播放一句（Promise 在播完时 settle）。 */
   const speak = async (text: string): Promise<void> => {
+    const my = generation
     const ac = getCtx()
     if (ac === null || disposed) return
     let data: { ok?: boolean; audio?: string; sampleRate?: number; reason?: string }
@@ -321,12 +326,15 @@ export function createCloudTtsSink(tuning: { language: string; voice?: string })
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text, voice: tuning.voice }),
+        signal: AbortSignal.timeout(TTS_TIMEOUT_MS),
       })
       data = await res.json().catch(() => ({})) as typeof data
     } catch {
-      return // 网络失败：跳过这句，不阻塞队列
+      return // 网络失败/超时：跳过这句，不阻塞队列
     }
-    if (disposed || data.ok !== true || data.audio === undefined) return
+    // 打断（cancel）/释放发生在 fetch 窗口内：这句必须作废，否则用户插话后
+    // 旧句照样起播，压过人声还拖住半双工门。
+    if (disposed || my !== generation || data.ok !== true || data.audio === undefined) return
     // base64 → 16k int16 LE → Float32（除以 32768 归一化到 -1~1）。
     const bin = atob(data.audio)
     const pcm = new Uint8Array(bin.length)
@@ -335,7 +343,7 @@ export function createCloudTtsSink(tuning: { language: string; voice?: string })
     const f32 = new Float32Array(frames)
     const view = new DataView(pcm.buffer)
     for (let i = 0; i < frames; i++) f32[i] = view.getInt16(i * 2, true) / 32768
-    if (disposed || frames === 0) return
+    if (disposed || my !== generation || frames === 0) return
     const buffer = ac.createBuffer(1, frames, data.sampleRate ?? 16000)
     buffer.copyToChannel(f32, 0)
     const source = ac.createBufferSource()
@@ -376,6 +384,7 @@ export function createCloudTtsSink(tuning: { language: string; voice?: string })
     },
     get active(): boolean { return playing || queue.length > 0 },
     cancel(): void {
+      generation += 1 // 作废 in-flight 合成链：fetch 窗口内的句子不得在打断后再起播
       queue.length = 0
       pending = false
       if (current !== null) { try { current.stop() } catch { /* already ended */ } }
@@ -385,6 +394,7 @@ export function createCloudTtsSink(tuning: { language: string; voice?: string })
     get onDrain(): (() => void) | null { return drain },
     dispose(): void {
       disposed = true
+      generation += 1
       queue.length = 0
       pending = false
       if (current !== null) { try { current.stop() } catch { /* already ended */ } }
