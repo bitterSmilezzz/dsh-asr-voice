@@ -133,6 +133,8 @@ export type LocaleKey =
   | 'realtimeEngineBrowser'
   | 'realtimeEngineSegmented'
   | 'realtimeEngineCloud'
+  | 'realtimeProviderLabel'
+  | 'realtimeProviderDesc'
   | 'vadFrameMsLabel'
   | 'vadFrameMsDesc'
   | 'vadRmsLabel'
@@ -330,6 +332,8 @@ export const zh: LocaleDict = {
   realtimeEngineBrowser: 'Web Speech（逐字，免费）',
   realtimeEngineSegmented: '按句转写（本地切句 + 云端识别）',
   realtimeEngineCloud: '云端实时（服务端判回合）',
+  realtimeProviderLabel: '实时服务商',
+  realtimeProviderDesc: '云端实时走哪个 provider。选「内置模拟」用 host 端假 provider（开发态，不花配额）；选阿里云百炼接真云端 qwen3-asr-flash-realtime（服务端 VAD 判回合，key 复用 DSH 凭据 DASHSCOPE_API_KEY）。',
   vadFrameMsLabel: '采集帧长',
   vadFrameMsDesc: '单位毫秒。每帧的时长，越小越省延迟、越大越省调度。',
   vadRmsLabel: '有声阈值',
@@ -522,6 +526,8 @@ export const en: LocaleDict = {
   realtimeEngineBrowser: 'Web Speech (word by word, free)',
   realtimeEngineSegmented: 'Per-sentence (local segmentation + cloud ASR)',
   realtimeEngineCloud: 'Cloud realtime (server-side turn detection)',
+  realtimeProviderLabel: 'Realtime provider',
+  realtimeProviderDesc: 'Which provider drives cloud realtime. "Built-in simulation" uses the host-side fake provider (dev mode, no quota); Alibaba Cloud Qwen connects to real qwen3-asr-flash-realtime (server-side VAD, reuses the DASHSCOPE_API_KEY credential).',
   vadFrameMsLabel: 'Capture frame',
   vadFrameMsDesc: 'Milliseconds per captured audio frame. Smaller is snappier, larger is cheaper to schedule.',
   vadRmsLabel: 'Speech threshold',

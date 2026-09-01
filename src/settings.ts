@@ -115,6 +115,11 @@ export const AsrVoiceSettingsSchema: any = z.object({
      * I5 真云端 provider）。
      */
     engine: z.string().default('browser'),
+    /**
+     * 云端实时 provider（仅 engine=cloud 生效）：'builtin' = 内置模拟（I3/I4 开发态，
+     * host 用假 provider）/ 预置 id（见 REALTIME_PRESETS，I5 真云端）。
+     */
+    provider: z.string().default('builtin'),
     /** 回复播报：browser（speechSynthesis，零配置）/ off（只出字不读）。 */
     tts: z.string().default('browser'),
     /** 进出实时模式的快捷键（默认关，避免与官方快捷键相撞）。 */
@@ -209,6 +214,10 @@ export interface AsrVoiceSettings {
   realtime: {
     /** 实时语音对话总开关。 */
     enabled: boolean
+    /** 实时引擎：browser | segmented | cloud。 */
+    engine: string
+    /** 云端实时 provider（engine=cloud 时；'' = 内置模拟）。 */
+    provider: string
     /** 回复播报：browser | off。 */
     tts: string
     /** 进出实时模式的快捷键（'' = 关闭）。 */
@@ -236,5 +245,5 @@ export const DEFAULT_SETTINGS: AsrVoiceSettings = {
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
-  realtime: { enabled: false, tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
+  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }

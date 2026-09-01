@@ -79,6 +79,8 @@ export interface AsrVoiceConfig {
     enabled: boolean
     /** 实时引擎：browser（Web Speech 逐字）/ segmented（本地 VAD 按句 + 整段转写通道）/ cloud（PCM 上行 host 实时通道，服务端 VAD 判回合）。 */
     engine: 'browser' | 'segmented' | 'cloud'
+    /** 云端实时 provider（engine=cloud 时；builtin = 内置模拟，dashscope-realtime = 阿里云百炼）。 */
+    provider: string
     /** 回复播报：browser（speechSynthesis）/ off（只出字）。 */
     tts: 'browser' | 'off'
     /** 进出实时模式的快捷键（'' = 关闭）。 */
@@ -129,7 +131,7 @@ export const DEFAULTS: AsrVoiceConfig = {
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
-  realtime: { enabled: false, engine: 'browser', tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
+  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与写回共同维护。 */

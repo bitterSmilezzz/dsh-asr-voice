@@ -25,12 +25,14 @@ import type {} from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-settings';
 import { ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema, type AsrVoiceSettings } from './settings.ts';
 import { keyRefFor } from './key-ref.ts';
-import { registerTranscribeRoute, type CloudAsrConfig } from './transcribe.ts';
+import { registerTranscribeRoute, resolveApiKey, type CloudAsrConfig } from './transcribe.ts';
 import { registerOptimizeRoute, registerModelsRoute } from './optimize.ts';
 import { registerAsrModelsRoute, type CloudProviderLike } from './asr-models.ts';
 import { createAsrStats, registerStatsRoute } from './stats.ts';
 import { RealtimeHost } from './realtime-host.ts';
-import { createFakeRealtimeProvider } from './realtime-provider.ts';
+import { createFakeRealtimeProvider, type RealtimeProvider } from './realtime-provider.ts';
+import { createDashscopeRealtimeProvider } from './realtime-dashscope.ts';
+import { realtimePresetById } from './presets.ts';
 
 /** Host context slice this plugin consumes (webServer/llm/settings via type merges). */
 type AsrVoiceHostContext = Context;
@@ -146,6 +148,43 @@ async function migrateLegacyKeys(
   log.info(`moved ${pending.length} API key(s) from plugin settings into DSH credentials`)
 }
 
+/**
+ * 实时 provider 工厂（I5）：按 `realtime.provider` 设置分派。
+ *  '' / 'builtin' → 内置假 provider（I3/I4 开发态，不花配额）；
+ *  预置 id（如 'dashscope-realtime'）→ 真云端 provider，凭据复用 DSH credentials
+ *  （keyPreset 指回 CLOUD_PRESETS 预置，`keyRefFor` 派生成 `<PRESET>_API_KEY`，
+ *  配过同名 LLM 的用户天然命中同一把 key）。无 key 时 connect 抛错，让会话路由
+ *  502 带原因，客户端可见「provider-unreachable」而不是静默降级。
+ */
+function createRealtimeProvider(
+  ctx: AsrVoiceHostContext,
+  getSettings: () => AsrVoiceSettings | undefined,
+): RealtimeProvider {
+  const pid = getSettings()?.realtime.provider ?? ''
+  if (pid === '' || pid === 'builtin') return createFakeRealtimeProvider()
+  const preset = realtimePresetById(pid)
+  if (preset === undefined) return createFakeRealtimeProvider()
+  return {
+    connect: async () => {
+      const apiKey = await resolveApiKey(ctx, {
+        id: preset.id,
+        preset: preset.keyPreset,
+        name: preset.label,
+        baseUrl: '',
+        apiKey: '',
+        model: preset.defaultModel,
+        mode: 'chat',
+      })
+      if (apiKey === '') {
+        throw new Error(
+          `realtime provider ${pid}: no API key — set the credential ${keyRefFor({ preset: preset.keyPreset, name: preset.label, id: preset.id })} in DSH (a same-named LLM key is reused automatically)`,
+        )
+      }
+      return createDashscopeRealtimeProvider({ apiKey, model: preset.defaultModel, wssUrl: preset.wssUrl }).connect()
+    },
+  }
+}
+
 export function apply(ctx: AsrVoiceHostContext): void {
   // 插件配置 namespace：设置统一存 host settings 服务（namespace `asr-voice`）。
   let settingsScope: { get(): AsrVoiceSettings; update(patch: object): Promise<void> } | undefined
@@ -181,11 +220,11 @@ export function apply(ctx: AsrVoiceHostContext): void {
   ctx.effect(() => registerStatsRoute((def) => ctx.webServer.register(def), () => stats.snapshot()), 'asr-voice: stats route');
 
   // 实时转写通道（I3）：会话注册表 + SSE 下行 + RealtimeProvider 接缝。
-  // I3 阶段 host 用假 provider 驱动整条管道（纯管道，浏览器侧尚未接线）；
-  // I5 换成真云端 provider（qwen3-asr-flash-realtime）时只替换 createProvider。
+  // I3/I4 阶段 host 用假 provider 驱动整条管道；I5 按 settings `realtime.provider`
+  // 分派到真云端（qwen3-asr-flash-realtime）或内置模拟——接缝与路由一行不改。
   ctx.effect(() => {
     const host = new RealtimeHost({
-      createProvider: () => createFakeRealtimeProvider().connect(),
+      createProvider: () => createRealtimeProvider(ctx, () => settingsScope?.get()).connect(),
     });
     const disposeRoutes = host.registerRoutes((def) => ctx.webServer.register(def));
     return () => disposeRoutes();

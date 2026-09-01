@@ -8,7 +8,7 @@
 import * as react from 'react'
 // Type-only: pulls the ui-settings-plugins SlotMap merge (the settings.plugin.item card seat).
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import { CLOUD_PRESETS, presetById } from '../presets.ts'
+import { CLOUD_PRESETS, presetById, REALTIME_PRESETS } from '../presets.ts'
 import {
   addProvider, draftActiveProvider, keyRefOf, newDraft, patchProvider, pickPreset,
   readKeyState, removeProvider, saveKey, settingsWritable, subscribeConfig, withLanguage,
@@ -757,6 +757,15 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                   ]}
                   onChange={(v) => edit((c) => withSection(c, 'realtime', { engine: v === 'segmented' ? 'segmented' : v === 'cloud' ? 'cloud' : 'browser' }))}
                 />
+                {draft.realtime.engine === 'cloud' && (
+                  <SelectRow
+                    title={t('realtimeProviderLabel')}
+                    desc={t('realtimeProviderDesc')}
+                    value={draft.realtime.provider}
+                    options={REALTIME_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
+                    onChange={(v) => edit((c) => withSection(c, 'realtime', { provider: v }))}
+                  />
+                )}
                 <SelectRow
                   title={t('realtimeTtsLabel')}
                   desc={t('realtimeTtsDesc')}
