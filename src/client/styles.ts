@@ -162,6 +162,21 @@ export const CSS = `
   line-height: 1.35;
   max-width: min(480px, calc(100vw - 120px));
 }
+/* err/notice 的文本包进 span 后必须可换行：
+   1) flex 子项默认按 min-content 收缩——中文每字可断行 → 每个字单独一行（纵向溢出）；
+      必须 min-width: 0 + flex: 1 让文本占满剩余宽度再折行。
+   2) 长 token（设备名/URL）不炸行：overflow-wrap: anywhere。 */
+.dshav-hotkey-hint[data-kind='err'] .dshav-hint-text,
+.dshav-hotkey-hint[data-kind='notice'] .dshav-hint-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  white-space: normal;
+  line-height: 1.35;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
 .dshav-hotkey-hint[data-kind='err'] .dshav-hint-dismiss { align-self: flex-start; }
 .dshav-hint-dismiss {
   flex: none;

@@ -507,14 +507,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         {error !== null && (
           <span className="dshav-hotkey-hint" data-kind="err" role="status">
             <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
-            {error}
+            <span className="dshav-hint-text">{error}</span>
             <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={dismissHint}>×</button>
           </span>
         )}
         {notice !== null && (
           <span className="dshav-hotkey-hint" data-kind="notice" role="status">
             <span className="dshav-dot" />
-            {notice}
+            <span className="dshav-hint-text">{notice}</span>
             <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={dismissHint}>×</button>
           </span>
         )}
