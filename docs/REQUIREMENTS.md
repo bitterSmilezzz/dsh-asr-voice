@@ -141,14 +141,15 @@ behavior:
 | 阶段 | 内容 | 用户可感知 |
 |---|---|---|
 | I3 ✅ | host 实时通道：会话注册表（`sid` 由 host 铸造，4 条 exact 路由全过 `isTrusted`）+ SSE 下行带背压 + `RealtimeProvider` 接缝 + 假 provider；含「undici `WebSocket` 能带 `Authorization`」的**真实 socket 上线证据**测试 | 否（纯管道） |
-| I4 ✅ | PCM 上行接上已就位的 `capture.ts`：client 新增第三档引擎 `realtime.engine=cloud`（`src/client/realtime-cloud.ts` + `realtime-cloud-transport.ts`），16k 采集帧量化 int16 LE 上行到 host 实时通道，SSE 下行 `partial/final/error` 驱动字幕与回合（服务端 VAD 判回合，本地不再文字静默判定）。设置卡可选、前置检查按引擎分派、7 例单测。**I4 关键产出仍是实测数字**：Chromium 回声消除对我们自己外放的合成语音的消除率——它 gate 住 D19 的全双工能不能做，不做成可选项；该实测需要在真实 Chrome 里跑通 cloud 引擎后采集，未完成 | 是 |
+| I4 ✅ | PCM 上行接上已就位的 `capture.ts`：client 新增第三档引擎 `realtime.engine=cloud`（`src/client/realtime-cloud.ts` + `realtime-cloud-transport.ts`），16k 采集帧量化 int16 LE 上行到 host 实时通道，SSE 下行 `partial/final/error` 驱动字幕与回合（服务端 VAD 判回合，本地不再文字静默判定）。设置卡可选、前置检查按引擎分派、7 例单测。**I4 关键产出实测已有数字（2026-09-01，qa-asr AEC 探针）**：`echoCancellation: true/false` 两轮采集流 RMS 对比，消除率 **0.42 dB**（on 0.06182 vs off 0.06486，峰值几乎相同）——**Chromium 假设备/虚拟管线绕过 APM，AEC 不生效**。含义：①虚拟环境不能作为 AEC 证据，消除率必须真机（真实声学回环）复测；②技术上不能把全双工押在「浏览器 AEC 消干净回声」上，D19 实现路径改为**软件回声门控**（播放参考音量 → 回声底 → 超底且持续才打断），以 `realtime.bargeIn` 开关**默认关闭**交付，真机复测通过前行为保持半双工 | 是 |
 | I5 ✅ | 填一条真 provider 行：`REALTIME_PRESETS`（`builtin` 内置模拟 + `dashscope-realtime` 阿里云百炼 `qwen3-asr-flash-realtime`）+ `key-ref.ts` 复用官方同名凭据（keyPreset 指回 CLOUD_PRESETS，`DASHSCOPE_API_KEY` 天然复用）。`src/realtime-dashscope.ts` 实现真 provider（undici WebSocket 握手带 `Authorization: Bearer`，`session.update`(pcm/16000/server_vad) → `input_audio_buffer.append`(base64 PCM) → 事件映射 speech_started/stopped→speech-*、transcription.text(text+stash)→partial、…completed(transcript)→final、error→error），`close()` 先发 `session.finish` 再等 `session.finished` 优雅关闭。host `index.ts` 的 `createProvider` 按 `settings.realtime.provider` 分派（''/builtin→假 provider 回退；预置 id→真云端，无 key 时 connect 抛错让路由 502 带原因，不静默降级）。设置卡 engine=cloud 时新增「实时服务商」下拉。**待真机**：qwen3-asr-flash-realtime 真 key 的端到端转写验证（单测用本地真 WS 服务模拟协议，6 例全绿） | 是 |
 | I6 ✅ | `CloudTtsSink`：`src/client/speech-out.ts` 新增云端 TTS 实现（文本 → host 私有路由 `/api/asr-voice/tts` → qwen3-tts-flash-realtime → base64 PCM → `AudioBufferSourceNode → ctx.destination` 播放），与浏览器 speechSynthesis 同 `SpeakSink` 接口，voice-chat-button 按 `realtime.tts` 分派（browser/cloud/off）；`src/realtime-tts.ts` host 通道（握手 `Authorization: Bearer`，session.update(voice/pcm/16000) → append+commit → response.audio.delta 拼 PCM → audio.done 收口 → session.finish 优雅关），凭据复用 `DASHSCOPE_API_KEY`；设置卡新增「云端 TTS」选项 + 音色字段。**待 I4 实测**：`realtime.duplex: 'full'` 语音插话被 Chromium 回声消除率 gate 住，实测通过前保持半双工 | 是 |
 
 已交付：I1（`pcm.ts` 抽取 + 整段模式计时项进 settings）、I2（`browser` 引擎闭环）、D23 的
-`segmented` 引擎、**I3（host 实时通道）**、**I4（client cloud 引擎）**、**I5（真云端实时
-provider qwen3-asr-flash-realtime）**、以及 **I6 的 CloudTtsSink（云 TTS PCM 播放；
-`realtime.duplex: 'full'` 仍被 I4 实测 gate 住）**。
+`segmented` 引擎、**I3（host 实时通道）**、**I4（client cloud 引擎 + AEC 消除率实测
+0.42 dB，见上表）**、**I5（真云端实时 provider qwen3-asr-flash-realtime）**、以及
+**I6 的 CloudTtsSink（云 TTS PCM 播放）**。D19 全双工被 I4 实测 gate 住：虚拟管线
+AEC 不生效 → 改为软件回声门控 + `realtime.bargeIn` 默认关交付，真机复测前保持半双工。
 I3 交付物：
 
 - `src/realtime-provider.ts`：`RealtimeProvider` 接缝（`connect() → RealtimeProviderConnection`，
@@ -165,8 +166,15 @@ I3 交付物：
   （2 例：undici WebSocket 带 `Authorization` 头完成真实 socket 上线——本地起真 WS 服务，
   握手时服务端校验收到的头，gate 住 I5 的 qwen3-asr-flash-realtime 上行能否带 DSH 凭据）。
 
-真机验收（单测代替不了）：
+- 真机验收（单测代替不了）：
 
+- **AEC 消除率复测（gate 住 D19 的默认开关）**：虚拟管线实测 0.42 dB 不算数，需真实声学
+  回环补数字。复测脚本已就位（qa-asr `run-aec.mjs`，页面同时播放合成 WAV + 麦克风采集，
+  对比 `echoCancellation` on/off 的 RMS）：`HEADLESS=0` 起真实 Chromium，播放走真实扬声器，
+  采集走真实麦克风（把假采集的 `--use-file-for-fake-audio-capture` 换成真设备），喂
+  `/tmp/dshav-speech.wav`（或任意含语音的 WAV）循环播放，观察 `eliminationDb`。若真机
+  消除率 ≥ 6 dB：D19 可把 `realtime.bargeIn` 默认值改为开；否则保持默认关。**该数字同时
+  是「软件回声底」泄漏系数的标定输入**（残余 = 播放音量 × 泄漏系数）。
 - 采集链路已在真 Chromium 里验过（`~/workspace/qa-asr`，探针不入库：它要 `playwright-core` 与合成
   WAV，不该进发布包）。假麦克风文件（`--use-file-for-fake-audio-capture`）驱动的三场景：
   语音突发 → 出帧 24.5/s、帧长恒 40ms、按突发切出 5 段；纯静音 → 4s 内触发死设备守卫；
@@ -177,5 +185,6 @@ I3 交付物：
 - I2 闭环要在真实 Chrome 过一遍：字幕逐字 → 停顿即上屏发送 → 回复逐句朗读 → 播报期间不收音 →
   点按钮立刻止读。无 `requestAnimationFrame`、无麦克风的内置验收浏览器不能作证据。
 - `segmented` 的 `vad.rms` 是设备噪声底的函数，换机器（含 macOS ↔ Windows）需重新校准：
-  偏低则呼吸与键盘声白烧配额，偏高则切掉轻声句尾。
+  偏低则呼吸与键盘声白烧配额，偏高则切掉轻声句尾。优化方向：开启 `vad.rmsAuto` 后 VAD 在
+  静音期用「分位数噪声底 × 裕量」实时推阈值，用户换设备免重校。
 - `dsh web` 由开发者手动起停（`--no-open`），agent 不代劳；本机端口直连要 `--noproxy '*'`。
