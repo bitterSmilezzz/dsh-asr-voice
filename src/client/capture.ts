@@ -161,7 +161,7 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
     stopped = true
     if (probeTimer !== null) clearTimeout(probeTimer)
     probeTimer = null
-    node?.port.removeEventListener('message', onMessage)
+    if (node) node.port.onmessage = null
     try { node?.disconnect() } catch { /* noop */ }
     try { mutedSink?.disconnect() } catch { /* noop */ }
     try { source?.disconnect() } catch { /* noop */ }
@@ -200,7 +200,9 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
     source.connect(node)
     node.connect(mutedSink)
     mutedSink.connect(ctx.destination)
-    node.port.addEventListener('message', onMessage)
+    // 必须是 onmessage（或显式 port.start()）：MessagePort 只 addEventListener 不会进入
+    // actively receiving 状态，真机实测一帧都不投，整条链路表现为「设备静音」。
+    node.port.onmessage = onMessage
   } catch {
     stream.getTracks().forEach((t) => t.stop())
     URL.revokeObjectURL(blobUrl)

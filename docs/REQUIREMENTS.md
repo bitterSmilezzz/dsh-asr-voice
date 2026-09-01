@@ -151,6 +151,13 @@ behavior:
 
 真机验收（单测代替不了）：
 
+- 采集链路已在真 Chromium 里验过（`~/workspace/qa-asr`，探针不入库：它要 `playwright-core` 与合成
+  WAV，不该进发布包）。假麦克风文件（`--use-file-for-fake-audio-capture`）驱动的三场景：
+  语音突发 → 出帧 24.5/s、帧长恒 40ms、按突发切出 5 段；纯静音 → 4s 内触发死设备守卫；
+  内置 beep 连续音 → 出帧但不切段。**这轮就是它抓出 `port.addEventListener` 不投递**——
+  引擎单测里帧是测试直接喂 `onFrame` 的，绕过了真 MessagePort，所以「整条链路必然报设备静音」
+  在 node 侧表现为全绿。改 `capture.ts` 后重跑：`rolldown probe.ts -o probe.js -f iife -p browser`
+  → `node run.mjs speech|silence|beep`。
 - I2 闭环要在真实 Chrome 过一遍：字幕逐字 → 停顿即上屏发送 → 回复逐句朗读 → 播报期间不收音 →
   点按钮立刻止读。无 `requestAnimationFrame`、无麦克风的内置验收浏览器不能作证据。
 - `segmented` 的 `vad.rms` 是设备噪声底的函数，换机器（含 macOS ↔ Windows）需重新校准：
