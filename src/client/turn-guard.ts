@@ -18,3 +18,22 @@ export function meaningfulTurn(text: string): boolean {
   if (unit.length <= 1) return false
   return true
 }
+
+/**
+ * 识别器重启后把同一句又报了一遍：这类「重启回声」只该出现在上一回合交出后的
+ * 很短窗口内（Chrome 静音自动结束 → 120ms 重启 → 立刻重报）。带时间盒判断：
+ * 窗口内同句丢弃；窗口外同句是用户真的又说了一遍，必须放行，否则短句复述会被
+ * 当回声吞掉。
+ */
+export const RESTART_ECHO_WINDOW_MS = 2_500
+
+export function isRestartEcho(
+  lastTurn: string,
+  lastTurnAt: number,
+  chunk: string,
+  now: number,
+): boolean {
+  if (lastTurn === '' || chunk !== lastTurn) return false
+  const age = now - lastTurnAt
+  return age >= 0 && age <= RESTART_ECHO_WINDOW_MS
+}

@@ -81,6 +81,9 @@ function openEvents(sid: string, onEvent: (ev: CloudProviderEvent) => void): () 
           }
         }
       }
+      // 服务端干净关流（host 重启/代理超时/provider 结束会话）：与异常路径同等
+      // 对待——不报错引擎就聋死（字幕冻结、麦克风开着、永不 onFail）。
+      if (!disposed) onEvent({ type: 'error', code: 'events-unavailable' })
     } catch {
       if (!disposed) onEvent({ type: 'error', code: 'events-unavailable' })
     }

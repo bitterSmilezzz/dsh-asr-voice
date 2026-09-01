@@ -14,6 +14,7 @@
  * 引擎选择不在此处：调用方拿到的就是 RealtimeSession（`createRealtime` 负责分派）。
  */
 import { isWebSpeechSupported, startLevelSimulation, transcribeViaHost, type SpeechRecognitionLike } from './recorder.ts'
+import { isRestartEcho } from './turn-guard.ts'
 import { startPcmCapture, type PcmCapture, type PcmCaptureOptions } from './capture.ts'
 import { PCM_SAMPLE_RATE, encodeWav16MonoPcm, isSilentPeak, normaliseGain, peakAbs, rmsOfFloat } from './pcm.ts'
 import { createEnergyVad, type EnergyVad, type VadTuning } from './vad.ts'
@@ -143,8 +144,9 @@ export function createBrowserRealtime(
   let recognition: SpeechRecognitionLike | null = null
   let restartTimer: ReturnType<typeof setTimeout> | null = null
   let stopLevel: (() => void) | null = null
-  /** 上一次交出去的文本：识别器重启后可能把同一句再报一遍。 */
+  /** 上一次交出去的文本与其交出时刻：识别器重启后可能在很短窗口内把同一句再报一遍。 */
   let lastTurn = ''
+  let lastTurnAt = 0
 
   const clear = (timer: ReturnType<typeof setTimeout> | null): null => {
     if (timer !== null) clearTimeout(timer)
@@ -161,6 +163,7 @@ export function createBrowserRealtime(
     if (text === '' || !active || paused) return
     if (!meaningfulTurn(text)) return  // 噪音幻觉（嗯…）不上屏不提交
     lastTurn = text
+    lastTurnAt = Date.now()
     events.onTurn(text)
   }
 
@@ -201,8 +204,9 @@ export function createBrowserRealtime(
       const fresh = interimChunk.trim()
       // 这条事件什么也没说（只有空白）：不动字幕、不冲掉在手候选、不重排静默计时。
       if (chunk === '' && fresh === '') return
-      // 重启后重复上报同一句：丢掉，否则字幕会念两遍、回合会提交两遍。
-      if (chunk !== '' && segment === '' && chunk === lastTurn) {
+      // 重启后重复上报同一句：窗口内丢弃（isRestartEcho 带时间盒——窗口外同句
+      // 是用户真的又说了一遍，不能吞）。
+      if (chunk !== '' && segment === '' && isRestartEcho(lastTurn, lastTurnAt, chunk, Date.now())) {
         interim = ''
         armSettle()
         return

@@ -36,3 +36,19 @@ test('turn-guard: 正常句子放行', () => {
   assert.equal(meaningfulTurn('please refactor'), true)
   assert.equal(meaningfulTurn('谢谢'), true)
 })
+
+test('isRestartEcho：重启回声只在时间窗内吞，窗外同句放行', async () => {
+  const { isRestartEcho, RESTART_ECHO_WINDOW_MS } = await import('../src/client/turn-guard.ts')
+  const T0 = 1_000_000
+  // 窗口内同句 = 重启回声，吞
+  assert.equal(isRestartEcho('帮我记一下', T0, '帮我记一下', T0 + 300), true)
+  assert.equal(isRestartEcho('帮我记一下', T0, '帮我记一下', T0 + RESTART_ECHO_WINDOW_MS), true)
+  // 窗口外同句 = 用户真的又说了一遍，放行
+  assert.equal(isRestartEcho('帮我记一下', T0, '帮我记一下', T0 + RESTART_ECHO_WINDOW_MS + 1), false)
+  assert.equal(isRestartEcho('帮我记一下', T0, '帮我记一下', T0 + 60_000), false)
+  // 空历史/不同句：无论如何放行
+  assert.equal(isRestartEcho('', T0, '帮我记一下', T0 + 100), false)
+  assert.equal(isRestartEcho('另一句', T0, '帮我记一下', T0 + 100), false)
+  // 时钟回拨（now < lastTurnAt）：不放行，宁可多念一句也不吞用户的
+  assert.equal(isRestartEcho('帮我记一下', T0, '帮我记一下', T0 - 5), false)
+})

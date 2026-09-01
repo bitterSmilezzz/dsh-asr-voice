@@ -122,16 +122,25 @@ export function createCloudRealtime(
   }
 
   const onProviderEvent = (ev: CloudProviderEvent): void => {
-    if (!active || paused) return
+    if (!active) return
+    if (ev.type === 'error') {
+      // 错误不受 pause 门控：断流常发生在播报期（半双工暂停中），吞掉它
+      // 引擎就聋死到下一次 resume 也没有任何提示。
+      failures += 1
+      // 事件流断了 = 这一局的回合再也到不了（final 全靠 SSE 下行），立即判死；
+      // 其余 provider 错误仍按连败阈值处理。
+      if (ev.code === 'events-unavailable' || failures >= CLOUD_FAIL_LIMIT) {
+        failNow(ev.code || 'provider-unreachable')
+      }
+      return
+    }
+    if (paused) return
     if (ev.type === 'partial') {
       events.onPartial(ev.text)
     } else if (ev.type === 'final') {
       failures = 0
       const text = ev.text.trim()
       if (text !== '' && meaningfulTurn(text)) events.onTurn(text)
-    } else if (ev.type === 'error') {
-      failures += 1
-      if (failures >= CLOUD_FAIL_LIMIT) { failNow(ev.code || 'provider-unreachable') }
     }
     // speech-started / speech-stopped：服务端 VAD 边界，本地不消费（final 已含文本）。
   }

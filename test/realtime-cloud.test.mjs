@@ -205,3 +205,31 @@ test('建会话返回时已 stop：立刻关掉空会话，不留孤儿', async 
   await sleep(40)
   assert.deepEqual(closes, ['orphan-sid'], '迟到的 sid 必须被关掉')
 })
+
+test('SSE 断流（events-unavailable）即刻判死：pause 期也不吞', async () => {
+  await withCloud(async ({ session, events, sessions, emit, closeCount }) => {
+    session.start()
+    await until('建会话', () => sessions.length === 1)
+    // 播报期（半双工 pause 中）事件流断了：错误必须穿透 pause 门控即刻判死，
+    // 否则引擎聋死到 resume 也没有提示。
+    session.pause()
+    emit({ type: 'error', code: 'events-unavailable' })
+    await until('断流判死', () => events.fails.length === 1)
+    assert.deepEqual(events.fails, ['events-unavailable'])
+    assert.equal(closeCount(), 1, '判死关会话')
+  })
+})
+
+test('provider 单次 error 不判死，连续三次才判死', async () => {
+  await withCloud(async ({ session, events, emit }) => {
+    session.start()
+    await until('建会话', () => true)
+    emit({ type: 'error', code: 'boom' })
+    emit({ type: 'error', code: 'boom' })
+    await sleep(60)
+    assert.deepEqual(events.fails, [], '单次/两次错误只计数')
+    emit({ type: 'error', code: 'boom' })
+    await until('三次判死', () => events.fails.length === 1)
+    assert.deepEqual(events.fails, ['boom'])
+  })
+})
