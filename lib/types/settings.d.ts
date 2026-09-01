@@ -121,6 +121,10 @@ export interface AsrVoiceSettings {
     realtime: {
         /** 实时语音对话总开关。 */
         enabled: boolean;
+        /** 实时引擎：browser | segmented | cloud。 */
+        engine: string;
+        /** 云端实时 provider（engine=cloud 时；'' = 内置模拟）。 */
+        provider: string;
         /** 回复播报：browser | off。 */
         tts: string;
         /** 进出实时模式的快捷键（'' = 关闭）。 */
