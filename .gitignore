@@ -17,3 +17,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# 本机 junction relink 记录（路径指向本机 .pnpm store，不入库）
+.alpha4-relink.json
