@@ -127,6 +127,8 @@ export interface AsrVoiceSettings {
         provider: string;
         /** 回复播报：browser | off。 */
         tts: string;
+        /** 云端 TTS 音色（仅 tts=cloud 生效）。 */
+        ttsVoice: string;
         /** 进出实时模式的快捷键（'' = 关闭）。 */
         hotkey: string;
         turn: {
