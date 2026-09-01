@@ -448,6 +448,11 @@ export const CSS = `
   accent-color: var(--dsw-alias-brand-primary);
   cursor: pointer;
 }
+/* 条件禁用（如 barge-in 仅 segmented 引擎可用）：整行降透明度并去掉指针 */
+.dshav-field-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
 /* ── 原生控件：跟随 DSH 主题（--dsw-alias-*），与官方设置页一致 ── */
 .dshav-field select,
 .dshav-field input[type='text'],

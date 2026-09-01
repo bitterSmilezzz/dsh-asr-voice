@@ -54,11 +54,11 @@ function Field({ title, desc, control }: { title: string; desc?: string | undefi
 }
 
 /** 开关字段：checkbox 与标题同行左对齐（官方 checkbox 行排布），desc 作 hint。 */
-function ToggleRow({ title, desc, checked, onChange }: { title: string; desc?: string; checked: boolean; onChange: () => void }): react.ReactElement {
+function ToggleRow({ title, desc, checked, onChange, disabled }: { title: string; desc?: string; checked: boolean; onChange: () => void; disabled?: boolean }): react.ReactElement {
   return (
-    <div className="dshav-field-item">
+    <div className={disabled ? 'dshav-field-item dshav-field-disabled' : 'dshav-field-item'}>
       <label className="dshav-toggle">
-        <input type="checkbox" checked={checked} onChange={onChange} />
+        <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
         <span>{title}</span>
       </label>
       {desc ? <p className="dshav-field-hint">{desc}</p> : null}
@@ -781,7 +781,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                   <TextRow title={t('realtimeTtsVoiceLabel')} desc={t('realtimeTtsVoiceDesc')} value={draft.realtime.ttsVoice} onChange={(v) => edit((c) => withSection(c, 'realtime', { ttsVoice: v }))} />
                 )}
                 <Field title={t('realtimeHotkeyLabel')} desc={t('realtimeHotkeyDesc')} control={<HotkeyRecorder value={draft.realtime.hotkey} onChange={(v) => edit((c) => withSection(c, 'realtime', { hotkey: v }))} t={t} />} />
-                <ToggleRow title={t('bargeInLabel')} desc={t('bargeInDesc')} checked={draft.realtime.bargeIn} onChange={() => edit((c) => withSection(c, 'realtime', { bargeIn: !c.realtime.bargeIn }))} />
+                <ToggleRow title={t('bargeInLabel')} desc={t('bargeInDesc')} checked={draft.realtime.bargeIn && draft.realtime.engine === 'segmented'} onChange={() => edit((c) => withSection(c, 'realtime', { bargeIn: !c.realtime.bargeIn }))} disabled={draft.realtime.engine !== 'segmented'} />
                 <NumberRow title={t('realtimeSettleMsLabel')} desc={t('realtimeSettleMsDesc')} value={draft.realtime.turn.settleMs} min={200} max={10_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, settleMs: v } }))} />
                 <NumberRow title={t('realtimeTailMsLabel')} desc={t('realtimeTailMsDesc')} value={draft.realtime.turn.tailMs} min={0} max={5_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, tailMs: v } }))} />
                 <ToggleRow title={t('vadRmsAutoLabel')} desc={t('vadRmsAutoDesc')} checked={draft.realtime.vad.rmsAuto} onChange={() => edit((c) => withSection(c, 'realtime', { vad: { ...c.realtime.vad, rmsAuto: !c.realtime.vad.rmsAuto } }))} />
