@@ -141,12 +141,13 @@ behavior:
 | 阶段 | 内容 | 用户可感知 |
 |---|---|---|
 | I3 ✅ | host 实时通道：会话注册表（`sid` 由 host 铸造，4 条 exact 路由全过 `isTrusted`）+ SSE 下行带背压 + `RealtimeProvider` 接缝 + 假 provider；含「undici `WebSocket` 能带 `Authorization`」的**真实 socket 上线证据**测试 | 否（纯管道） |
-| I4 | PCM 上行接上已就位的 `capture.ts`，用假 provider 验字幕与播放。**关键产出是一个实测数字**：Chromium 回声消除对我们自己外放的合成语音的消除率——它 gate 住 D19 的全双工能不能做，不做成可选项 | 是 |
+| I4 ✅ | PCM 上行接上已就位的 `capture.ts`：client 新增第三档引擎 `realtime.engine=cloud`（`src/client/realtime-cloud.ts` + `realtime-cloud-transport.ts`），16k 采集帧量化 int16 LE 上行到 host 实时通道，SSE 下行 `partial/final/error` 驱动字幕与回合（服务端 VAD 判回合，本地不再文字静默判定）。设置卡可选、前置检查按引擎分派、7 例单测。**I4 关键产出仍是实测数字**：Chromium 回声消除对我们自己外放的合成语音的消除率——它 gate 住 D19 的全双工能不能做，不做成可选项；该实测需要在真实 Chrome 里跑通 cloud 引擎后采集，未完成 | 是 |
 | I5 | 填一条真 provider 行：`REALTIME_PRESETS` + `key-ref.ts` 复用官方同名凭据。当前候选为阿里云百炼 `qwen3-asr-flash-realtime`（服务端 VAD，约 ¥1.19/音频小时） | 是 |
 | I6 | `CloudTtsSink`（云 TTS PCM 经 `AudioBufferSourceNode → ctx.destination` 播放）+ 若 I4 实测通过则开 `realtime.duplex: 'full'` 语音插话 | 是 |
 
 已交付：I1（`pcm.ts` 抽取 + 整段模式计时项进 settings）、I2（`browser` 引擎闭环）、D23 的
-`segmented` 引擎、以及 **I3（host 实时通道）**。I3 交付物：
+`segmented` 引擎、**I3（host 实时通道）**、以及 **I4（client cloud 引擎）**。
+I3 交付物：
 
 - `src/realtime-provider.ts`：`RealtimeProvider` 接缝（`connect() → RealtimeProviderConnection`，
   `send(pcm)` 上行 / `onEvent` 事件下行 / `close()`）+ 假 provider（能量 VAD 把 PCM 切成句，

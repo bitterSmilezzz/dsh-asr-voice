@@ -132,6 +132,7 @@ export type LocaleKey =
   | 'realtimeEngineDesc'
   | 'realtimeEngineBrowser'
   | 'realtimeEngineSegmented'
+  | 'realtimeEngineCloud'
   | 'vadFrameMsLabel'
   | 'vadFrameMsDesc'
   | 'vadRmsLabel'
@@ -325,9 +326,10 @@ export const zh: LocaleDict = {
   realtimeTailMsLabel: '收尾延时',
   realtimeTailMsDesc: '单位毫秒。上屏前再多等一会儿，接住最后一个词的迟到结果；0 表示不等。',
   realtimeEngineLabel: '实时引擎',
-  realtimeEngineDesc: 'Web Speech 逐字出字、不花配额；按句转写用本地静音检测切句，每句走一次已配置的云端转写，出字会慢一拍。',
+  realtimeEngineDesc: 'Web Speech 逐字出字、不花配额；按句转写用本地静音检测切句，每句走一次已配置的云端转写，出字会慢一拍；云端实时把采集帧上行到本机实时通道，服务端判回合。',
   realtimeEngineBrowser: 'Web Speech（逐字，免费）',
   realtimeEngineSegmented: '按句转写（本地切句 + 云端识别）',
+  realtimeEngineCloud: '云端实时（服务端判回合）',
   vadFrameMsLabel: '采集帧长',
   vadFrameMsDesc: '单位毫秒。每帧的时长，越小越省延迟、越大越省调度。',
   vadRmsLabel: '有声阈值',
@@ -519,6 +521,7 @@ export const en: LocaleDict = {
   realtimeEngineDesc: 'Web Speech streams words as you speak and costs nothing; per-sentence mode segments on local silence and sends each sentence to your configured cloud ASR, so captions land one round trip late.',
   realtimeEngineBrowser: 'Web Speech (word by word, free)',
   realtimeEngineSegmented: 'Per-sentence (local segmentation + cloud ASR)',
+  realtimeEngineCloud: 'Cloud realtime (server-side turn detection)',
   vadFrameMsLabel: 'Capture frame',
   vadFrameMsDesc: 'Milliseconds per captured audio frame. Smaller is snappier, larger is cheaper to schedule.',
   vadRmsLabel: 'Speech threshold',

@@ -76,8 +76,8 @@ export interface AsrVoiceConfig {
   realtime: {
     /** 实时语音对话总开关。 */
     enabled: boolean
-    /** 实时引擎：browser（Web Speech 逐字）/ segmented（本地 VAD 按句 + 整段转写通道）。 */
-    engine: 'browser' | 'segmented'
+    /** 实时引擎：browser（Web Speech 逐字）/ segmented（本地 VAD 按句 + 整段转写通道）/ cloud（PCM 上行 host 实时通道，服务端 VAD 判回合）。 */
+    engine: 'browser' | 'segmented' | 'cloud'
     /** 回复播报：browser（speechSynthesis）/ off（只出字）。 */
     tts: 'browser' | 'off'
     /** 进出实时模式的快捷键（'' = 关闭）。 */
@@ -367,7 +367,7 @@ export interface RealtimeTuning {
   /** 按钮是否存在。 */
   enabled: boolean
   /** 实时引擎。 */
-  engine: 'browser' | 'segmented'
+  engine: 'browser' | 'segmented' | 'cloud'
   /** 回复播报方式。 */
   tts: 'browser' | 'off'
   /** 对话快捷键（'' = 关闭）。 */

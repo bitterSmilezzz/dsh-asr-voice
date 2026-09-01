@@ -17,6 +17,8 @@ import { isWebSpeechSupported, startLevelSimulation, transcribeViaHost, type Spe
 import { startPcmCapture, type PcmCapture, type PcmCaptureOptions } from './capture.ts'
 import { PCM_SAMPLE_RATE, encodeWav16MonoPcm, isSilentPeak, normaliseGain, peakAbs, rmsOfFloat } from './pcm.ts'
 import { createEnergyVad, type EnergyVad, type VadTuning } from './vad.ts'
+import { createCloudRealtime, defaultCloudCapture } from './realtime-cloud.ts'
+import { createBrowserCloudTransport } from './realtime-cloud-transport.ts'
 
 /** 引擎回调（与 VoiceRecorder 的回调契约同构，语义换成连续会话）。 */
 export interface RealtimeEvents {
@@ -496,9 +498,9 @@ export function createSegmentedRealtime(
 }
 
 /** 实时引擎标识（对应 settings 的 realtime.engine）。 */
-export type RealtimeEngine = 'browser' | 'segmented'
+export type RealtimeEngine = 'browser' | 'segmented' | 'cloud'
 
-/** 按配置装配实时引擎（两引擎的回合判定同源，切换只改边界来源不改边界语义）。 */
+/** 按配置装配实时引擎（browser/segmented 回合判定同源；cloud 由服务端 VAD 给回合）。 */
 export function createRealtime(
   engine: RealtimeEngine,
   language: string,
@@ -506,5 +508,11 @@ export function createRealtime(
   events: RealtimeEvents,
 ): RealtimeSession {
   if (engine === 'segmented') return createSegmentedRealtime(language, tuning, events)
+  if (engine === 'cloud') {
+    return createCloudRealtime({ frameMs: tuning.frameMs }, events, {
+      capture: defaultCloudCapture,
+      transport: createBrowserCloudTransport(),
+    })
+  }
   return createBrowserRealtime(language, tuning, events)
 }

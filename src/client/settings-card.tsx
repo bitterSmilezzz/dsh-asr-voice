@@ -753,8 +753,9 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                   options={[
                     { value: 'browser', label: t('realtimeEngineBrowser') },
                     { value: 'segmented', label: t('realtimeEngineSegmented') },
+                    { value: 'cloud', label: t('realtimeEngineCloud') },
                   ]}
-                  onChange={(v) => edit((c) => withSection(c, 'realtime', { engine: v === 'segmented' ? 'segmented' : 'browser' }))}
+                  onChange={(v) => edit((c) => withSection(c, 'realtime', { engine: v === 'segmented' ? 'segmented' : v === 'cloud' ? 'cloud' : 'browser' }))}
                 />
                 <SelectRow
                   title={t('realtimeTtsLabel')}

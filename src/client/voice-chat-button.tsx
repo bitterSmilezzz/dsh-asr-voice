@@ -208,7 +208,7 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
       ? t('errNoMic')
       : code === 'network'
         ? t('errWebSpeechNetwork')
-        : code === 'provider-unreachable'
+        : code === 'provider-unreachable' || code === 'events-unavailable'
           ? t('errSegmentedUnreachable')
           : code === 'no-worklet' || code === 'capture-failed'
             ? t('errSegmentedUnsupported')
@@ -219,10 +219,13 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
   /** 开始一次对话。必须在点击回调里调用（Safari 的发声权限只认用户激活上下文）。 */
   const begin = (): void => {
     const tuning = realtimeTuning()
-    // 前置检查按引擎分：segmented 不用 Web Speech，但每句都要过一次已配置的云端转写。
+    // 前置检查按引擎分：segmented 不用 Web Speech，但每句都要过一次已配置的云端转写；
+    // cloud 走 host 实时通道（I3 假 provider / I5 真云端），也不需要 Web Speech。
     if (tuning.engine === 'segmented') {
       if (!isPcmCaptureSupported()) { setError(t('errSegmentedUnsupported')); setNotice(null); return }
       if (!cloudConfigured()) { setError(t('errSegmentedNeedsCloud')); setNotice(null); return }
+    } else if (tuning.engine === 'cloud') {
+      if (!isPcmCaptureSupported()) { setError(t('errSegmentedUnsupported')); setNotice(null); return }
     } else if (!isWebSpeechSupported()) {
       setError(t('errNoSpeechSupport')); setNotice(null); return
     }

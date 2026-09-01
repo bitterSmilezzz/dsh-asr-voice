@@ -126,7 +126,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 行为 | `behavior.silenceMs` | `2500` | 静音判定时长（毫秒，200~60000）：连续安静这么久即判定说完，需开 `silenceStop` |
 | 行为 | `behavior.silenceRms` | `0.02` | 静音阈值（0~1 响度比例）：低于它算安静 |
 | 实时 | `realtime.enabled` | `false` | 语音对话总开关：开了才出现第二个按钮与 `realtime.hotkey`（改动即时生效，无需重载页面） |
-| 实时 | `realtime.engine` | `browser` | 出字来源：`browser`（浏览器 Web Speech，逐字上屏、零 key、不新增本机请求）/ `segmented`（本地能量 VAD 按句切段，每句走一次已有的云端整段转写，需先配好 ASR 服务商） |
+| 实时 | `realtime.engine` | `browser` | 出字来源：`browser`（浏览器 Web Speech，逐字上屏、零 key、不新增本机请求）/ `segmented`（本地能量 VAD 按句切段，每句走一次已有的云端整段转写，需先配好 ASR 服务商）/ `cloud`（16k PCM 帧上行 host 实时通道，SSE 下行驱动字幕与回合，服务端 VAD 判回合） |
 | 实时 | `realtime.tts` | `browser` | 回复播报：`browser`（浏览器 `speechSynthesis`，零配置）/ `off`（只出字不出声） |
 | 实时 | `realtime.hotkey` | 空 | 进出实时对话的快捷键（空 = 不用快捷键）；与 `behavior.hotkey` 撞键时**对话优先** |
 | 实时 | `realtime.turn.settleMs` | `900` | 转写文字静默多久算「说完了」（毫秒，200~10000）：到点即提交并发起回合 |
@@ -159,23 +159,27 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 - **停顿即发起回合**：实时模式恒等于「自动发送」，与 `behavior.autoSend` 无关——那一次点击
   换成了每句的静默判定，草稿框里的内容会真的被提交执行。`behavior.textMode` 仍然生效：
   `append` 保留你已敲的文字，`replace` 覆盖草稿。
-- **两种引擎，回合判据同源**：`browser` 用浏览器 Web Speech 连续识别，逐字上屏，不新增任何本机
+- **三种引擎，回合判据同源**：`browser` 用浏览器 Web Speech 连续识别，逐字上屏，不新增任何本机
   host 请求、不需要云商 key（识别由浏览器自己的语音服务完成，音频出机方式见下节披露，因此同样受
   Firefox 无 Web Speech 的限制）。`segmented` 用本地能量 VAD 把连续麦克风切成句，每句走一次已有的
   云端整段转写：要先配好 ASR 服务商，出字节奏是「说完 `vad.silenceMs` + 一个往返」而非逐字，
   换来的是不依赖浏览器语音服务、且电平表由真实麦克风电平驱动。
-  两者共用同一套 `realtime.turn.*` 静默判定，切换引擎只改段边界的**来源**，不改「什么时候算说完」。
-  `segmented` 连续三次转写失败即判死并结束会话；转写慢过说话时丢最旧的段并提示字幕断裂，
-  而不是让字幕越拖越长。
+  `browser`/`segmented` 共用同一套 `realtime.turn.*` 静默判定，切换只改段边界的**来源**，不改
+  「什么时候算说完」。`segmented` 连续三次转写失败即判死并结束会话；转写慢过说话时丢最旧的段并
+  提示字幕断裂，而不是让字幕越拖越长。
+  `cloud` 走 host 实时通道（I3 交付）：16k PCM 帧量化后逐帧上行，SSE 下行事件驱动字幕与回合，
+  回合边界由**服务端 VAD** 判定（I3 假 provider / I5 真云端），本地不再文字静默判定——逐字延迟
+  更低，代价是需要一条 host 实时通道。
 - **半双工**：朗读期间不收音，回声不会被当成你说的话。打断有三处入口——再按一次按钮、
   再按一次快捷键、点提示条上的 `×`——任一都会立刻止住朗读、取消在途回合、回到聆听。
   不支持用说话声打断（见下节）。
 - **不做提示词优化**：对话要的是即时，转写文本原样上屏；`optimize.*` 只作用于整段录音模式。
 - **到点自己收**：`realtime.maxSessionMs` 上限到即结束会话并释放麦克风，麦克风不会无人值守常开。
-- **I3 已交付 host 实时通道（纯管道）**：会话注册表（`sid` 由 host 铸造）+ SSE 下行带背压 +
-  `RealtimeProvider` 接缝 + 假 provider 已实现并全量测试（含 undici WebSocket 带 `Authorization`
-  的真实 socket 上线证据），但**浏览器侧尚未接线**——当前两引擎（`browser` / `segmented`）都不走它；
-  接入真云端 provider 属于后续阶段，届时只替换 host 的 `createProvider`。
+- **I3/I4 已交付实时通道 + 浏览器侧 cloud 引擎**：host 会话注册表（`sid` 由 host 铸造）+ SSE
+  下行带背压 + `RealtimeProvider` 接缝 + 假 provider 已实现并全量测试（含 undici WebSocket 带
+  `Authorization` 的真实 socket 上线证据）；`realtime.engine = cloud` 时浏览器把采集帧上行到该
+  通道、SSE 下行驱动字幕/回合（7 例单测）。接入真云端 provider 属于后续阶段，届时只替换 host 的
+  `createProvider`。
 
 ## 云端 ASR 预置 Presets
 
@@ -253,14 +257,14 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   *Half-duplex: no barge-in by speaking. Whether browser echo cancellation suppresses our own
   synthesized speech is unmeasured, so acoustic interruption is deliberately absent.*
 - 播报音色与断句取决于操作系统装了什么语音，长句可能出现机械停顿；不接受就 `realtime.tts = off`，
-  字幕与自动提交照常。云端实时（PCM 流 + 服务端轮次判定）**浏览器侧尚未接线**：host 半区的实时
-  通道（会话注册表 + SSE 下行 + `RealtimeProvider` 接缝 + 假 provider）已随 I3 交付并全量测试，
-  但客户端还不消费它——`realtime.engine` 目前只有 `browser` / `segmented` 两档，真云端 provider
-  （如 qwen3-asr-flash-realtime）是后续阶段。
+  字幕与自动提交照常。云端实时（PCM 流 + 服务端轮次判定）**已由 `engine=cloud` 接入**：host 实时
+  通道（会话注册表 + SSE 下行 + `RealtimeProvider` 接缝 + 假 provider）随 I3 交付，client 侧 cloud
+  引擎（采集帧上行 + SSE 下行驱动字幕/回合）随 I4 交付；真云端 provider（如 qwen3-asr-flash-realtime）
+  仍是后续阶段。
   *Voice quality depends on installed system voices; set `realtime.tts = off` for captions only.
   The host realtime channel (session registry + SSE downlink + `RealtimeProvider` seam + fake
-  provider) shipped in I3 with full tests, but the browser half does not consume it yet —
-  `realtime.engine` today is `browser` / `segmented`, and a real cloud provider is a later stage.*
+  provider) shipped in I3, and the browser half now consumes it via `engine=cloud` (I4); a real
+  cloud provider is still a later stage.*
 - API key 存于 DSH 凭据服务（落盘位置与格式由 host 的凭据策略决定），仅本机回环可访问代理路由
   （信任围栏防 CSRF）。
   *Keys live in the DSH credential store (where and how they are persisted is the host's policy);
