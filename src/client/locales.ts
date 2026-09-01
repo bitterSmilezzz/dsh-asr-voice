@@ -124,6 +124,8 @@ export type LocaleKey =
   | 'realtimeTtsOff'
   | 'realtimeHotkeyLabel'
   | 'realtimeHotkeyDesc'
+  | 'bargeInLabel'
+  | 'bargeInDesc'
   | 'realtimeSettleMsLabel'
   | 'realtimeSettleMsDesc'
   | 'realtimeTailMsLabel'
@@ -330,6 +332,8 @@ export const zh: LocaleDict = {
   realtimeTtsVoiceLabel: '云端音色',
   realtimeTtsVoiceDesc: 'qwen3-tts-flash-realtime 的系统音色名（如 Cherry），key 复用 DSH 凭据 DASHSCOPE_API_KEY。',
   realtimeHotkeyLabel: '对话快捷键',
+  bargeInLabel: '语音插话（全双工，默认关）',
+  bargeInDesc: '播报回复期间继续收音：你开口说话（持续超过回声门）就直接打断朗读、取消当前回合。默认关——浏览器 AEC 在虚拟设备上实测不生效（0.42 dB），真机回环复测通过前先保持半双工最稳；仅按句切段引擎（segmented）支持。',
   realtimeHotkeyDesc: '点击后按新组合键，用于开始/结束对话或打断播报；留空表示只用按钮。与上面的录音快捷键互不影响。',
   realtimeSettleMsLabel: '断句等待',
   realtimeSettleMsDesc: '单位毫秒。识别文字停止变化这么久，就认为这句说完并上屏。',
@@ -529,6 +533,8 @@ export const en: LocaleDict = {
   realtimeTtsVoiceLabel: 'Cloud voice',
   realtimeTtsVoiceDesc: 'A qwen3-tts-flash-realtime system voice name (e.g. Cherry); reuses the DASHSCOPE_API_KEY credential.',
   realtimeHotkeyLabel: 'Chat hotkey',
+  bargeInLabel: 'Barge-in (full duplex, off by default)',
+  bargeInDesc: 'Keep listening while the reply is spoken: your voice (sustained past the echo gate) cuts the TTS and cancels the turn. Off by default — Chromium AEC measured 0.42 dB on virtual devices, so half-duplex stays the default until a real acoustic-loop retest; segmented engine only.',
   realtimeHotkeyDesc: 'Click, then press a new combo to start, stop or interrupt the chat. Leave empty to use the button only. Independent from the recording hotkey above.',
   realtimeSettleMsLabel: 'Turn settle time',
   realtimeSettleMsDesc: 'Milliseconds. Once the transcript stops changing for this long, the turn is considered finished and put on screen.',

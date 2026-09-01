@@ -87,6 +87,8 @@ export interface AsrVoiceConfig {
     ttsVoice: string
     /** 进出实时模式的快捷键（'' = 关闭）。 */
     hotkey: string
+    /** 语音插话（D19，默认关）：播报回复期间恢复收音，人声持续超出回声门才打断。 */
+    bargeIn: boolean
     turn: {
       /** 转写文字静默多久算「说完了」（毫秒）。 */
       settleMs: number
@@ -135,7 +137,7 @@ export const DEFAULTS: AsrVoiceConfig = {
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
-  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', ttsVoice: 'Cherry', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, rmsAuto: true, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
+  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', ttsVoice: 'Cherry', hotkey: '', bargeIn: false, turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, rmsAuto: true, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与写回共同维护。 */
@@ -380,6 +382,8 @@ export interface RealtimeTuning {
   ttsVoice: string
   /** 对话快捷键（'' = 关闭）。 */
   hotkey: string
+  /** 语音插话（默认关）：播报期间恢复收音，人声持续超出回声门才打断。 */
+  bargeIn: boolean
   /** 转写静默多久算说完（毫秒）。 */
   settleMs: number
   /** 说完后再宽限这么久才提交（毫秒）。 */
@@ -398,9 +402,9 @@ export interface RealtimeTuning {
 
 /** 取当前配置的实时对话快照（配置 → 会话/引擎/播报的唯一搬运处）。 */
 export function realtimeTuning(source: AsrVoiceConfig = config): RealtimeTuning {
-  const { enabled, engine, tts, ttsVoice, hotkey, turn, vad, maxSessionMs, speech } = source.realtime
+  const { enabled, engine, tts, ttsVoice, hotkey, bargeIn, turn, vad, maxSessionMs, speech } = source.realtime
   return {
-    enabled, engine, tts, ttsVoice, hotkey, maxSessionMs, language: source.language,
+    enabled, engine, tts, ttsVoice, hotkey, bargeIn, maxSessionMs, language: source.language,
     settleMs: turn.settleMs, tailMs: turn.tailMs,
     firstSentenceMinChars: speech.firstSentenceMinChars,
     utteranceWatchdogMs: speech.utteranceWatchdogMs,

@@ -126,6 +126,8 @@ export const AsrVoiceSettingsSchema: any = z.object({
     ttsVoice: z.string().default('Cherry'),
     /** 进出实时模式的快捷键（默认关，避免与官方快捷键相撞）。 */
     hotkey: z.string().default(''),
+    /** 语音插话（默认关）：播报期间恢复收音，人声持续超出回声门才打断。 */
+    bargeIn: z.boolean().default(false),
     /** 回合边界判定（本地兜底：实时引擎不给回合终点时由文字稳定性决定）。 */
     turn: z.object({
       /** 转写文字静默多久算「说完了」（毫秒）。 */

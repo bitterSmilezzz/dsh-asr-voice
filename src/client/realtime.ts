@@ -17,7 +17,7 @@ import { isWebSpeechSupported, startLevelSimulation, transcribeViaHost, type Spe
 import { startPcmCapture, type PcmCapture, type PcmCaptureOptions } from './capture.ts'
 import { PCM_SAMPLE_RATE, encodeWav16MonoPcm, isSilentPeak, normaliseGain, peakAbs, rmsOfFloat } from './pcm.ts'
 import { createEnergyVad, type EnergyVad, type VadTuning } from './vad.ts'
-import { createRmsFloorEstimator, DEFAULT_RMS_FLOOR_TUNING } from './rms-floor.ts'
+import { createRmsFloorEstimator, DEFAULT_RMS_FLOOR_TUNING, createBargeInGate, DEFAULT_BARGE_IN_TUNING } from './rms-floor.ts'
 import { createCloudRealtime, defaultCloudCapture } from './realtime-cloud.ts'
 import { createBrowserCloudTransport } from './realtime-cloud-transport.ts'
 
@@ -33,6 +33,8 @@ export interface RealtimeEvents {
   onFail(code: string): void
   /** 背压丢段：字幕从这里起不再完整（segmented 引擎独有）。 */
   onGap?(): void
+  /** 语音插话（D19）：播放回复期间检测到真正的人声打断（segmented 引擎独有）。 */
+  onBargeIn?(): void
 }
 
 /** 回合判定参数。 */
@@ -58,6 +60,13 @@ export interface RealtimeSession {
   stop(): void
   /** 是否正在收音。 */
   readonly listening: boolean
+  /**
+   * 语音插话（barge-in，D19）：播放回复期间恢复采集并武装回声门控。只有带本地
+   * 能量门控的引擎（segmented）实现；browser/cloud 引擎保持半双工（pause 静音）。
+   */
+  armBargeIn?(): void
+  /** 解除回声门控（播放自然排空/被打断时调用）。 */
+  disarmBargeIn?(): void
 }
 
 /** Web Speech 在 onend 后重新拉起前的最小间隔：紧接着 start() 会撞 InvalidStateError。 */
@@ -342,6 +351,8 @@ export function createSegmentedRealtime(
   const floor = tuning.vad.rmsAuto === true
     ? createRmsFloorEstimator({ ...DEFAULT_RMS_FLOOR_TUNING, frameMs: tuning.frameMs })
     : null
+  /** barge-in 回声门控：播放回复期间武装，只有它触发才打断（D19，默认关）。 */
+  const bargeGate = createBargeInGate({ ...DEFAULT_BARGE_IN_TUNING, frameMs: tuning.frameMs })
   let inFlight = false
   let failures = 0
   const queue: Float32Array[] = []
@@ -373,6 +384,7 @@ export function createSegmentedRealtime(
 
   const tearDown = (): void => {
     gate.cancel()
+    bargeGate.disarm()
     abortAll()
     queue.length = 0
     inFlight = false
@@ -436,6 +448,9 @@ export function createSegmentedRealtime(
     vad ??= createEnergyVad(PCM_SAMPLE_RATE, tuning.vad, {
       onSegment: (pcm) => {
         if (!active || paused) return
+        // barge-in 期（播报回复中）：回声可能被 VAD 切成段，直接丢弃不上行——
+        // 打断检测走能量门控，这里留白只会浪费一次上游配额。
+        if (bargeGate.armed) return
         // 静音守卫：VAD 也可能被噪声底顶开一段，趋零的段发上去只会换来幻觉字。
         if (isSilentPeak(peakAbs(pcm))) return
         enqueue(pcm)
@@ -447,7 +462,11 @@ export function createSegmentedRealtime(
 
   const onFrame = (pcm: Float32Array): void => {
     if (!active || paused) return
-    events.onLevel(rmsOfFloat(pcm))
+    const rms = rmsOfFloat(pcm)
+    events.onLevel(rms)
+    if (bargeGate.armed && bargeGate.feed(rms, vad?.inSpeech ?? false)) {
+      events.onBargeIn?.()
+    }
     ensureVad().feed(pcm)
   }
 
@@ -494,11 +513,28 @@ export function createSegmentedRealtime(
       active = false
       paused = true
       generation += 1
+      bargeGate.disarm()
       tearDown()
       capture?.stop()
       capture = null
     },
     get listening(): boolean { return active && !paused },
+    armBargeIn(): void {
+      if (!active) return
+      bargeGate.arm()
+      // 从 thinking 的静音态回到收音（与 resume 同款逻辑：重启采集 + 重置 VAD，
+      // 播报回声不留痕迹；在途请求随代际作废——此时本就没有在途请求）。
+      if (paused) {
+        paused = false
+        generation += 1
+        ensureVad().reset()
+        if (capture === null) openCapture()
+        else capture.setMuted(false)
+      }
+    },
+    disarmBargeIn(): void {
+      bargeGate.disarm()
+    },
   }
 }
 

@@ -316,7 +316,7 @@ const frame = (ms, amp) => new Float32Array(Math.round(SR * ms / 1000)).fill(amp
  * 转写请求由测试手动放行——上游往返什么时候回来不可控，这里必须可控。
  */
 async function withSegmented(run, opts = {}) {
-  const events = { partial: [], turns: [], fails: [], gaps: 0, levels: [] }
+  const events = { partial: [], turns: [], fails: [], gaps: 0, levels: [], barges: 0 }
   const sinks = []
   const mutes = []
   const requests = []
@@ -356,6 +356,7 @@ async function withSegmented(run, opts = {}) {
       onLevel: (level) => { events.levels.push(level) },
       onFail: (code) => { events.fails.push(code) },
       onGap: () => { events.gaps += 1 },
+      onBargeIn: () => { events.barges += 1 },
     },
     { capture, transcribe },
   )
@@ -536,4 +537,67 @@ test('采集报 no-worklet → 会话级失败并关麦', async () => {
   assert.deepEqual(events.fails, ['no-worklet'])
   assert.equal(session.listening, false)
   assert.equal(stopped, 1)
+})
+
+test('barge-in: armBargeIn 从 thinking 静音态恢复收音，播报回声段不上行', async () => {
+  await withSegmented(async ({ session, events, requests, feed, speak, mutes }) => {
+    session.start()
+    speak()
+    await until('正常段在途', () => requests.length === 1)
+    requests[0].resolve('一句正常的')
+    await until('回合交出', () => events.turns.length === 1)
+    session.pause()                     // thinking：采集静音
+    assert.equal(session.listening, false)
+    assert.deepEqual(mutes, [true])
+    session.armBargeIn()                // speaking 开始播报：恢复收音 + 武装门控
+    assert.equal(session.listening, true, 'armBargeIn 必须恢复收音')
+    assert.deepEqual(mutes, [true, false], '采集取消静音')
+    // 播报回声被 VAD 切成段：必须丢弃，不能白烧一次上游配额
+    feed(300, 0.12)
+    feed(300, 0.12)
+    feed(300, 0)
+    await sleep(60)
+    assert.equal(requests.length, 1, 'barge-in 期的回声段不得上行')
+    assert.equal(events.barges, 0, '稳定回声不触发打断')
+  })
+})
+
+test('barge-in: 人声显著超回声门并持续 → 恰好触发一次 onBargeIn', async () => {
+  await withSegmented(async ({ session, events, requests, feed }) => {
+    session.start()
+    session.armBargeIn()
+    // 宽限期（800ms/40ms = 20 帧）内学回声背景 0.03；headroom ×3 → 门 0.09
+    for (let i = 0; i < 22; i++) feed(40, 0.03)
+    assert.equal(events.barges, 0, '宽限期不触发')
+    // 人声 0.3（10 倍超门）持续 holdMs(350ms) ≈ 9 帧 → 触发
+    for (let i = 0; i < 9; i++) feed(40, 0.3)
+    assert.equal(events.barges, 1, '人声持续超门恰好触发一次')
+    // 触发即一次性 disarm：继续大声也不再报
+    for (let i = 0; i < 20; i++) feed(40, 0.5)
+    assert.equal(events.barges, 1)
+    assert.equal(requests.length, 0, '全程无段上行（barge 期 + 触发后）')
+  })
+})
+
+test('barge-in: 语音只比回声高一点（3dB 量级）不触发，防误打断', async () => {
+  await withSegmented(async ({ session, events, feed }) => {
+    session.start()
+    session.armBargeIn()
+    for (let i = 0; i < 22; i++) feed(40, 0.1)   // 回声背景 0.1 → 门 0.3
+    for (let i = 0; i < 30; i++) feed(40, 0.16)  // 0.16 < 0.3：不足
+    assert.equal(events.barges, 0)
+  })
+})
+
+test('barge-in: disarm 后恢复正常切段上行', async () => {
+  await withSegmented(async ({ session, events, requests, feed }) => {
+    session.start()
+    session.armBargeIn()
+    for (let i = 0; i < 22; i++) feed(40, 0.03)
+    session.disarmBargeIn()
+    feed(80, 0.2)
+    feed(120, 0)
+    await until('断言的段正常上行', () => requests.length === 1)
+    assert.equal(events.barges, 0)
+  })
 })

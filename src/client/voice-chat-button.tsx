@@ -151,6 +151,8 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
     if (!mountedRef.current || phaseRef.current === 'idle' || phaseRef.current === 'listening') return
     if (turnRef.current !== null) return
     setLive('')
+    // barge-in 播报结束：解除回声门控，回到普通聆听。
+    engineRef.current?.disarmBargeIn?.()
     engineRef.current?.resume()
     setPhase('listening')
   }
@@ -160,7 +162,12 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
     const sink = sinkRef.current
     if (sink === null) return
     sink.enqueue(sentence)
-    if (phaseRef.current === 'thinking') setPhase('speaking')
+    if (phaseRef.current === 'thinking') {
+      setPhase('speaking')
+      // 全双工（barge-in，默认关）：开始播报时武装回声门控并恢复收音——
+      // 门控把 TTS 回声当背景，只有真正的人声持续超出才打断（D19）。
+      if (tuningRef.current?.bargeIn === true) engineRef.current?.armBargeIn?.()
+    }
   }
 
   /** 提交一句 → 发起回合。 */
@@ -194,6 +201,7 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
 
   /** 打断：止住播报、取消在途回合，立刻回到聆听。 */
   const interrupt = (): void => {
+    engineRef.current?.disarmBargeIn?.()
     sinkRef.current?.cancel()
     clearNoReply()
     turnRef.current = null
@@ -258,6 +266,12 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
       },
       onFail: (code) => { failByCode(code) },
       onGap: () => { setNotice(t('chatGap')) },
+      onBargeIn: () => {
+        // 听到真正的人声打断（回声音量不足触发不了门控）：立刻止读、取消回合、
+        // 回到聆听。键盘/关门等瞬态被持续时长门槛滤掉，不会误断。
+        setNotice(null)
+        interrupt()
+      },
     })
     // 到点自己收：麦克风不能因为人去倒杯水就一直开着。
     capRef.current = setTimeout(() => { endSession(t('chatEndedLimit')) }, tuning.maxSessionMs)
