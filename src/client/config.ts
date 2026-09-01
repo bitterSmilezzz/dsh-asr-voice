@@ -97,8 +97,10 @@ export interface AsrVoiceConfig {
     vad: {
       /** 采集帧长（毫秒）。 */
       frameMs: number
-      /** RMS 有声阈值（0~1）。 */
+      /** RMS 有声阈值（0~1）；rmsAuto 开启时它是下限，实际判据随噪声底抬升。 */
       rms: number
+      /** 自动校准：阈值 = max(rms, 静音期噪声底 × 裕量)，换设备免重校。 */
+      rmsAuto: boolean
       /** 连续静音多久切一段（毫秒）。 */
       silenceMs: number
       /** 段前保留（毫秒）。 */
@@ -133,7 +135,7 @@ export const DEFAULTS: AsrVoiceConfig = {
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
-  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', ttsVoice: 'Cherry', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
+  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', ttsVoice: 'Cherry', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, rmsAuto: true, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与写回共同维护。 */
@@ -409,6 +411,8 @@ export function realtimeTuning(source: AsrVoiceConfig = config): RealtimeTuning 
       maxPending: vad.maxPending,
       vad: {
         rms: vad.rms,
+        // 老宿主快照（schema 升级前）没有 rmsAuto：缺省按开启回退。
+        rmsAuto: vad.rmsAuto ?? true,
         silenceMs: vad.silenceMs,
         prerollMs: vad.prerollMs,
         minSpeechMs: vad.minSpeechMs,

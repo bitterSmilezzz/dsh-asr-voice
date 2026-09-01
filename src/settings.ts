@@ -139,6 +139,8 @@ export const AsrVoiceSettingsSchema: any = z.object({
       frameMs: z.natural().min(10).max(500).default(40),
       /** RMS 高于此值算有声。偏低→杂音成句；偏高→轻声句尾被切掉。 */
       rms: z.percent().default(0.02),
+      /** 自动校准：实际判据 = max(rms, 静音期噪声底×3)，换设备免重校。 */
+      rmsAuto: z.boolean().default(true),
       /** 连续静音多久切一段（毫秒）：也是每句上屏的固定延迟。 */
       silenceMs: z.natural().min(200).max(5_000).default(700),
       /** 段前保留（毫秒）：不留就会切掉第一个音节。 */

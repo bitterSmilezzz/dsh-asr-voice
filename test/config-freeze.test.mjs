@@ -242,6 +242,7 @@ test('宿主文档早于 realtime 段：整段缺省仍要给出可用快照', (
   const { vad: vadDefaults } = DEFAULTS.realtime
   assert.deepEqual(upgraded.segmented.vad, {
     rms: vadDefaults.rms,
+    rmsAuto: true, // 老文档没有 rmsAuto：realtimeTuning 按开启回退，绝不能让 undefined 泄漏
     silenceMs: vadDefaults.silenceMs,
     prerollMs: vadDefaults.prerollMs,
     minSpeechMs: vadDefaults.minSpeechMs,

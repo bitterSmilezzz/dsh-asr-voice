@@ -14,8 +14,10 @@ import { rmsOfFloat } from './pcm.ts'
 
 /** VAD 参数（来自 settings 的 realtime.vad.*，见 `config.ts`）。 */
 export interface VadTuning {
-  /** RMS 判有声的阈值（0~1）。 */
+  /** RMS 判有声的阈值（0~1），也是 rmsAuto 关闭时的唯一判据。 */
   rms: number
+  /** 开启后阈值 = max(rms, 自适应噪声底 × 裕量)，换设备免重校。 */
+  rmsAuto?: boolean
   /** 连续静音多久切一段（毫秒）。 */
   silenceMs: number
   /** 段前保留多久的音频（毫秒）。 */
@@ -24,6 +26,14 @@ export interface VadTuning {
   minSpeechMs: number
   /** 单段语音长度上限（毫秒）。 */
   maxSegmentMs: number
+}
+
+/** 自适应噪声底来源（`rms-floor.ts`）：VAD 用它把阈值变成设备噪声底的函数。 */
+export interface RmsFloorSource {
+  /** 投喂一窗 RMS 与 VAD 当前是否判着有声；语音期帧不更新底噪。 */
+  observe(rms: number, speechActive: boolean): void
+  /** 当前建议阈值（未学到时 0 = 回退 tuning.rms）。 */
+  readonly threshold: number
 }
 
 /** VAD 事件。 */
@@ -64,8 +74,12 @@ function concatWindows(windows: Float32Array[]): Float32Array {
   return out
 }
 
-/** 构造一个能量 VAD。`sampleRate` 必须是投喂帧的采样率（本项目为 PCM_SAMPLE_RATE）。 */
-export function createEnergyVad(sampleRate: number, tuning: VadTuning, events: VadEvents): EnergyVad {
+/**
+ * 构造一个能量 VAD。`sampleRate` 必须是投喂帧的采样率（本项目为 PCM_SAMPLE_RATE）。
+ * `floor` 可选：`tuning.rmsAuto` 时 VAD 每窗把 RMS 与语音期判定反馈给它，并用
+ * `floor.threshold`（未学到时为 0）抬高/放低实际判据。
+ */
+export function createEnergyVad(sampleRate: number, tuning: VadTuning, events: VadEvents, floor?: RmsFloorSource | null): EnergyVad {
   const windowSamples = Math.max(1, Math.round((sampleRate * WINDOW_MS) / 1000))
   const prerollWindows = Math.max(0, Math.round(tuning.prerollMs / WINDOW_MS))
   const silenceWindows = Math.max(1, Math.round(tuning.silenceMs / WINDOW_MS))
@@ -91,7 +105,21 @@ export function createEnergyVad(sampleRate: number, tuning: VadTuning, events: V
   }
 
   const handleWindow = (w: Float32Array): void => {
-    const voiced = rmsOfFloat(w) > tuning.rms
+    const rms = rmsOfFloat(w)
+    const auto = tuning.rmsAuto === true && floor !== undefined && floor !== null
+    floor?.observe(rms, speaking)
+    // 学习期纪律：floor 未就绪（threshold === 0）时阈值回退用户基线，而噪声底高于
+    // 基线时学习窗本身会被判成语音 → 估计器永远学不到、段被整体吃掉。所以在
+    // threshold 就绪之前 VAD 只积累段前缓冲、不开段不说话（约一个观测窗长，默
+    // 认 2s），学满后自动恢复正式判定。
+    const learning = auto && floor?.threshold === 0
+    if (learning) {
+      preroll.push(w)
+      if (preroll.length > prerollWindows) preroll.shift()
+      return
+    }
+    const effectiveRms = auto ? Math.max(tuning.rms, floor!.threshold) : tuning.rms
+    const voiced = rms > effectiveRms
     if (!speaking) {
       if (!voiced) {
         preroll.push(w)

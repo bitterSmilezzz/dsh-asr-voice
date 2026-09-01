@@ -138,6 +138,8 @@ export type LocaleKey =
   | 'realtimeTtsCloud'
   | 'realtimeTtsVoiceLabel'
   | 'realtimeTtsVoiceDesc'
+  | 'vadRmsAutoLabel'
+  | 'vadRmsAutoDesc'
   | 'vadFrameMsLabel'
   | 'vadFrameMsDesc'
   | 'vadRmsLabel'
@@ -340,6 +342,8 @@ export const zh: LocaleDict = {
   realtimeEngineCloud: '云端实时（服务端判回合）',
   realtimeProviderLabel: '实时服务商',
   realtimeProviderDesc: '云端实时走哪个 provider。选「内置模拟」用 host 端假 provider（开发态，不花配额）；选阿里云百炼接真云端 qwen3-asr-flash-realtime（服务端 VAD 判回合，key 复用 DSH 凭据 DASHSCOPE_API_KEY）。',
+  vadRmsAutoLabel: '有声阈值自动校准',
+  vadRmsAutoDesc: '按设备噪声底自动调整实际判阈值（下限仍是你设置的「有声阈值」）：安静环境更灵、嘈杂环境不乱切句，换设备免重校。',
   vadFrameMsLabel: '采集帧长',
   vadFrameMsDesc: '单位毫秒。每帧的时长，越小越省延迟、越大越省调度。',
   vadRmsLabel: '有声阈值',
@@ -537,6 +541,8 @@ export const en: LocaleDict = {
   realtimeEngineCloud: 'Cloud realtime (server-side turn detection)',
   realtimeProviderLabel: 'Realtime provider',
   realtimeProviderDesc: 'Which provider drives cloud realtime. "Built-in simulation" uses the host-side fake provider (dev mode, no quota); Alibaba Cloud Qwen connects to real qwen3-asr-flash-realtime (server-side VAD, reuses the DASHSCOPE_API_KEY credential).',
+  vadRmsAutoLabel: 'Auto-calibrate speech threshold',
+  vadRmsAutoDesc: 'Raise the effective threshold above your device noise floor automatically (your "Speech threshold" stays the lower bound): more responsive when quiet, no phantom sentences when noisy — no recalibration after switching devices.',
   vadFrameMsLabel: 'Capture frame',
   vadFrameMsDesc: 'Milliseconds per captured audio frame. Smaller is snappier, larger is cheaper to schedule.',
   vadRmsLabel: 'Speech threshold',

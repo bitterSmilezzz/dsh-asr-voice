@@ -17,6 +17,7 @@ import { isWebSpeechSupported, startLevelSimulation, transcribeViaHost, type Spe
 import { startPcmCapture, type PcmCapture, type PcmCaptureOptions } from './capture.ts'
 import { PCM_SAMPLE_RATE, encodeWav16MonoPcm, isSilentPeak, normaliseGain, peakAbs, rmsOfFloat } from './pcm.ts'
 import { createEnergyVad, type EnergyVad, type VadTuning } from './vad.ts'
+import { createRmsFloorEstimator, DEFAULT_RMS_FLOOR_TUNING } from './rms-floor.ts'
 import { createCloudRealtime, defaultCloudCapture } from './realtime-cloud.ts'
 import { createBrowserCloudTransport } from './realtime-cloud-transport.ts'
 
@@ -337,6 +338,10 @@ export function createSegmentedRealtime(
   let text = ''
   let vad: EnergyVad | null = null
   let capture: PcmCapture | null = null
+  /** rmsAuto 的噪声底估计器：与 VAD 同生命周期，静音期持续学习。 */
+  const floor = tuning.vad.rmsAuto === true
+    ? createRmsFloorEstimator({ ...DEFAULT_RMS_FLOOR_TUNING, frameMs: tuning.frameMs })
+    : null
   let inFlight = false
   let failures = 0
   const queue: Float32Array[] = []
@@ -436,7 +441,7 @@ export function createSegmentedRealtime(
         enqueue(pcm)
       },
       onSpeech: (inSpeech) => { if (!inSpeech) gate.arm(text !== '') },
-    })
+    }, floor)
     return vad
   }
 
