@@ -772,10 +772,14 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                   value={draft.realtime.tts}
                   options={[
                     { value: 'browser', label: t('realtimeTtsBrowser') },
+                    { value: 'cloud', label: t('realtimeTtsCloud') },
                     { value: 'off', label: t('realtimeTtsOff') },
                   ]}
-                  onChange={(v) => edit((c) => withSection(c, 'realtime', { tts: v === 'off' ? 'off' : 'browser' }))}
+                  onChange={(v) => edit((c) => withSection(c, 'realtime', { tts: v === 'off' ? 'off' : v === 'cloud' ? 'cloud' : 'browser' }))}
                 />
+                {draft.realtime.tts === 'cloud' && (
+                  <TextRow title={t('realtimeTtsVoiceLabel')} desc={t('realtimeTtsVoiceDesc')} value={draft.realtime.ttsVoice} onChange={(v) => edit((c) => withSection(c, 'realtime', { ttsVoice: v }))} />
+                )}
                 <Field title={t('realtimeHotkeyLabel')} desc={t('realtimeHotkeyDesc')} control={<HotkeyRecorder value={draft.realtime.hotkey} onChange={(v) => edit((c) => withSection(c, 'realtime', { hotkey: v }))} t={t} />} />
                 <NumberRow title={t('realtimeSettleMsLabel')} desc={t('realtimeSettleMsDesc')} value={draft.realtime.turn.settleMs} min={200} max={10_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, settleMs: v } }))} />
                 <NumberRow title={t('realtimeTailMsLabel')} desc={t('realtimeTailMsDesc')} value={draft.realtime.turn.tailMs} min={0} max={5_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, tailMs: v } }))} />

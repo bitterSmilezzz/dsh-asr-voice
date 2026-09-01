@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { cloudConfigured, config, realtimeTuning, type RealtimeTuning } from './config.ts'
 import { createRealtime, type RealtimeSession } from './realtime.ts'
 import { isPcmCaptureSupported } from './capture.ts'
-import { createSentencePump, createSpeechSynthesisSink, isSpeechSynthesisSupported, type SpeakSink } from './speech-out.ts'
+import { createSentencePump, createSpeechSynthesisSink, createCloudTtsSink, isSpeechSynthesisSupported, isCloudTtsSupported, type SpeakSink } from './speech-out.ts'
 import { isWebSpeechSupported } from './recorder.ts'
 import { RecDot, SpectrumBars, Spinner } from './voice-button.tsx'
 import type { LocaleT } from './locales.ts'
@@ -229,17 +229,19 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
     } else if (!isWebSpeechSupported()) {
       setError(t('errNoSpeechSupport')); setNotice(null); return
     }
-    const ttsReady = isSpeechSynthesisSupported()
+    const ttsReady = tuning.tts === 'cloud' ? isCloudTtsSupported() : isSpeechSynthesisSupported()
     tuningRef.current = tuning
     setError(null)
     setNotice(tuning.tts !== 'off' && !ttsReady ? t('chatNoTts') : null)
     setLive('')
     levelRef.current = -1
     if (tuning.tts !== 'off' && ttsReady) {
-      const sink = createSpeechSynthesisSink({
-        utteranceWatchdogMs: tuning.utteranceWatchdogMs,
-        language: tuning.language,
-      })
+      const sink = tuning.tts === 'cloud'
+        ? createCloudTtsSink({ language: tuning.language, voice: tuning.ttsVoice })
+        : createSpeechSynthesisSink({
+            utteranceWatchdogMs: tuning.utteranceWatchdogMs,
+            language: tuning.language,
+          })
       sink.onDrain = () => { if (turnRef.current === null) resumeListening() }
       sinkRef.current = sink
       sink.prime()

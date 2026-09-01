@@ -81,8 +81,10 @@ export interface AsrVoiceConfig {
     engine: 'browser' | 'segmented' | 'cloud'
     /** 云端实时 provider（engine=cloud 时；builtin = 内置模拟，dashscope-realtime = 阿里云百炼）。 */
     provider: string
-    /** 回复播报：browser（speechSynthesis）/ off（只出字）。 */
-    tts: 'browser' | 'off'
+    /** 回复播报：browser（speechSynthesis）/ cloud（云端 TTS）/ off（只出字）。 */
+    tts: 'browser' | 'off' | 'cloud'
+    /** 云端 TTS 音色（仅 tts=cloud 生效）。 */
+    ttsVoice: string
     /** 进出实时模式的快捷键（'' = 关闭）。 */
     hotkey: string
     turn: {
@@ -131,7 +133,7 @@ export const DEFAULTS: AsrVoiceConfig = {
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
-  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
+  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', ttsVoice: 'Cherry', hotkey: '', turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与写回共同维护。 */
@@ -371,7 +373,9 @@ export interface RealtimeTuning {
   /** 实时引擎。 */
   engine: 'browser' | 'segmented' | 'cloud'
   /** 回复播报方式。 */
-  tts: 'browser' | 'off'
+  tts: 'browser' | 'off' | 'cloud'
+  /** 云端 TTS 音色（仅 tts=cloud 生效）。 */
+  ttsVoice: string
   /** 对话快捷键（'' = 关闭）。 */
   hotkey: string
   /** 转写静默多久算说完（毫秒）。 */
@@ -392,9 +396,9 @@ export interface RealtimeTuning {
 
 /** 取当前配置的实时对话快照（配置 → 会话/引擎/播报的唯一搬运处）。 */
 export function realtimeTuning(source: AsrVoiceConfig = config): RealtimeTuning {
-  const { enabled, engine, tts, hotkey, turn, vad, maxSessionMs, speech } = source.realtime
+  const { enabled, engine, tts, ttsVoice, hotkey, turn, vad, maxSessionMs, speech } = source.realtime
   return {
-    enabled, engine, tts, hotkey, maxSessionMs, language: source.language,
+    enabled, engine, tts, ttsVoice, hotkey, maxSessionMs, language: source.language,
     settleMs: turn.settleMs, tailMs: turn.tailMs,
     firstSentenceMinChars: speech.firstSentenceMinChars,
     utteranceWatchdogMs: speech.utteranceWatchdogMs,

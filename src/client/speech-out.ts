@@ -276,3 +276,125 @@ export function createSpeechSynthesisSink(tuning: SpeakTuning): SpeakSink {
     },
   }
 }
+
+/** 云端 TTS 是否需要 Web Audio（浏览器能力检查）。 */
+export function isCloudTtsSupported(): boolean {
+  const w = typeof window === 'undefined' ? undefined : (window as unknown as { AudioContext?: unknown; webkitAudioContext?: unknown })
+  return Boolean(w?.AudioContext ?? w?.webkitAudioContext)
+}
+
+/**
+ * 云端 TTS 实现（I6）：文本 → host 私有路由 → 阿里云百炼 qwen3-tts-flash-realtime
+ * → base64 PCM（16k int16 LE）→ `AudioBufferSourceNode → ctx.destination` 播放。
+ *
+ * 与浏览器 speechSynthesis 同接口（SpeakSink），调用方（语音对话按钮）不感知实现。
+ * 句子按到达顺序排队、一次播一句；`onended` 是 Web Audio 的精确事件（不像
+ * speechSynthesis 的 onend 会漏回调），所以不需要看门狗。云端不可达或合成失败时
+ * 跳过该句继续排队（不阻塞对话），失败静默（错误面由录音侧暴露）。
+ */
+export function createCloudTtsSink(tuning: { language: string; voice?: string }): SpeakSink {
+  const queue: string[] = []
+  let ctx: AudioContext | null = null
+  let current: AudioBufferSourceNode | null = null
+  let playing = false
+  let pending = false
+  let drain: (() => void) | null = null
+  let disposed = false
+
+  const getCtx = (): AudioContext | null => {
+    if (ctx === null) {
+      const w = window as unknown as { AudioContext?: new () => AudioContext; webkitAudioContext?: new () => AudioContext }
+      const Ctor = w.AudioContext ?? w.webkitAudioContext
+      if (Ctor === undefined) return null
+      ctx = new Ctor()
+    }
+    return ctx
+  }
+
+  /** 合成并播放一句（Promise 在播完时 settle）。 */
+  const speak = async (text: string): Promise<void> => {
+    const ac = getCtx()
+    if (ac === null || disposed) return
+    let data: { ok?: boolean; audio?: string; sampleRate?: number; reason?: string }
+    try {
+      const res = await fetch('/api/asr-voice/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, voice: tuning.voice }),
+      })
+      data = await res.json().catch(() => ({})) as typeof data
+    } catch {
+      return // 网络失败：跳过这句，不阻塞队列
+    }
+    if (disposed || data.ok !== true || data.audio === undefined) return
+    // base64 → 16k int16 LE → Float32（除以 32768 归一化到 -1~1）。
+    const bin = atob(data.audio)
+    const pcm = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i)
+    const frames = pcm.byteLength >> 1
+    const f32 = new Float32Array(frames)
+    const view = new DataView(pcm.buffer)
+    for (let i = 0; i < frames; i++) f32[i] = view.getInt16(i * 2, true) / 32768
+    if (disposed || frames === 0) return
+    const buffer = ac.createBuffer(1, frames, data.sampleRate ?? 16000)
+    buffer.copyToChannel(f32, 0)
+    const source = ac.createBufferSource()
+    source.buffer = buffer
+    source.connect(ac.destination)
+    current = source
+    await new Promise<void>((resolve) => {
+      source.onended = () => resolve()
+      source.start()
+      // 保险：start 后超时（如 ctx 被挂起）不能让队列永久卡住。长句按 5s/1000 帧估算。
+      const ms = Math.max(2_000, Math.ceil(frames / 16000) * 1000 + 1_500)
+      setTimeout(() => { try { source.stop() } catch { /* already ended */ } }, ms)
+    })
+    if (current === source) current = null
+  }
+
+  const next = (): void => {
+    if (disposed || playing) return
+    const text = queue.shift()
+    if (text === undefined) {
+      // 只在「刚刚播完一批」时通知一次；未起播的空转不重复触发。
+      if (pending) { pending = false; drain?.() }
+      return
+    }
+    pending = true
+    playing = true
+    void speak(text).finally(() => {
+      playing = false
+      next()
+    })
+  }
+
+  return {
+    enqueue(text: string): void {
+      if (disposed || text.trim() === '') return
+      queue.push(text)
+      next()
+    },
+    get active(): boolean { return playing || queue.length > 0 },
+    cancel(): void {
+      queue.length = 0
+      pending = false
+      if (current !== null) { try { current.stop() } catch { /* already ended */ } }
+      current = null
+    },
+    set onDrain(fn: (() => void) | null) { drain = fn },
+    get onDrain(): (() => void) | null { return drain },
+    dispose(): void {
+      disposed = true
+      queue.length = 0
+      pending = false
+      if (current !== null) { try { current.stop() } catch { /* already ended */ } }
+      current = null
+      if (ctx !== null) { void ctx.close().catch(() => {}); ctx = null }
+    },
+    prime(): void {
+      if (disposed) return
+      const ac = getCtx()
+      if (ac !== null && ac.state === 'suspended') void ac.resume()
+    },
+  }
+}

@@ -135,6 +135,9 @@ export type LocaleKey =
   | 'realtimeEngineCloud'
   | 'realtimeProviderLabel'
   | 'realtimeProviderDesc'
+  | 'realtimeTtsCloud'
+  | 'realtimeTtsVoiceLabel'
+  | 'realtimeTtsVoiceDesc'
   | 'vadFrameMsLabel'
   | 'vadFrameMsDesc'
   | 'vadRmsLabel'
@@ -320,7 +323,10 @@ export const zh: LocaleDict = {
   realtimeTtsLabel: '回复播报',
   realtimeTtsDesc: '用浏览器内置语音把 agent 的回复读出来；选「不播报」则只上屏文字。',
   realtimeTtsBrowser: '浏览器语音（默认）',
+  realtimeTtsCloud: '云端 TTS（Qwen，需 key）',
   realtimeTtsOff: '不播报',
+  realtimeTtsVoiceLabel: '云端音色',
+  realtimeTtsVoiceDesc: 'qwen3-tts-flash-realtime 的系统音色名（如 Cherry），key 复用 DSH 凭据 DASHSCOPE_API_KEY。',
   realtimeHotkeyLabel: '对话快捷键',
   realtimeHotkeyDesc: '点击后按新组合键，用于开始/结束对话或打断播报；留空表示只用按钮。与上面的录音快捷键互不影响。',
   realtimeSettleMsLabel: '断句等待',
@@ -514,7 +520,10 @@ export const en: LocaleDict = {
   realtimeTtsLabel: 'Speak replies',
   realtimeTtsDesc: 'Reads the agent reply aloud with the browser built-in voice. Choose "off" for captions only.',
   realtimeTtsBrowser: 'Browser speech (default)',
+  realtimeTtsCloud: 'Cloud TTS (Qwen, needs key)',
   realtimeTtsOff: 'Do not speak',
+  realtimeTtsVoiceLabel: 'Cloud voice',
+  realtimeTtsVoiceDesc: 'A qwen3-tts-flash-realtime system voice name (e.g. Cherry); reuses the DASHSCOPE_API_KEY credential.',
   realtimeHotkeyLabel: 'Chat hotkey',
   realtimeHotkeyDesc: 'Click, then press a new combo to start, stop or interrupt the chat. Leave empty to use the button only. Independent from the recording hotkey above.',
   realtimeSettleMsLabel: 'Turn settle time',

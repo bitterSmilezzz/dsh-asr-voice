@@ -33,6 +33,7 @@ import { RealtimeHost } from './realtime-host.ts';
 import { createFakeRealtimeProvider, type RealtimeProvider } from './realtime-provider.ts';
 import { createDashscopeRealtimeProvider } from './realtime-dashscope.ts';
 import { realtimePresetById } from './presets.ts';
+import { registerTtsRoute } from './realtime-tts.ts';
 
 /** Host context slice this plugin consumes (webServer/llm/settings via type merges). */
 type AsrVoiceHostContext = Context;
@@ -218,6 +219,15 @@ export function apply(ctx: AsrVoiceHostContext): void {
   ctx.effect(() => registerModelsRoute((def) => ctx.webServer.register(def), ctx), 'asr-voice: models route');
   ctx.effect(() => registerAsrModelsRoute((def) => ctx.webServer.register(def), getProviders, ctx), 'asr-voice: asr-models route');
   ctx.effect(() => registerStatsRoute((def) => ctx.webServer.register(def), () => stats.snapshot()), 'asr-voice: stats route');
+
+  // 云端 TTS（I6）：文本 → 私有路由 → qwen3-tts-flash-realtime，浏览器不持 key。
+  // 凭据固定复用 DASHSCOPE_API_KEY（getTtsConfig 只喂 preset=dashscope 的空壳配置，
+  // resolveApiKey 按 keyRefFor 派生引用名，配过同名 LLM 的用户天然命中）。
+  ctx.effect(() => registerTtsRoute(
+    (def) => ctx.webServer.register(def),
+    () => ({ id: 'tts', preset: 'dashscope', name: '', baseUrl: '', apiKey: '', model: '', mode: 'chat' }),
+    ctx,
+  ), 'asr-voice: tts route');
 
   // 实时转写通道（I3）：会话注册表 + SSE 下行 + RealtimeProvider 接缝。
   // I3/I4 阶段 host 用假 provider 驱动整条管道；I5 按 settings `realtime.provider`
