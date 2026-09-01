@@ -19,7 +19,10 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import * as jsxRuntime from 'react/jsx-runtime'
 import { zh, en } from './locales.ts'
 import { CSS } from './styles.ts'
-import { bindConfigScope, bindCredentialsApi, config, subscribeConfig, type CredentialsApiLike, type SettingsBinderLike } from './config.ts'
+import {
+  adaptLegacyCredentials, bindConfigScope, bindCredentialsApi, config, subscribeConfig,
+  type CredentialsApiLike, type LegacyCredentialsApiLike, type SettingsBinderLike,
+} from './config.ts'
 import { VoiceSettingsCard } from './settings-card.tsx'
 import { VoiceButton, voiceController } from './voice-button.tsx'
 import { VoiceChatButton, voiceChatController } from './voice-chat-button.tsx'
@@ -179,14 +182,16 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(applyHotkey, 'asr-voice: hotkey')
 
   // 设置卡片（settings.plugin.item, key: asr-voice）+ 配置绑定。
-  // settingsScope / connection 都是既有的客户端服务：前者给配置读写通道，后者的
-  // credentials 域是 API key 的唯一去处（key 不进 settings、不进浏览器 DOM）。
-  ctx.inject(['settingsScope', 'connection'], (raw) => {
+  // settingsScope 给配置读写通道；凭据域（API key 的唯一去处，key 不进 settings、
+  // 不进浏览器 DOM）在 alpha.3 起由 `remote.credentials` 提供（旧运行时经
+  // `connection.api.credentials` 回退，由适配器归一化）。
+  ctx.inject(['settingsScope', 'remote', 'connection'], (raw) => {
     const c = raw as ClientContext & {
       settingsScope?: SettingsBinderLike
-      connection?: { api?: { credentials?: CredentialsApiLike } }
+      remote?: { credentials?: CredentialsApiLike }
+      connection?: { api?: { credentials?: LegacyCredentialsApiLike } }
     }
-    bindCredentialsApi(c.connection?.api?.credentials)
+    bindCredentialsApi(c.remote?.credentials ?? adaptLegacyCredentials(c.connection?.api?.credentials))
     const binder = c.settingsScope
     if (binder === undefined) return
     c.effect(() => bindConfigScope(binder), 'asr-voice: settings scope sync')

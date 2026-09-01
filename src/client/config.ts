@@ -164,11 +164,48 @@ export interface CredentialStateLike {
 
 type RpcOutcome<T> = { ok: true; value: T } | { ok: false; error?: { message?: string } }
 
-/** DSH credentials 域的 client 面（connection.api.credentials 的最小形状）。 */
+/**
+ * DSH credentials 域的 client 面（alpha.3 官方 `ctx.remote.credentials` 的最小形状）。
+ * 与旧 `connection.api.credentials`（describe({refs}) 返回 {result}）形状不同：
+ * 这里 describe 直接收 refs 数组、返回 { ok, value }。host 半区解析键与展示
+ * 语义不变，只是 client 通道换了载体（见 src/client/index.ts 的注入）。
+ */
 export interface CredentialsApiLike {
+  describe(refs: string[]): Promise<{ ok: true; value: Record<string, CredentialStateLike> } | { ok: false; error?: { message?: string } }>
+  set(ref: string, value: string): Promise<{ ok: true } | { ok: false; error?: { message?: string } }>
+  unset(ref: string): Promise<{ ok: true } | { ok: false; error?: { message?: string } }>
+}
+
+/** 旧版 `connection.api.credentials` 形状（仅作回退，见 index.ts 的适配器）。 */
+export interface LegacyCredentialsApiLike {
   describe(payload: { refs: string[] }): Promise<{ result: RpcOutcome<{ credentials?: Record<string, CredentialStateLike> }> }>
   set(payload: { ref: string; value: string }): Promise<{ result: RpcOutcome<unknown> }>
   unset(payload: { ref: string }): Promise<{ result: RpcOutcome<unknown> }>
+}
+
+type CredentialsDescribeOutcome = { ok: true; value: Record<string, CredentialStateLike> } | { ok: false; error?: { message?: string } }
+type CredentialsWriteOutcome = { ok: true } | { ok: false; error?: { message?: string } }
+
+/** 把旧版凭据通道适配成新版形状（alpha.3 前的老运行时仍暴露旧面时兜底）。 */
+export function adaptLegacyCredentials(legacy: LegacyCredentialsApiLike | undefined): CredentialsApiLike | undefined {
+  if (legacy === undefined) return undefined
+  const writeOutcome = (r: RpcOutcome<unknown>): CredentialsWriteOutcome =>
+    r.ok ? { ok: true } : r.error === undefined ? { ok: false } : { ok: false, error: r.error }
+  return {
+    describe: async (refs: string[]): Promise<CredentialsDescribeOutcome> => {
+      const response = await legacy.describe({ refs })
+      if (!response.result.ok) {
+        return response.result.error === undefined
+          ? { ok: false }
+          : { ok: false, error: response.result.error }
+      }
+      return { ok: true, value: response.result.value.credentials ?? {} }
+    },
+    set: async (ref: string, value: string): Promise<CredentialsWriteOutcome> =>
+      writeOutcome((await legacy.set({ ref, value })).result),
+    unset: async (ref: string): Promise<CredentialsWriteOutcome> =>
+      writeOutcome((await legacy.unset({ ref })).result),
+  }
 }
 
 /** host settings scope 的写路径（apply 时绑定；未绑定则只更新本地快照）。 */
@@ -279,7 +316,11 @@ export function bindConfigScope(binder: SettingsBinderLike): () => void {
   return unsub
 }
 
-/** 绑定 credentials 域（可选：拿不到时设置页只显示「本机未启用凭据服务」）。 */
+/**
+ * 绑定 credentials 域（可选：拿不到时设置页只显示「本机未启用凭据服务」）。
+ * 统一收新形状（alpha.3 `remote.credentials`）；旧形状由调用方经
+ * {@link adaptLegacyCredentials} 显式转换后再绑。
+ */
 export function bindCredentialsApi(api: CredentialsApiLike | undefined): void {
   credentialsApi = api
 }
@@ -484,9 +525,12 @@ export interface KeyState {
   failure: string | null
 }
 
-function outcomeError<T>(result: RpcOutcome<T>): string | null {
-  if (result.ok) return null
-  return result.error?.message ?? 'credential request rejected'
+/**
+ * 解析一次凭据 describe 的「失败原因」（{ok,value} 形状直接返回 error）。
+ */
+function describeFailure(response: CredentialsDescribeOutcome): string | null {
+  if (response.ok) return null
+  return response.error?.message ?? 'credential request rejected'
 }
 
 /** 查某供应商的密钥是否已配置。 */
@@ -496,10 +540,10 @@ export async function readKeyState(p: KeyRefSource): Promise<KeyState> {
     return { ref, configured: false, writable: false, source: '', failure: 'credentials service unavailable' }
   }
   try {
-    const response = await credentialsApi.describe({ refs: [ref] })
-    const failure = outcomeError(response.result)
+    const response = await credentialsApi.describe([ref])
+    const failure = describeFailure(response)
     if (failure !== null) return { ref, configured: false, writable: true, source: '', failure }
-    const view = response.result.ok === true ? response.result.value.credentials?.[ref] : undefined
+    const view = response.ok ? response.value[ref] : undefined
     return {
       ref,
       configured: view?.configured ?? false,
@@ -523,9 +567,8 @@ export async function saveKey(p: KeyRefSource, value: string): Promise<string | 
   if (credentialsApi === undefined) return 'credentials service unavailable'
   const key = value.trim()
   try {
-    const response = key === '' ? await credentialsApi.unset({ ref }) : await credentialsApi.set({ ref, value: key })
-    const failure = outcomeError(response.result)
-    if (failure !== null) return failure
+    const response = key === '' ? await credentialsApi.unset(ref) : await credentialsApi.set(ref, key)
+    if (!response.ok) return response.error?.message ?? 'credential request rejected'
     // 读回校验：只读来源（如环境变量）能拒绝落盘而不报错。
     const state = await readKeyState(p)
     if (key !== '' && !state.configured) return state.failure ?? `credential ${ref} did not persist`

@@ -7,6 +7,7 @@ globalThis.window = { dispatchEvent() {} }
 const {
   DEFAULTS, config, mergeHostValue, newDraft, patchProvider, pickPreset, addProvider, removeProvider,
   withProviders, withLegacyMaterialized, draftActiveProvider, bindConfigScope, bindCredentialsApi,
+  adaptLegacyCredentials,
   writeDraft, readKeyState, saveKey, keyRefOf, recordBehavior, realtimeTuning,
 } = await import('../src/client/config.ts')
 const { keyRefFor } = await import('../src/key-ref.ts')
@@ -254,14 +255,14 @@ test('readKeyState / saveKey：只经 credentials 通道，值不回流 config',
   const store = new Map([['OPENAI_API_KEY', 'sk-real']])
   const calls = []
   bindCredentialsApi({
-    describe: async ({ refs }) => {
+    describe: async (refs) => {
       calls.push(['describe', ...refs])
-      return { result: { ok: true, value: { credentials: Object.fromEntries(refs.map((ref) => [ref, {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, {
         configured: store.has(ref), source: store.has(ref) ? 'settings-file' : '', writable: true,
-      }])) } } }
+      }])) }
     },
-    set: async ({ ref, value }) => { calls.push(['set', ref]); store.set(ref, value); return { result: { ok: true, value: {} } } },
-    unset: async ({ ref }) => { calls.push(['unset', ref]); store.delete(ref); return { result: { ok: true, value: {} } } },
+    set: async (ref, value) => { calls.push(['set', ref]); store.set(ref, value); return { ok: true } },
+    unset: async (ref) => { calls.push(['unset', ref]); store.delete(ref); return { ok: true } },
   })
   mergeHostValue(hostSnapshot())
   const draft = newDraft()
@@ -278,9 +279,9 @@ test('readKeyState / saveKey：只经 credentials 通道，值不回流 config',
   assert.equal(store.get('GROQ_API_KEY'), 'gsk-new', '首尾空白要洗掉')
   // 只读来源能拒绝落盘而不报错：set 成功但读回仍未配置时必须报失败。
   const readOnly = {
-    describe: async ({ refs }) => ({ result: { ok: true, value: { credentials: Object.fromEntries(refs.map((ref) => [ref, { configured: false, source: '', writable: false }])) } } }),
-    set: async () => ({ result: { ok: true, value: {} } }),
-    unset: async () => ({ result: { ok: true, value: {} } }),
+    describe: async (refs) => ({ ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, source: '', writable: false }])) }),
+    set: async () => ({ ok: true }),
+    unset: async () => ({ ok: true }),
   }
   bindCredentialsApi(readOnly)
   const refusal = await saveKey({ preset: 'groq', name: '', id: 'b' }, 'gsk-x')
@@ -296,4 +297,30 @@ test('readKeyState / saveKey：只经 credentials 通道，值不回流 config',
     calls.filter(([op]) => op === 'set').map(([, ref]) => ref),
     ['GROQ_API_KEY'],
   )
+})
+
+test('adaptLegacyCredentials：旧 connection.api 形状适配成新形状', async () => {
+  const store = new Map([['OPENAI_API_KEY', 'sk-legacy']])
+  const legacy = {
+    describe: async ({ refs }) => ({ result: { ok: true, value: { credentials: Object.fromEntries(refs.map((ref) => [ref, {
+      configured: store.has(ref), source: store.has(ref) ? 'file' : '', writable: true,
+    }])) } } }),
+    set: async ({ ref, value }) => { store.set(ref, value); return { result: { ok: true, value: {} } } },
+    unset: async ({ ref }) => { store.delete(ref); return { result: { ok: true, value: {} } } },
+  }
+  bindCredentialsApi(adaptLegacyCredentials(legacy))
+  const state = await readKeyState({ preset: 'openai', name: '', id: 'a' })
+  assert.equal(state.configured, true)
+  assert.equal(state.source, 'file')
+  assert.equal(await saveKey({ preset: 'groq', name: '', id: 'b' }, 'gsk-y'), undefined)
+  assert.equal(store.get('GROQ_API_KEY'), 'gsk-y')
+  // 旧形状拒绝也要正确映射成 failure。
+  bindCredentialsApi(adaptLegacyCredentials({
+    describe: async () => ({ result: { ok: false, error: { message: 'legacy rejected' } } }),
+    set: async () => ({ result: { ok: true, value: {} } }),
+    unset: async () => ({ result: { ok: true, value: {} } }),
+  }))
+  const refused = await readKeyState({ preset: 'openai', name: '', id: 'a' })
+  assert.equal(refused.failure, 'legacy rejected')
+  bindCredentialsApi(undefined)
 })
