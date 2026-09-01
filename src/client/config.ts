@@ -137,7 +137,7 @@ export const DEFAULTS: AsrVoiceConfig = {
   optimize: { mode: 'llm', preview: false, llm: { provider: '', model: '' } },
   language: 'auto',
   behavior: { autoSend: false, silenceStop: false, holdToTalk: false, hotkey: 'Ctrl+Shift+Space', textMode: 'replace', copyToClipboard: true, maxRecordMs: 120_000, silenceRms: 0.02, silenceMs: 2_500 },
-  realtime: { enabled: false, engine: 'browser', provider: 'builtin', tts: 'browser', ttsVoice: 'Cherry', hotkey: '', bargeIn: false, turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, rmsAuto: true, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
+  realtime: { enabled: true, engine: 'browser', provider: 'builtin', tts: 'browser', ttsVoice: 'Cherry', hotkey: '', bargeIn: false, turn: { settleMs: 900, tailMs: 300 }, vad: { frameMs: 40, rms: 0.02, rmsAuto: true, silenceMs: 700, prerollMs: 200, minSpeechMs: 250, maxSegmentMs: 8_000, maxPending: 3 }, maxSessionMs: 600_000, speech: { firstSentenceMinChars: 12, utteranceWatchdogMs: 60_000 } },
 }
 
 /** 运行时配置快照：初始为默认值，scope 订阅与写回共同维护。 */

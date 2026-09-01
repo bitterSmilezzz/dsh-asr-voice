@@ -323,7 +323,7 @@ export const zh: LocaleDict = {
 
   groupRealtime: '实时语音对话',
   realtimeEnableLabel: '启用「语音对话」按钮',
-  realtimeEnableDesc: '在麦克风按钮旁再加一个：边说边上屏，停顿即发起回合，并把回复朗读出来。默认关闭。',
+  realtimeEnableDesc: '在麦克风按钮旁再加一个：边说边上屏，停顿即发起回合，并把回复朗读出来。默认开启。',
   realtimeTtsLabel: '回复播报',
   realtimeTtsDesc: '用浏览器内置语音把 agent 的回复读出来；选「不播报」则只上屏文字。',
   realtimeTtsBrowser: '浏览器语音（默认）',
@@ -524,7 +524,7 @@ export const en: LocaleDict = {
 
   groupRealtime: 'Realtime voice chat',
   realtimeEnableLabel: 'Show the voice chat button',
-  realtimeEnableDesc: 'Adds a second button next to the mic: live captions while you speak, a turn starts on your pause, and the reply is read back. Off by default.',
+  realtimeEnableDesc: 'Adds a second button next to the mic: live captions while you speak, a turn starts on your pause, and the reply is read back. On by default.',
   realtimeTtsLabel: 'Speak replies',
   realtimeTtsDesc: 'Reads the agent reply aloud with the browser built-in voice. Choose "off" for captions only.',
   realtimeTtsBrowser: 'Browser speech (default)',

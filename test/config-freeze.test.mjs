@@ -191,7 +191,7 @@ test('null / 形状漂移不得顶掉本地默认（realtimeTuning 必须是全�
   assert.equal(tuning.settleMs, DEFAULTS.realtime.turn.settleMs)
   assert.equal(tuning.firstSentenceMinChars, DEFAULTS.realtime.speech.firstSentenceMinChars)
   assert.equal(tuning.hotkey, '', '快捷键位上的 null 会被 parseHotkey 当成字符串炸掉')
-  assert.equal(tuning.enabled, false, '开关位上的 null 不能变成任意真值')
+  assert.equal(tuning.enabled, true, '开关位上的 null 回退默认（默认开）')
   assert.equal(tuning.engine, 'browser', '引擎位上的 null 会把会话装配成 undefined 引擎')
   assert.equal(tuning.segmented.vad.silenceMs, DEFAULTS.realtime.vad.silenceMs, '整段 vad 顶成 null 时解构 vad.frameMs 直接炸')
 
@@ -227,7 +227,7 @@ test('宿主文档早于 realtime 段：整段缺省仍要给出可用快照', (
   delete legacy.realtime
   mergeHostValue(deepFreeze({ ...legacy, behavior: { ...legacy.behavior, autoSend: true } }))
   const tuning = realtimeTuning()
-  assert.equal(tuning.enabled, false)
+  assert.equal(tuning.enabled, true, 'realtime 整段缺省时按默认开回退')
   assert.equal(tuning.settleMs, 900)
   assert.equal(tuning.maxSessionMs, 600_000)
   assert.equal(config.behavior.autoSend, true, '合法标量照写，缺的那一段不能连带吞掉')

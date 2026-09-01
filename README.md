@@ -63,7 +63,7 @@ voice input.*
   点停止即整段去识别；可选静音自动停止），可选按住说话
 - 默认快捷键 **Ctrl+Shift+Space**（可配置，支持 macOS 的 Cmd 兼容）
 - 识别后**填入草稿**待确认；可选「识别后自动发送」（push-to-talk 风格）
-- **语音对话**（默认关，开 `realtime.enabled` 后与麦克风并列第二个按钮）：边说边上字幕 →
+- **语音对话**（默认开，与麦克风并列第二个按钮；关 `realtime.enabled` 即回到纯整段模式）：边说边上字幕 →
   停顿即发起 agent 回合 → 回复按句朗读 → 念完自动回到聆听，半双工、点按可打断
 - 设置卡片：「设置 → 插件 → 配置 → 语音输入」= **三步向导** + 默认折叠的「高级」（BaseURL /
   模型 / 通道 / 多服务商 / 语言 / 优化 / 快捷键 / 用量）；改动先进本地草稿，点「保存」才写回，
@@ -125,7 +125,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 行为 | `behavior.maxRecordMs` | `120000` | 单次录音上限（毫秒，5s~600s）：到点自动结束并送识别 |
 | 行为 | `behavior.silenceMs` | `2500` | 静音判定时长（毫秒，200~60000）：连续安静这么久即判定说完，需开 `silenceStop` |
 | 行为 | `behavior.silenceRms` | `0.02` | 静音阈值（0~1 响度比例）：低于它算安静 |
-| 实时 | `realtime.enabled` | `false` | 语音对话总开关：开了才出现第二个按钮与 `realtime.hotkey`（改动即时生效，无需重载页面） |
+| 实时 | `realtime.enabled` | `true` | 语音对话总开关（默认开）：开着才出现第二个按钮与 `realtime.hotkey`（改动即时生效，无需重载页面） |
 | 实时 | `realtime.engine` | `browser` | 出字来源：`browser`（浏览器 Web Speech，逐字上屏、零 key、不新增本机请求）/ `segmented`（本地能量 VAD 按句切段，每句走一次已有的云端整段转写，需先配好 ASR 服务商）/ `cloud`（16k PCM 帧上行 host 实时通道，SSE 下行驱动字幕与回合，服务端 VAD 判回合） |
 | 实时 | `realtime.tts` | `browser` | 回复播报：`browser`（浏览器 `speechSynthesis`，零配置）/ `off`（只出字不出声） |
 | 实时 | `realtime.hotkey` | 空 | 进出实时对话的快捷键（空 = 不用快捷键）；与 `behavior.hotkey` 撞键时**对话优先** |
