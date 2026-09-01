@@ -129,13 +129,15 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 实时 | `realtime.engine` | `browser` | 出字来源：`browser`（浏览器 Web Speech，逐字上屏、零 key、不新增本机请求）/ `segmented`（本地能量 VAD 按句切段，每句走一次已有的云端整段转写，需先配好 ASR 服务商）/ `cloud`（16k PCM 帧上行 host 实时通道，SSE 下行驱动字幕与回合，服务端 VAD 判回合） |
 | 实时 | `realtime.tts` | `browser` | 回复播报：`browser`（浏览器 `speechSynthesis`，零配置）/ `off`（只出字不出声） |
 | 实时 | `realtime.hotkey` | 空 | 进出实时对话的快捷键（空 = 不用快捷键）；与 `behavior.hotkey` 撞键时**对话优先** |
+| 实时 | `realtime.bargeIn` | `false` | **语音插话（全双工）**：播报回复期间继续收音，人声持续超过回声门即打断朗读。默认关（真机回环复测通过前保持半双工），仅 `engine=segmented` 支持 |
 | 实时 | `realtime.turn.settleMs` | `900` | 转写文字静默多久算「说完了」（毫秒，200~10000）：到点即提交并发起回合 |
 | 实时 | `realtime.turn.tailMs` | `300` | 判完之后再宽限这么久才提交（毫秒，0~5000）：接住最后一个词的迟到结果，0 = 不等 |
 | 实时 | `realtime.maxSessionMs` | `600000` | 单次对话上限（毫秒，30s~3600s）：到点自动结束并交还麦克风 |
 | 实时 | `realtime.speech.firstSentenceMinChars` | `12` | 首句最少字数：太短就与后句并成一段再起音，避免「好的。」这类碎片开头 |
 | 实时 | `realtime.speech.utteranceWatchdogMs` | `60000` | 单句朗读看门狗（毫秒）：浏览器不回 `onend` 时按念完处理，防止麦克风被永久扣住 |
 | 实时切段 | `realtime.vad.frameMs` | `40` | 采集帧长（毫秒，10~500，仅 `engine=segmented`）：越小越省延迟，越大越省调度开销 |
-| 实时切段 | `realtime.vad.rms` | `0.02` | RMS 判有声阈值（0~1）：它是**设备噪声底**的函数——偏低则呼吸/键盘成句，偏高则轻声句尾被切掉 |
+| 实时切段 | `realtime.vad.rmsAuto` | `true` | 有声阈值自动校准：实际判据 = max(`rms`, 静音期噪声底 ×3)——安静环境更灵、嘈杂环境不乱切句，换设备免重校 |
+| 实时切段 | `realtime.vad.rms` | `0.02` | RMS 判有声阈值（0~1）：`rmsAuto` 关闭时是唯一判据；开启时是下限 |
 | 实时切段 | `realtime.vad.silenceMs` | `700` | 连续静音多久切一段（毫秒，200~5000）：也是每句上屏的固定延迟 |
 | 实时切段 | `realtime.vad.prerollMs` | `200` | 段前多保留多久音频（毫秒，0~1000）：不留就会切掉第一个音节 |
 | 实时切段 | `realtime.vad.minSpeechMs` | `250` | 实际语音短于此不成为一段（毫秒，100~3000）：杂音不该花一次上游配额 |
@@ -170,9 +172,12 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   `cloud` 走 host 实时通道（I3 交付）：16k PCM 帧量化后逐帧上行，SSE 下行事件驱动字幕与回合，
   回合边界由**服务端 VAD** 判定（I3 假 provider / I5 真云端），本地不再文字静默判定——逐字延迟
   更低，代价是需要一条 host 实时通道。
-- **半双工**：朗读期间不收音，回声不会被当成你说的话。打断有三处入口——再按一次按钮、
-  再按一次快捷键、点提示条上的 `×`——任一都会立刻止住朗读、取消在途回合、回到聆听。
-  不支持用说话声打断（见下节）。
+- **半双工（默认）与语音插话（可选）**：默认朗读期间不收音，回声不会被当成你说的话——
+  虚拟设备上实测 Chromium AEC 消除率仅 0.42 dB（`echoCancellation` 基本无效），因此真机
+  回环复测通过前不冒然默认全双工。打断三入口——再按一次按钮、再按一次快捷键、点提示条
+  `×`——任一都立刻止住朗读、取消在途回合、回到聆听。开启 `realtime.bargeIn` 后（仅
+  `engine=segmented`）：播报期间继续收音，TTS 回声被能量门当背景学习，**人声持续
+  350ms 且显著超过回声门**才打断；键盘/关门等瞬态与 3dB 量级的弱声不会误断。
 - **不做提示词优化**：对话要的是即时，转写文本原样上屏；`optimize.*` 只作用于整段录音模式。
 - **到点自己收**：`realtime.maxSessionMs` 上限到即结束会话并释放麦克风，麦克风不会无人值守常开。
 - **I3/I4 已交付实时通道 + 浏览器侧 cloud 引擎**：host 会话注册表（`sid` 由 host 铸造）+ SSE
@@ -252,10 +257,12 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   由静音守卫当场拦下、不上游）。
   *With the segmented engine, every utterance becomes one upload to your configured cloud ASR and
   consumes quota per sentence; raise `vad.rms` if breaths or keystrokes are being billed.*
-- **半双工，不支持语音插话**：朗读期间不收音，只能用按钮 / 快捷键 / 提示条的 `×` 打断。
-  浏览器回声消除能否吃掉我们自己外放的合成语音尚未在本机实测，实测通过前不做声学打断。
-  *Half-duplex: no barge-in by speaking. Whether browser echo cancellation suppresses our own
-  synthesized speech is unmeasured, so acoustic interruption is deliberately absent.*
+- **语音插话需真机复测**：浏览器回声消除在假设备管路线上实测不生效（消除率 0.42 dB），
+  因此 `realtime.bargeIn` 默认关。打开后打断走软件回声门（纯能量，不依赖 AEC）；真机
+  （真实扬声器 + 麦克风回环）复测脚本就位后在真实声学下确认误断率，再考虑翻转默认。
+  *Barge-in is off by default: Chromium's AEC measured 0.42 dB on virtual devices, so acoustic
+  interruption uses a software echo gate. Turn it on to try; a real-device retest will decide
+  whether the default flips.*
 - 播报音色与断句取决于操作系统装了什么语音，长句可能出现机械停顿；不接受就 `realtime.tts = off`，
   字幕与自动提交照常。云端实时（PCM 流 + 服务端轮次判定）**已由 `engine=cloud` 接入**：host 实时
   通道（会话注册表 + SSE 下行 + `RealtimeProvider` 接缝 + 假 provider）随 I3 交付，client 侧 cloud
