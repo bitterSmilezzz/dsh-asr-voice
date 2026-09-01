@@ -21,6 +21,7 @@ import { cloudConfigured, config, recordBehavior } from './config.ts'
 import { heuristicOptimize, llmOptimize } from './optimize.ts'
 import { createVoiceRecorder, isWebSpeechSupported, type VoiceRecorder } from './recorder.ts'
 import { fromTo } from './animate.ts'
+import { systemLanguage, zh as zhDict, en as enDict } from './locales.ts'
 import type { LocaleT } from './locales.ts'
 
 /** 输入动作最小面（来自官方 standard kit 的 inputActions prop）。 */
@@ -490,9 +491,11 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   }, [])
 
   const busy = state !== 'idle'
+  // 悬停提示按系统语言（与 DSH 界面语言解耦），其余文案仍随界面语言。
+  const sys = systemLanguage() === 'zh' ? zhDict : enDict
   const title = busy
-    ? state === 'recording' ? t('recordingTitle') : state === 'transcribing' ? t('transcribingTitle') : t('optimizingTitle')
-    : t('micTitle')
+    ? state === 'recording' ? sys.recordingTitle : state === 'transcribing' ? sys.transcribingTitle : sys.optimizingTitle
+    : sys.micTitle
 
   return (
     <react.Fragment>
@@ -518,14 +521,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           <span className="dshav-hotkey-hint" data-kind="err" role="status">
             <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
             <span className="dshav-hint-text">{error}</span>
-            <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={dismissHint}>×</button>
+            <button type="button" className="dshav-hint-dismiss" aria-label={sys.dismiss} onClick={dismissHint}>×</button>
           </span>
         )}
         {notice !== null && (
           <span className="dshav-hotkey-hint" data-kind="notice" role="status">
             <span className="dshav-dot" />
             <span className="dshav-hint-text">{notice}</span>
-            <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={dismissHint}>×</button>
+            <button type="button" className="dshav-hint-dismiss" aria-label={sys.dismiss} onClick={dismissHint}>×</button>
           </span>
         )}
         {busy && (

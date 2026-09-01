@@ -211,6 +211,15 @@ export type LocaleDict = Record<LocaleKey, string>
 /** 词典绑定后的翻译函数。 */
 export type LocaleT = (key: LocaleKey, vars?: Record<string, string | number>) => string
 
+/**
+ * 悬停提示语言：跟随**操作系统**语言（navigator.language），与 DSH 界面语言解耦——
+ * 界面设成中文但系统是英文时，按钮 tooltip 仍按系统显示英文（反之亦然）。
+ */
+export function systemLanguage(): 'zh' | 'en' {
+  const lang = typeof navigator !== 'undefined' ? navigator.language : ''
+  return lang.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+}
+
 export const zh: LocaleDict = {
   cardTitle: '语音输入',
   cardCopy: '开口成文：识别、优化、填入草稿。',

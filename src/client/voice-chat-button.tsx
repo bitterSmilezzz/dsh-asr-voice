@@ -22,6 +22,7 @@ import { isPcmCaptureSupported } from './capture.ts'
 import { createSentencePump, createSpeechSynthesisSink, createCloudTtsSink, isSpeechSynthesisSupported, isCloudTtsSupported, type SpeakSink } from './speech-out.ts'
 import { isWebSpeechSupported } from './recorder.ts'
 import { RecDot, SpectrumBars, Spinner } from './voice-button.tsx'
+import { systemLanguage, zh as zhDict, en as enDict } from './locales.ts'
 import type { LocaleT } from './locales.ts'
 
 /** 输入动作最小面（官方 standard kit 的 inputActions）。 */
@@ -334,10 +335,12 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
   }, [])
 
   const busy = phase !== 'idle'
-  const title = phase === 'idle' ? t('chatTitle')
-    : phase === 'listening' ? t('chatListeningTitle')
-      : phase === 'thinking' ? t('chatThinkingTitle')
-        : t('chatSpeakingTitle')
+  // 悬停提示按系统语言（与 DSH 界面语言解耦），其余文案仍随界面语言。
+  const sys = systemLanguage() === 'zh' ? zhDict : enDict
+  const title = phase === 'idle' ? sys.chatTitle
+    : phase === 'listening' ? sys.chatListeningTitle
+      : phase === 'thinking' ? sys.chatThinkingTitle
+        : sys.chatSpeakingTitle
   const shown = phase === 'listening' ? tailText(live) : tailText(replyText)
   const hintText = shown !== ''
     ? shown
