@@ -143,6 +143,10 @@ export const CSS = `
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
+  /* 关键：包含块是 28px 的按钮容器（.dshav-mic-wrap position:relative），
+     shrink-to-fit 会被压到 min-content——中文每字可断行 → 一字一行纵向溢出。
+     width:max-content 让宽度由内容决定，再由 max-width 封顶折行。 */
+  width: max-content;
   max-width: min(420px, calc(100vw - 120px));
   overflow: hidden;
   border: 1px solid var(--dsw-alias-border-l2, var(--dshav-border));
