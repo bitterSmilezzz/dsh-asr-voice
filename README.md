@@ -167,7 +167,8 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
    在途回合、回到聆听。开启「语音插话」（`realtime.bargeIn`，仅按句切段引擎）后更可以直接
    开口打断朗读——人声持续超过回声门才生效，键盘和机器自己的声音不会误触。
 
-引擎怎么选：`browser` 零配置零配额，但依赖浏览器语音服务（部分地区被网络屏蔽）；`segmented`
+引擎怎么选：`browser` 零配置零配额，但依赖浏览器语音服务（部分地区被网络屏蔽，遇 `network`
+错误会自动降级到 `segmented`——提示「已自动改用云端识别」后照常说即可，不用手动切引擎）；`segmented`
 每句走你已配好的云端 ASR，天然适配国内网络；`cloud` 上传 PCM 到 host 实时通道、服务端判回合，
 出字延迟最低（需 `DASHSCOPE_API_KEY`）。
 

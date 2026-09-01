@@ -104,6 +104,11 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
   const engineRef = react.useRef<RealtimeSession | null>(null)
   const sinkRef = react.useRef<SpeakSink | null>(null)
   const tuningRef = react.useRef<RealtimeTuning | null>(null)
+  /** 浏览器识别（Web Speech）在本机会话内已被网络/服务判定不可用 → 整个会话降级到
+   * segmented（按句云端转写）再说话。整段录音的 auto 模式早有同款降级，这里补齐
+   * 实时语音对话的路：Chrome 走 Google 服务器被网络屏蔽时 network 错误一上来就报，
+   * 不许用户每次手动切引擎。 */
+  const fallbackEngineRef = react.useRef<'segmented' | null>(null)
   /** 在途回合闩：非空表示这句话已提交、回复还没念完。 */
   const turnRef = react.useRef<{
     armed: boolean
@@ -213,6 +218,15 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
   }
 
   const failByCode = (code: string): void => {
+    // 自动降级：browser 引擎 network 失败且云端 ASR 已配置 → 切 segmented 立即重开
+    // （浏览器识别已被网络屏蔽是持久事实，整个会话都不要再碰 Web Speech）。
+    if (code === 'network' && (fallbackEngineRef.current === null && tuningRef.current?.engine === 'browser') && cloudConfigured()) {
+      fallbackEngineRef.current = 'segmented'
+      endSession(undefined, undefined)
+      setNotice(t('chatWebSpeechFallback'))
+      begin()
+      return
+    }
     const msg = code === 'no-mic' || code === 'mic-denied' || code === 'silent-device' || code === 'no-audio-context'
       ? t('errNoMic')
       : code === 'network'
@@ -228,12 +242,14 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
   /** 开始一次对话。必须在点击回调里调用（Safari 的发声权限只认用户激活上下文）。 */
   const begin = (): void => {
     const tuning = realtimeTuning()
+    // 降级后的引擎
+    const engine = fallbackEngineRef.current ?? tuning.engine
     // 前置检查按引擎分：segmented 不用 Web Speech，但每句都要过一次已配置的云端转写；
     // cloud 走 host 实时通道（I3 假 provider / I5 真云端），也不需要 Web Speech。
-    if (tuning.engine === 'segmented') {
+    if (engine === 'segmented') {
       if (!isPcmCaptureSupported()) { setError(t('errSegmentedUnsupported')); setNotice(null); return }
       if (!cloudConfigured()) { setError(t('errSegmentedNeedsCloud')); setNotice(null); return }
-    } else if (tuning.engine === 'cloud') {
+    } else if (engine === 'cloud') {
       if (!isPcmCaptureSupported()) { setError(t('errSegmentedUnsupported')); setNotice(null); return }
     } else if (!isWebSpeechSupported()) {
       setError(t('errNoSpeechSupport')); setNotice(null); return
@@ -255,7 +271,7 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
       sinkRef.current = sink
       sink.prime()
     }
-    engineRef.current = createRealtime(tuning.engine, tuning.language, tuning.segmented, {
+    engineRef.current = createRealtime(engine, tuning.language, tuning.segmented, {
       onPartial: (text) => { if (phaseRef.current === 'listening') setLive(text) },
       onTurn: (text) => { commitTurn(text) },
       onLevel: (level) => {

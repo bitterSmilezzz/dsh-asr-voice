@@ -167,6 +167,7 @@ export type LocaleKey =
   | 'chatListeningTitle'
   | 'chatThinkingTitle'
   | 'chatSpeakingTitle'
+  | 'chatWebSpeechFallback'
   | 'chatThinkingHint'
   | 'chatSpeakingHint'
   | 'chatInterrupt'
@@ -381,6 +382,7 @@ export const zh: LocaleDict = {
   chatTitle: '语音对话',
   chatListeningTitle: '正在听…点击结束对话',
   chatThinkingTitle: '思考中…点击打断',
+  chatWebSpeechFallback: '浏览器语音识别不可用，已自动改用云端识别（按句切段）。请再说一遍。',
   chatSpeakingTitle: '朗读中…点击打断',
   chatThinkingHint: '等回复…',
   chatSpeakingHint: '朗读中…',
@@ -582,6 +584,7 @@ export const en: LocaleDict = {
   chatTitle: 'Voice chat',
   chatListeningTitle: 'Listening… click to end the chat',
   chatThinkingTitle: 'Thinking… click to interrupt',
+  chatWebSpeechFallback: 'Browser speech is unavailable — auto-switched to cloud recognition (per-sentence). Please say it again.',
   chatSpeakingTitle: 'Speaking… click to interrupt',
   chatThinkingHint: 'Waiting for the reply…',
   chatSpeakingHint: 'Reading the reply…',
