@@ -130,7 +130,15 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const draftRef = react.useRef<string>('')
   const insertedRef = react.useRef<string | null>(null)
   react.useEffect(() => {
-    draftRef.current = props.input?.draft ?? ''
+    const next = props.input?.draft ?? ''
+    // 草稿离开插件的掌控（用户编辑/发送清空）→ 后台优化立即作废：
+    // 优化走 ctx.llm.stream（与 agent 回合同一条 LLM 通道），发送后仍挂着会让
+    // 新回合的 LLM 请求排队（发送后卡顿的直接来源），且结果对已发送草稿毫无价值。
+    if (insertedRef.current !== null && next !== insertedRef.current && optimizeControllerRef.current !== null) {
+      optimizeControllerRef.current.abort()
+      optimizeControllerRef.current = null
+    }
+    draftRef.current = next
   }, [props.input?.draft])
   // 错误/提示自动消散（6s），避免状态条永久悬挂；也可点 × 手动关闭。
   react.useEffect(() => {
@@ -364,7 +372,9 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     } catch {
       // 后台优化失败不打断用户：草稿已可用，仅轻提示（6s 后自动消散，可点 × 关闭）。
       // 取消→立刻重开时 cancelledRef 已重置，须连同会话代际一起判定，防旧会话假失败提示串台。
+      // 发送/编辑触发的主动放弃（abort 已把 optimizeControllerRef 置 null）同样不算失败。
       if (cancelledRef.current || generationRef.current !== myGen) return
+      if (optimizeControllerRef.current === null) return
       setNotice(t('optimizeFailedKeep'))
     } finally {
       // 打断（cancel）后旧 promise 的 finally 不得改写新会话状态：
