@@ -17,6 +17,7 @@
  */
 // Type-only: pulls the settings domain's Context merge (ctx.settingsScope).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsScope, SettingsScopeBinder } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { SegmentedTuning } from './realtime.ts'
 import { keyRefFor, type KeyRefSource } from '../key-ref.ts'
 import { DEFAULT_PRESET_ID, presetById } from '../presets.ts'
@@ -143,17 +144,11 @@ export function subscribeConfig(fn: () => void): () => void {
   return () => { listeners.delete(fn) }
 }
 
-/** host settings scope 的写路径（apply 时绑定；未绑定则只更新本地快照）。 */
-export interface SettingsScopeLike<T> {
-  getSnapshot(): { value?: T; writable?: boolean }
-  subscribe(listener: () => void): () => void
-  set(field: string, value: unknown): Promise<void>
-}
+/** settings namespace（host schema 注册与 client 绑定共用同一个名字）。 */
+export const ASR_VOICE_NS = 'asr-voice'
 
-/** settingsScope 服务的最小面（当前 DSH client 的 SettingsScopeBinder.bind）。 */
-export interface SettingsBinderLike {
-  bind<T>(spec: { namespace: string }): SettingsScopeLike<T>
-}
+/** host settings scope 的写路径（官方 SettingsScopeBinder.bind 的返回类型）。 */
+export type SettingsScopeLike<T> = SettingsScope<T>
 
 /** credentials RPC 的单条视图（脱敏后的配置态，永不含密钥本身）。 */
 export interface CredentialStateLike {
@@ -301,8 +296,13 @@ function jsonEqual(a: unknown, b: unknown): boolean {
  * @param binder - settingsScope 服务的 binder（SettingsScopeBinder）。
  * @returns 订阅 disposer（随 fiber 清理）。
  */
-export function bindConfigScope(binder: SettingsBinderLike): () => void {
-  const scope = binder.bind<AsrVoiceConfig>({ namespace: 'asr-voice' })
+/**
+ * 绑定 host settings scope 并订阅：首次读取当前值，之后 scope 变化回写本地快照并广播。
+ * @param binder - settingsScope 服务（官方 SettingsScopeBinder，随 fiber 注入）。
+ * @returns 订阅 disposer（随 fiber 清理）。
+ */
+export function bindConfigScope(binder: SettingsScopeBinder): () => void {
+  const scope = binder.bind<AsrVoiceConfig>({ namespace: ASR_VOICE_NS })
   voiceScope = scope
   const applySnapshot = (): void => {
     const value = scope.getSnapshot().value

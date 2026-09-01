@@ -21,7 +21,7 @@ import { zh, en } from './locales.ts'
 import { CSS } from './styles.ts'
 import {
   adaptLegacyCredentials, bindConfigScope, bindCredentialsApi, config, subscribeConfig,
-  type CredentialsApiLike, type LegacyCredentialsApiLike, type SettingsBinderLike,
+  type CredentialsApiLike, type LegacyCredentialsApiLike,
 } from './config.ts'
 import { VoiceSettingsCard } from './settings-card.tsx'
 import { VoiceButton, voiceController } from './voice-button.tsx'
@@ -32,10 +32,12 @@ export { zh, en }
 
 const NS = 'asr-voice'
 
-/** 只依赖实际存在的硬服务；设置卡所需的 settingsScope / connection 走 scoped inject。 */
+/** 硬依赖：设置卡/配置读写必须的顶层服务（与兄弟插件同款：settingsScope 必须硬依赖，
+ * 否则卡片包在 scoped inject 里会因某服务不可注入而永不注册——这正是此前设置卡消失的根因）。 */
 export const inject = [
   'slots',
   'locale',
+  'settingsScope',
 ]
 
 /** 快捷键处理（按住说话 / 点击切换 / 实时对话进出），随 fiber 生命周期注册。 */
@@ -182,24 +184,25 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(applyHotkey, 'asr-voice: hotkey')
 
   // 设置卡片（settings.plugin.item, key: asr-voice）+ 配置绑定。
-  // settingsScope 给配置读写通道；凭据域（API key 的唯一去处，key 不进 settings、
-  // 不进浏览器 DOM）在 alpha.3 起由 `remote.credentials` 提供（旧运行时经
-  // `connection.api.credentials` 回退，由适配器归一化）。
-  ctx.inject(['settingsScope', 'remote', 'connection'], (raw) => {
+  // settingsScope 已是顶层硬依赖，卡片直接在 apply 顶层注册（与兄弟插件同款）——
+  // 绝不能把卡片包进 ctx.inject([...])：任一服务不可注入则回调永不执行、卡片永不出现
+  // （此前把凭据服务的 connection 放进 scoped inject，设置卡就消失过）。
+  ctx.effect(() => bindConfigScope(ctx.settingsScope), 'asr-voice: settings scope sync')
+  ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
+    name: 'settings.plugin.item',
+    key: 'asr-voice',
+    locale: NS,
+  }, () => jsxRuntime.jsx(VoiceSettingsCard, { t })))
+
+  // 凭据绑定（可选服务，单独 scoped inject）：alpha.3 起凭据域在 `remote.credentials`，
+  // 旧运行时经 `connection.api.credentials` 回退，由适配器归一化。这个回调只负责绑定
+  // 凭据，任一服务缺席就永远不执行——但不影响上面卡片的注册。
+  ctx.inject(['settingsScope', 'connection', 'remote', 'remote.credentials'], (raw) => {
     const c = raw as ClientContext & {
-      settingsScope?: SettingsBinderLike
-      remote?: { credentials?: CredentialsApiLike }
       connection?: { api?: { credentials?: LegacyCredentialsApiLike } }
+      remote?: { credentials?: CredentialsApiLike }
     }
     bindCredentialsApi(c.remote?.credentials ?? adaptLegacyCredentials(c.connection?.api?.credentials))
-    const binder = c.settingsScope
-    if (binder === undefined) return
-    c.effect(() => bindConfigScope(binder), 'asr-voice: settings scope sync')
-    c.slots.inject('settings.plugin.item', () => c.slots.register({
-      name: 'settings.plugin.item',
-      key: 'asr-voice',
-      locale: NS,
-    }, () => jsxRuntime.jsx(VoiceSettingsCard, { t })))
   })
 }
 
