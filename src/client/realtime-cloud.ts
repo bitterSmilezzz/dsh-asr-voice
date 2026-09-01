@@ -18,6 +18,7 @@
 import { startPcmCapture, type PcmCapture, type PcmCaptureOptions } from './capture.ts'
 import { peakAbs, quantiseInt16 } from './pcm.ts'
 import type { RealtimeEvents, RealtimeSession } from './realtime.ts'
+import { meaningfulTurn } from './turn-guard.ts'
 
 /** 云端通道收到的上游事件（镜像 host 的 RealtimeProviderEvent 形状）。 */
 export type CloudProviderEvent =
@@ -127,7 +128,7 @@ export function createCloudRealtime(
     } else if (ev.type === 'final') {
       failures = 0
       const text = ev.text.trim()
-      if (text !== '') events.onTurn(text)
+      if (text !== '' && meaningfulTurn(text)) events.onTurn(text)
     } else if (ev.type === 'error') {
       failures += 1
       if (failures >= CLOUD_FAIL_LIMIT) { failNow(ev.code || 'provider-unreachable') }

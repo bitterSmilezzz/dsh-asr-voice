@@ -151,7 +151,28 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 零输入即可用**；自定义供应商用 `ASR_VOICE_<显示名>_API_KEY`。解析顺序：过渡期 settings 里的
 残留明文 → `credentials.resolve(ref)` → 环境变量 `ref`。
 
+## 实时对话演示 Realtime demo
+
+<video src="docs/video-realtime.mp4" width="720" controls loop muted></video>
+
+*一句话闭环：开口 → 字幕逐字上屏 → 停顿即自动发起回合 → 回复按句朗读 → 念完麦克风自动回来听下一句。*
+
+**怎么用好它**（三步）：
+
+1. **开口即出字，说话而不是打字**：点输入行的声波按钮或按 `realtime.hotkey`，说的时候字幕逐字
+   上屏——不用等把话说完：停顿约一秒即判定「说完了」，草稿自动填入并发送。你在对 agent 说话。
+2. **回复朗读，随后自动还麦**：回复按句朗读（浏览器语音，或云端 TTS），念完麦克风自动回来听
+   下一句。**半双工**保证扬声器里机器自己的声音不会被当成你说的话，回声不会触发奇怪的回合。
+3. **三处打断，随时收放**：再按一次按钮 / 再按一次快捷键 / 点提示条上的 `×`，立刻止读、取消
+   在途回合、回到聆听。开启「语音插话」（`realtime.bargeIn`，仅按句切段引擎）后更可以直接
+   开口打断朗读——人声持续超过回声门才生效，键盘和机器自己的声音不会误触。
+
+引擎怎么选：`browser` 零配置零配额，但依赖浏览器语音服务（部分地区被网络屏蔽）；`segmented`
+每句走你已配好的云端 ASR，天然适配国内网络；`cloud` 上传 PCM 到 host 实时通道、服务端判回合，
+出字延迟最低（需 `DASHSCOPE_API_KEY`）。
+
 ## 实时语音对话 Realtime voice chat
+
 
 `realtime.enabled` 打开后，输入行多出第二个按钮（快捷键 `realtime.hotkey`）。一轮闭环：
 

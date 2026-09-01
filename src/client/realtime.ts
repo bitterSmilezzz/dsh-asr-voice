@@ -18,6 +18,7 @@ import { startPcmCapture, type PcmCapture, type PcmCaptureOptions } from './capt
 import { PCM_SAMPLE_RATE, encodeWav16MonoPcm, isSilentPeak, normaliseGain, peakAbs, rmsOfFloat } from './pcm.ts'
 import { createEnergyVad, type EnergyVad, type VadTuning } from './vad.ts'
 import { createRmsFloorEstimator, DEFAULT_RMS_FLOOR_TUNING, createBargeInGate, DEFAULT_BARGE_IN_TUNING } from './rms-floor.ts'
+import { meaningfulTurn } from './turn-guard.ts'
 import { createCloudRealtime, defaultCloudCapture } from './realtime-cloud.ts'
 import { createBrowserCloudTransport } from './realtime-cloud-transport.ts'
 
@@ -158,6 +159,7 @@ export function createBrowserRealtime(
     segment = ''
     interim = ''
     if (text === '' || !active || paused) return
+    if (!meaningfulTurn(text)) return  // 噪音幻觉（嗯…）不上屏不提交
     lastTurn = text
     events.onTurn(text)
   }
@@ -368,6 +370,7 @@ export function createSegmentedRealtime(
     const out = text
     text = ''
     if (out === '' || !active || paused) return
+    if (!meaningfulTurn(out)) return  // 底噪段幻觉（嗯…）不上屏不提交
     events.onTurn(out)
   }
 
