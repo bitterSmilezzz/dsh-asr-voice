@@ -104,13 +104,26 @@ test('barge-in: 人声显著超背景并持续 holdMs 触发；瞬态（键盘�
   for (let i = 0; i < 100; i++) assert.equal(g.feed(0.9, false), false)
 })
 
-test('barge-in: 人声音量不够（仅 ~3dB 超底）不触发，防误打断', () => {
-  const g = createBargeInGate({ ...DEFAULT_BARGE_IN_TUNING, frameMs: FRAME })
-  const grace = Math.round(DEFAULT_BARGE_IN_TUNING.graceMs / FRAME)
-  const hold = Math.round(DEFAULT_BARGE_IN_TUNING.holdMs / FRAME)
+test('barge-in 回归: 有声-静音交替不触发——TTS 停顿空隙不得把背景拉低', () => {
+  // 真机探针抓出的缺陷：TTS 700ms 有声 + 600ms 静音交替，1.6s 窗口里 p25 被
+  // 静音帧（≈0.001）拉低 → 门≈0.003 → TTS 自身音量（0.09）反而「超底」误断。
+  // 修复：低于基线（默认 0.02）的静音空隙帧不参与背景学习。
+  const g = createBargeInGate({ ...DEFAULT_BARGE_IN_TUNING, frameMs: FRAME, graceMs: 0 })
   g.arm()
-  for (let i = 0; i < grace; i++) g.feed(0.1, false) // 背景 0.1
-  for (let i = 0; i < hold + 20; i++) assert.equal(g.feed(0.14, false), false) // 0.14 < 0.3 门槛
+  for (let i = 0; i < 200; i++) {
+    const voiced = i % 32 < 17 // 40ms 帧：17 帧≈680ms 有声、15 帧≈600ms 静音
+    assert.equal(g.feed(voiced ? 0.09 : 0.001, false), false,
+      `有声-静音交替不得触发（帧 ${i}）`)
+  }
+  assert.equal(g.armed, true, '未触发就不该 disarm')
+})
+
+test('barge-in 回归: 背景未学到（全静音窗）时不触发', () => {
+  const g = createBargeInGate({ ...DEFAULT_BARGE_IN_TUNING, frameMs: FRAME, graceMs: 0 })
+  g.arm()
+  // 全静音帧（低于基线）→ 窗口永远学不到背景 → 任何音量都不该触发。
+  for (let i = 0; i < 30; i++) assert.equal(g.feed(0.0005, false), false)
+  for (let i = 0; i < 30; i++) assert.equal(g.feed(0.5, false), false, '背景未学到不得误断')
 })
 
 test('rmsAuto VAD: 嘈杂环境自动抬高阈值——低噪声不当话、真大声才成段', () => {

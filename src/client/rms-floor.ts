@@ -120,6 +120,13 @@ export interface BargeInTuning {
   holdMs: number
   /** 帧长（毫秒）。 */
   frameMs: number
+  /**
+   * 最低背景门槛（RMS）：低于它的帧是静音空隙（TTS 停顿/呼吸间），不参与背景
+   * 学习——否则「有声-静音交替」窗口里 p25 会被静音帧拉低，TTS 本身的音量
+   * 反而超出「背景」，把自己的回声当成打断。调用方传 VAD 的 `rms`（引擎侧
+   * 已含 rmsAuto 抬升，语义即「设备上有声音的水平」）。
+   */
+  baselineRms?: number
 }
 
 export const DEFAULT_BARGE_IN_TUNING: BargeInTuning = {
@@ -129,6 +136,7 @@ export const DEFAULT_BARGE_IN_TUNING: BargeInTuning = {
   headroom: 3,
   holdMs: 350,
   frameMs: 40,
+  baselineRms: 0.02,
 }
 
 export function createBargeInGate(tuning: BargeInTuning = DEFAULT_BARGE_IN_TUNING): BargeInGate {
@@ -146,6 +154,9 @@ export function createBargeInGate(tuning: BargeInTuning = DEFAULT_BARGE_IN_TUNIN
   let background = 0
 
   const push = (rms: number): void => {
+    // 静音空隙（TTS 停顿/呼吸）低于基线，不学——否则 p25 被拉低，回声自身反而
+    // 会超出「背景」把自己当成人声打断（真机探针抓出的缺陷）。
+    if (rms < (tuning.baselineRms ?? 0)) return
     // 只学「不太高」的观测：语音尖峰会拉高背景，让人声更难触发。
     if (background > 0 && rms > background * tuning.headroom) return
     buf[head] = rms
@@ -177,7 +188,8 @@ export function createBargeInGate(tuning: BargeInTuning = DEFAULT_BARGE_IN_TUNIN
     push(rms)
     // 周期刷新背景（每 8 帧一次，避免每帧全排序）。
     if ((head % 8) === 0) updateBackground()
-    const over = rms > background * tuning.headroom
+    // 背景未学到（全静音窗）时不判 over：空背景会让任何环境声都「超底」而误断。
+    const over = background > 0 && rms > background * tuning.headroom
     if (!over) { overRun = 0; return false }
     overRun += 1
     if (overRun < Math.max(1, Math.round(tuning.holdMs / tuning.frameMs))) return false
