@@ -140,14 +140,27 @@ behavior:
 
 | 阶段 | 内容 | 用户可感知 |
 |---|---|---|
-| I3 | host 实时通道：会话注册表（`sid` 由 host 铸造，4 条 exact 路由全过 `isTrusted`）+ SSE 下行带背压 + `RealtimeProvider` 接缝 + 假 provider；含「undici `WebSocket` 能带 `Authorization`」的**真实 socket 上线证据**测试 | 否（纯管道） |
+| I3 ✅ | host 实时通道：会话注册表（`sid` 由 host 铸造，4 条 exact 路由全过 `isTrusted`）+ SSE 下行带背压 + `RealtimeProvider` 接缝 + 假 provider；含「undici `WebSocket` 能带 `Authorization`」的**真实 socket 上线证据**测试 | 否（纯管道） |
 | I4 | PCM 上行接上已就位的 `capture.ts`，用假 provider 验字幕与播放。**关键产出是一个实测数字**：Chromium 回声消除对我们自己外放的合成语音的消除率——它 gate 住 D19 的全双工能不能做，不做成可选项 | 是 |
 | I5 | 填一条真 provider 行：`REALTIME_PRESETS` + `key-ref.ts` 复用官方同名凭据。当前候选为阿里云百炼 `qwen3-asr-flash-realtime`（服务端 VAD，约 ¥1.19/音频小时） | 是 |
 | I6 | `CloudTtsSink`（云 TTS PCM 经 `AudioBufferSourceNode → ctx.destination` 播放）+ 若 I4 实测通过则开 `realtime.duplex: 'full'` 语音插话 | 是 |
 
-已交付：I1（`pcm.ts` 抽取 + 整段模式计时项进 settings）、I2（`browser` 引擎闭环）、以及 D23 的
-`segmented` 引擎。后者不在原阶段表内——它是「零新协议、零新 key 也要端到端验证」的旁路，
-顺带交付的 `capture.ts` 正是 I4 的采集原语。
+已交付：I1（`pcm.ts` 抽取 + 整段模式计时项进 settings）、I2（`browser` 引擎闭环）、D23 的
+`segmented` 引擎、以及 **I3（host 实时通道）**。I3 交付物：
+
+- `src/realtime-provider.ts`：`RealtimeProvider` 接缝（`connect() → RealtimeProviderConnection`，
+  `send(pcm)` 上行 / `onEvent` 事件下行 / `close()`）+ 假 provider（能量 VAD 把 PCM 切成句，
+  句内 partial → 句尾 final + speech-stopped，行为形状对齐真流式通道）。
+- `src/realtime-host.ts`：`RealtimeHost` 会话注册表（`sid` = `crypto.randomUUID()`，host 铸造，
+  不透明 token）+ `SseChannel` 下行（partial coalesce / final 必达的背压 + 空闲心跳 + 断连清理）
+  + 4 条 exact 路由全过 `isTrusted`（`POST session` 建会话 / `POST audio?sid=` PCM 上行 /
+  `GET events?sid=` SSE 下行 / `POST close?sid=` 关会话）+ 空闲超时自动拆会话。
+- I3 阶段 host 用假 provider 驱动整条管道（纯管道，浏览器侧尚未接线）；I5 换成真云端
+  provider 时只替换 `index.ts` 的 `createProvider`，接缝与路由一行不改。
+- 测试：`test/realtime-provider.test.mjs`（7 例 VAD 分段行为）、`test/realtime-host.test.mjs`
+  （10 例：注册表 / 信任围栏 / 全链路 / 背压 / 缓冲 / 空闲超时）、`test/ws-auth.test.mjs`
+  （2 例：undici WebSocket 带 `Authorization` 头完成真实 socket 上线——本地起真 WS 服务，
+  握手时服务端校验收到的头，gate 住 I5 的 qwen3-asr-flash-realtime 上行能否带 DSH 凭据）。
 
 真机验收（单测代替不了）：
 

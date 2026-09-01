@@ -29,6 +29,8 @@ import { registerTranscribeRoute, type CloudAsrConfig } from './transcribe.ts';
 import { registerOptimizeRoute, registerModelsRoute } from './optimize.ts';
 import { registerAsrModelsRoute, type CloudProviderLike } from './asr-models.ts';
 import { createAsrStats, registerStatsRoute } from './stats.ts';
+import { RealtimeHost } from './realtime-host.ts';
+import { createFakeRealtimeProvider } from './realtime-provider.ts';
 
 /** Host context slice this plugin consumes (webServer/llm/settings via type merges). */
 type AsrVoiceHostContext = Context;
@@ -177,4 +179,15 @@ export function apply(ctx: AsrVoiceHostContext): void {
   ctx.effect(() => registerModelsRoute((def) => ctx.webServer.register(def), ctx), 'asr-voice: models route');
   ctx.effect(() => registerAsrModelsRoute((def) => ctx.webServer.register(def), getProviders, ctx), 'asr-voice: asr-models route');
   ctx.effect(() => registerStatsRoute((def) => ctx.webServer.register(def), () => stats.snapshot()), 'asr-voice: stats route');
+
+  // 实时转写通道（I3）：会话注册表 + SSE 下行 + RealtimeProvider 接缝。
+  // I3 阶段 host 用假 provider 驱动整条管道（纯管道，浏览器侧尚未接线）；
+  // I5 换成真云端 provider（qwen3-asr-flash-realtime）时只替换 createProvider。
+  ctx.effect(() => {
+    const host = new RealtimeHost({
+      createProvider: () => createFakeRealtimeProvider().connect(),
+    });
+    const disposeRoutes = host.registerRoutes((def) => ctx.webServer.register(def));
+    return () => disposeRoutes();
+  }, 'asr-voice: realtime routes');
 }

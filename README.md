@@ -172,6 +172,10 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   不支持用说话声打断（见下节）。
 - **不做提示词优化**：对话要的是即时，转写文本原样上屏；`optimize.*` 只作用于整段录音模式。
 - **到点自己收**：`realtime.maxSessionMs` 上限到即结束会话并释放麦克风，麦克风不会无人值守常开。
+- **I3 已交付 host 实时通道（纯管道）**：会话注册表（`sid` 由 host 铸造）+ SSE 下行带背压 +
+  `RealtimeProvider` 接缝 + 假 provider 已实现并全量测试（含 undici WebSocket 带 `Authorization`
+  的真实 socket 上线证据），但**浏览器侧尚未接线**——当前两引擎（`browser` / `segmented`）都不走它；
+  接入真云端 provider 属于后续阶段，届时只替换 host 的 `createProvider`。
 
 ## 云端 ASR 预置 Presets
 
@@ -249,9 +253,14 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   *Half-duplex: no barge-in by speaking. Whether browser echo cancellation suppresses our own
   synthesized speech is unmeasured, so acoustic interruption is deliberately absent.*
 - 播报音色与断句取决于操作系统装了什么语音，长句可能出现机械停顿；不接受就 `realtime.tts = off`，
-  字幕与自动提交照常。云端实时（PCM 流 + 服务端轮次判定）本插件不提供。
+  字幕与自动提交照常。云端实时（PCM 流 + 服务端轮次判定）**浏览器侧尚未接线**：host 半区的实时
+  通道（会话注册表 + SSE 下行 + `RealtimeProvider` 接缝 + 假 provider）已随 I3 交付并全量测试，
+  但客户端还不消费它——`realtime.engine` 目前只有 `browser` / `segmented` 两档，真云端 provider
+  （如 qwen3-asr-flash-realtime）是后续阶段。
   *Voice quality depends on installed system voices; set `realtime.tts = off` for captions only.
-  Cloud realtime is not offered.*
+  The host realtime channel (session registry + SSE downlink + `RealtimeProvider` seam + fake
+  provider) shipped in I3 with full tests, but the browser half does not consume it yet —
+  `realtime.engine` today is `browser` / `segmented`, and a real cloud provider is a later stage.*
 - API key 存于 DSH 凭据服务（落盘位置与格式由 host 的凭据策略决定），仅本机回环可访问代理路由
   （信任围栏防 CSRF）。
   *Keys live in the DSH credential store (where and how they are persisted is the host's policy);
