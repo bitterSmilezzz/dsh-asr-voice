@@ -133,5 +133,26 @@ behavior:
   （离线环境复用已装包），但这是 dev 便利：junction node_modules 已 gitignore、
   不进发布包；运行时与发布产物完全不依赖它。发布产物只依赖官方 peerDependencies。
 
-## 待确认
-- 上述设计蓝图整体确认后开始实现（grilling 约定：确认共享理解后才动手）
+## 剩余阶段与待验收（实时语音对话）
+
+阶段划分只记在这里；实现细节以代码与上一节决策为准。**最初的方案原文在开发者本机的 agent 计划目录里，
+不随仓库分发**——换机器接手时本节即唯一路线来源。
+
+| 阶段 | 内容 | 用户可感知 |
+|---|---|---|
+| I3 | host 实时通道：会话注册表（`sid` 由 host 铸造，4 条 exact 路由全过 `isTrusted`）+ SSE 下行带背压 + `RealtimeProvider` 接缝 + 假 provider；含「undici `WebSocket` 能带 `Authorization`」的**真实 socket 上线证据**测试 | 否（纯管道） |
+| I4 | PCM 上行接上已就位的 `capture.ts`，用假 provider 验字幕与播放。**关键产出是一个实测数字**：Chromium 回声消除对我们自己外放的合成语音的消除率——它 gate 住 D19 的全双工能不能做，不做成可选项 | 是 |
+| I5 | 填一条真 provider 行：`REALTIME_PRESETS` + `key-ref.ts` 复用官方同名凭据。当前候选为阿里云百炼 `qwen3-asr-flash-realtime`（服务端 VAD，约 ¥1.19/音频小时） | 是 |
+| I6 | `CloudTtsSink`（云 TTS PCM 经 `AudioBufferSourceNode → ctx.destination` 播放）+ 若 I4 实测通过则开 `realtime.duplex: 'full'` 语音插话 | 是 |
+
+已交付：I1（`pcm.ts` 抽取 + 整段模式计时项进 settings）、I2（`browser` 引擎闭环）、以及 D23 的
+`segmented` 引擎。后者不在原阶段表内——它是「零新协议、零新 key 也要端到端验证」的旁路，
+顺带交付的 `capture.ts` 正是 I4 的采集原语。
+
+真机验收（单测代替不了）：
+
+- I2 闭环要在真实 Chrome 过一遍：字幕逐字 → 停顿即上屏发送 → 回复逐句朗读 → 播报期间不收音 →
+  点按钮立刻止读。无 `requestAnimationFrame`、无麦克风的内置验收浏览器不能作证据。
+- `segmented` 的 `vad.rms` 是设备噪声底的函数，换机器（含 macOS ↔ Windows）需重新校准：
+  偏低则呼吸与键盘声白烧配额，偏高则切掉轻声句尾。
+- `dsh web` 由开发者手动起停（`--no-open`），agent 不代劳；本机端口直连要 `--noproxy '*'`。
