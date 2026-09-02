@@ -142,6 +142,18 @@ test('writeDraft：只写真正改过的段，并按宿主读回判定成败', a
   assert.equal(await writeDraft(failedDraft), 'language')
 })
 
+test('writeDraft：realtime 段同样按需落盘（曾漏写：实时设置只在本地生效、宿主回声即打回）', async () => {
+  const initial = hostSnapshot()
+  const ok = fakeScope(initial)
+  bindConfigScope(ok.binder)
+  mergeHostValue(structuredClone(initial))
+
+  const draft = { ...newDraft(), realtime: { ...newDraft().realtime, engine: 'segmented' } }
+  assert.equal(await writeDraft(draft), undefined)
+  assert.deepEqual(ok.written, ['realtime'], '只该写 realtime 一段，未改动的段不过线')
+  assert.equal(ok.scope.getSnapshot().value.realtime.engine, 'segmented', '宿主真相必须收到新引擎')
+})
+
 test('keyRefFor：预置与官方 LLM 凭据同名，自定义按显示名派生', () => {
   assert.equal(keyRefFor({ preset: 'openai', name: 'x', id: 'a' }), 'OPENAI_API_KEY')
   assert.equal(keyRefFor({ preset: 'mimo', name: '', id: 'a' }), 'MIMO_API_KEY')

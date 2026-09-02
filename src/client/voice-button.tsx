@@ -172,6 +172,10 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   react.useEffect(() => voiceController.mount(instance), [instance])
 
   const setPhase = (next: VoiceState): void => {
+    // 离开 recording 就停光环：静音/超时自动停止（onDone 直达）、录音中出错
+    // （onFail）与 no-speech 都不经 finish/cancel，漏停会让 repeat:Infinity 的
+    // 波纹 rAF 循环空转到卸载，idle 按钮上残留红色脉冲环。
+    if (stateRef.current === 'recording' && next !== 'recording') stopWave()
     stateRef.current = next
     setState(next)
   }

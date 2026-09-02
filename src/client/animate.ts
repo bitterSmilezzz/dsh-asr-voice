@@ -183,8 +183,13 @@ export function tween(
           return
         }
         startTime = null
-        // 反向播放：交换起止
-        for (const k of Object.keys(startProps)) startProps[k] = endProps[k]!
+        // 反向播放：起止互换。只把 start 换成 end 会让 start===end，
+        // 反向周期变成恒值空转（元素钉在终点不动）——end 必须同时换回原 start。
+        for (const k of Object.keys(startProps)) {
+          const tmp = startProps[k]!
+          startProps[k] = endProps[k]!
+          endProps[k] = tmp
+        }
         requestAnimationFrame(tick)
         return
       }

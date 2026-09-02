@@ -512,7 +512,9 @@ export async function writeDraft(draft: AsrVoiceConfig): Promise<ConfigSection |
   // 比对基准是**宿主真相**，不是本地快照：本函数会把草稿并进本地快照，用本地快照
   // 当基准会让「写回被吞掉后再点一次保存」算出零变更，于是静默报成功。
   const host = scope?.getSnapshot().value
-  const changed = (['asr', 'optimize', 'language', 'behavior'] as const)
+  // realtime 必须在内：设置卡的实时对话组（引擎/TTS/VAD/快捷键…）也走本函数保存，
+  // 漏了它整段改动只在本地快照生效，宿主回声一到就打回原形，重启后更是全丢。
+  const changed = (['asr', 'optimize', 'language', 'behavior', 'realtime'] as const)
     .filter((key) => !jsonEqual(host?.[key] ?? config[key], draft[key]))
   if (scope === undefined) {
     // 没有宿主通道（settings 服务未挂载）：本地快照仍然生效，只是重启后回到旧值。
