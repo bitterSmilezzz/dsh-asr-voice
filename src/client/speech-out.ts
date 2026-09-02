@@ -161,6 +161,81 @@ export interface SpeakTuning {
   language: string
 }
 
+/**
+ * 排队播放骨架：两条 SpeakSink（浏览器合成/云端 TTS）共用的状态机。
+ *
+ * 单一来源化的语义（历史上一处回归过：drain 处理器首轮后被摘掉，第二回合起
+ * 麦克风永远要不回来）：
+ *   - 一次一句：上一句 settle 前不起播下一句；
+ *   - pending-drain：只在「起播过的一批」排空时触发一次 onDrain，空转不重复；
+ *   - cancel：清队列、止住当前句、active 立即为 false，且**吞掉本轮 drain**
+ *     （打断后何时还麦由调用方决定）；迟到 settle 一律作废，不抢跑新状态。
+ *
+ * 播放细节由实现注入：`play` 一句（Promise 在这句结束——自然/被打断/超时——时
+ * settle），`interrupt` 止住正在发声的这一句。
+ */
+interface QueueRunnerDeps {
+  play(text: string): Promise<void>
+  interrupt(): void
+}
+
+function createQueueRunner(deps: QueueRunnerDeps): {
+  enqueue(text: string): void
+  cancel(): void
+  dispose(): void
+  /** 是否空闲（既没在播也没排队）。 */
+  active(): boolean
+  set onDrain(fn: (() => void) | null)
+  get onDrain(): (() => void) | null
+} {
+  const queue: string[] = []
+  let token = 0
+  let pending = false
+  let drain: (() => void) | null = null
+  let disposed = false
+
+  const next = (): void => {
+    if (disposed || token !== 0) return
+    const text = queue.shift()
+    if (text === undefined) {
+      if (pending) { pending = false; drain?.() }
+      return
+    }
+    pending = true
+    const my = ++token
+    void deps.play(text).finally(() => {
+      // 迟到的旧代 settle（cancel/dispose 后）：不得动新状态（新句可能已在播）。
+      if (disposed || my !== token) return
+      token = 0
+      next()
+    })
+  }
+
+  return {
+    enqueue(text: string): void {
+      if (disposed || text.trim() === '') return
+      queue.push(text)
+      next()
+    },
+    cancel(): void {
+      queue.length = 0
+      pending = false
+      token = 0
+      deps.interrupt()
+    },
+    dispose(): void {
+      disposed = true
+      queue.length = 0
+      pending = false
+      token = 0
+      deps.interrupt()
+    },
+    active: () => token !== 0 || queue.length > 0,
+    set onDrain(fn: (() => void) | null) { drain = fn },
+    get onDrain(): (() => void) | null { return drain },
+  }
+}
+
 /** 按语言挑音色：没有完全匹配时退到同主语言的任何音色，再退到浏览器默认。 */
 function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice | null {
   if (voices.length === 0 || lang === '') return null
@@ -172,17 +247,15 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesi
 }
 
 /**
- * 浏览器语音合成实现。句子按到达顺序排队，一次只播一句；播完（或看门狗判死）自动播
- * 下一句，每从「有内容」落到空闲触发一次 onDrain（处理器常驻，跨回合不失效）。
+ * 浏览器语音合成实现。排队/一次一句/drain 语义在 QueueRunner；这里只提供
+ * 「合成并播一句」（onend/onerror/看门狗三者谁先到都算这句结束）与「止住当前句」。
  */
 export function createSpeechSynthesisSink(tuning: SpeakTuning): SpeakSink {
   const synth = typeof window === 'undefined' ? undefined : window.speechSynthesis
-  const queue: string[] = []
-  let playing: SpeechSynthesisUtterance | null = null
-  let pending = false
-  let watchdog: ReturnType<typeof setTimeout> | null = null
-  let drain: (() => void) | null = null
   let voices: SpeechSynthesisVoice[] = []
+  let watchdog: ReturnType<typeof setTimeout> | null = null
+  /** 正在播的这句（interrupt/dispose 时 synth.cancel，看门狗一并清）。 */
+  let current: SpeechSynthesisUtterance | null = null
   let disposed = false
 
   const lang = tuning.language === 'auto'
@@ -193,45 +266,44 @@ export function createSpeechSynthesisSink(tuning: SpeakTuning): SpeakSink {
     if (watchdog !== null) clearTimeout(watchdog)
     watchdog = null
   }
-  const next = (): void => {
-    if (disposed || playing !== null || synth === undefined) return
-    const text = queue.shift()
-    if (text === undefined) {
-      // 只在「刚刚播完一批」时通知一次；未起播的空转不重复触发，
-      // 否则调用方会把麦克风反复重开。
-      if (pending) {
-        pending = false
-        drain?.()
-      }
-      return
-    }
-    pending = true
-    const utter = new SpeechSynthesisUtterance(text)
-    if (lang !== '') utter.lang = lang
-    const voice = pickVoice(voices, lang)
-    if (voice !== null) utter.voice = voice
-    const finish = (): void => {
-      if (playing !== utter) return
-      playing = null
+
+  const runner = createQueueRunner({
+    play(text: string): Promise<void> {
+      return new Promise<void>((resolve) => {
+        if (synth === undefined) { resolve(); return }
+        const utter = new SpeechSynthesisUtterance(text)
+        if (lang !== '') utter.lang = lang
+        const voice = pickVoice(voices, lang)
+        if (voice !== null) utter.voice = voice
+        current = utter
+        let settled = false
+        const finish = (): void => {
+          if (settled) return
+          settled = true
+          if (current === utter) current = null
+          clearWatchdog()
+          resolve()
+        }
+        utter.onend = finish
+        utter.onerror = finish
+        // onend 不可信：Chrome 长句、部分音色会静默不回。超时按播完处理，
+        // 否则麦克风永远还不回来（半双工门控挂在 onDrain 上）。
+        watchdog = setTimeout(() => {
+          try { synth.cancel() } catch { /* noop */ }
+          finish()
+        }, tuning.utteranceWatchdogMs)
+        try {
+          synth.speak(utter)
+        } catch {
+          finish() // 同步失败也结算：队列继续，不因单句卡死
+        }
+      })
+    },
+    interrupt(): void {
       clearWatchdog()
-      next()
-    }
-    utter.onend = finish
-    utter.onerror = finish
-    playing = utter
-    // onend 不可信：Chrome 长句、部分音色会静默不回。超时按播完处理，
-    // 否则麦克风永远还不回来（半双工门控挂在 onDrain 上）。
-    watchdog = setTimeout(() => {
-      try { synth.cancel() } catch { /* noop */ }
-      finish()
-    }, tuning.utteranceWatchdogMs)
-    try {
-      synth.speak(utter)
-    } catch {
-      playing = null
-      clearWatchdog()
-    }
-  }
+      try { synth?.cancel() } catch { /* noop */ }
+    },
+  })
 
   // Chrome 的音色表要等 voiceschanged 才填得满，构造时常为空。
   const onVoices = (): void => { voices = synth?.getVoices() ?? [] }
@@ -239,29 +311,15 @@ export function createSpeechSynthesisSink(tuning: SpeakTuning): SpeakSink {
   synth?.addEventListener?.('voiceschanged', onVoices)
 
   return {
-    enqueue(text: string): void {
-      if (disposed || text.trim() === '') return
-      queue.push(text)
-      next()
-    },
-    get active(): boolean { return playing !== null || queue.length > 0 },
-    cancel(): void {
-      queue.length = 0
-      pending = false
-      playing = null
-      clearWatchdog()
-      try { synth?.cancel() } catch { /* noop */ }
-    },
-    set onDrain(fn: (() => void) | null) { drain = fn },
-    get onDrain(): (() => void) | null { return drain },
+    enqueue: (text) => runner.enqueue(text),
+    get active() { return runner.active() },
+    cancel: () => runner.cancel(),
+    set onDrain(fn) { runner.onDrain = fn },
+    get onDrain() { return runner.onDrain },
     dispose(): void {
       disposed = true
-      queue.length = 0
-      pending = false
-      playing = null
-      clearWatchdog()
+      runner.dispose()
       synth?.removeEventListener?.('voiceschanged', onVoices)
-      try { synth?.cancel() } catch { /* noop */ }
     },
     prime(): void {
       if (disposed || synth === undefined) return
@@ -288,21 +346,19 @@ export function isCloudTtsSupported(): boolean {
  * → base64 PCM（16k int16 LE）→ `AudioBufferSourceNode → ctx.destination` 播放。
  *
  * 与浏览器 speechSynthesis 同接口（SpeakSink），调用方（语音对话按钮）不感知实现。
- * 句子按到达顺序排队、一次播一句；`onended` 是 Web Audio 的精确事件（不像
- * speechSynthesis 的 onend 会漏回调），所以不需要看门狗。云端不可达或合成失败时
+ * 排队/drain/打断语义在 QueueRunner；这里只提供「合成并播一句」与「止住当前句」。
+ * `onended` 是 Web Audio 的精确事件（不像 speechSynthesis 的 onend 会漏回调），
+ * 另有播放时长兜底；合成请求带超时，且打断（cancel/dispose）按句子代际作废
+ * in-flight 请求——fetch 窗口内的句子不得在打断后再起播。云端不可达或合成失败时
  * 跳过该句继续排队（不阻塞对话），失败静默（错误面由录音侧暴露）。
  */
 export function createCloudTtsSink(tuning: { language: string; voice?: string }): SpeakSink {
-  const queue: string[] = []
   let ctx: AudioContext | null = null
   let current: AudioBufferSourceNode | null = null
-  let playing = false
-  let pending = false
-  let drain: (() => void) | null = null
   let disposed = false
-  /** 句子代际：cancel()/dispose() 递增，in-flight 合成链在起播前按代作废（打断后不得再出声）。 */
-  let generation = 0
-  /** 合成请求超时：host 挂起时不能让 playing 永真（半双工门挂在 onDrain，麦克风永不归还）。 */
+  /** 句子代际：interrupt 递增，in-flight 合成链在起播前按代作废。 */
+  let utteranceGen = 0
+  /** 合成请求超时：host 挂起时不能让一句永久占用播放槽（半双工门挂在 onDrain 上）。 */
   const TTS_TIMEOUT_MS = 30_000
 
   const getCtx = (): AudioContext | null => {
@@ -315,90 +371,66 @@ export function createCloudTtsSink(tuning: { language: string; voice?: string })
     return ctx
   }
 
-  /** 合成并播放一句（Promise 在播完时 settle）。 */
-  const speak = async (text: string): Promise<void> => {
-    const my = generation
-    const ac = getCtx()
-    if (ac === null || disposed) return
-    let data: { ok?: boolean; audio?: string; sampleRate?: number; reason?: string }
-    try {
-      const res = await fetch('/api/asr-voice/tts', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, voice: tuning.voice }),
-        signal: AbortSignal.timeout(TTS_TIMEOUT_MS),
-      })
-      data = await res.json().catch(() => ({})) as typeof data
-    } catch {
-      return // 网络失败/超时：跳过这句，不阻塞队列
-    }
-    // 打断（cancel）/释放发生在 fetch 窗口内：这句必须作废，否则用户插话后
-    // 旧句照样起播，压过人声还拖住半双工门。
-    if (disposed || my !== generation || data.ok !== true || data.audio === undefined) return
-    // base64 → 16k int16 LE → Float32（除以 32768 归一化到 -1~1）。
-    const bin = atob(data.audio)
-    const pcm = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i)
-    const frames = pcm.byteLength >> 1
-    const f32 = new Float32Array(frames)
-    const view = new DataView(pcm.buffer)
-    for (let i = 0; i < frames; i++) f32[i] = view.getInt16(i * 2, true) / 32768
-    if (disposed || my !== generation || frames === 0) return
-    const buffer = ac.createBuffer(1, frames, data.sampleRate ?? 16000)
-    buffer.copyToChannel(f32, 0)
-    const source = ac.createBufferSource()
-    source.buffer = buffer
-    source.connect(ac.destination)
-    current = source
-    await new Promise<void>((resolve) => {
-      source.onended = () => resolve()
-      source.start()
-      // 保险：start 后超时（如 ctx 被挂起）不能让队列永久卡住。长句按 5s/1000 帧估算。
-      const ms = Math.max(2_000, Math.ceil(frames / 16000) * 1000 + 1_500)
-      setTimeout(() => { try { source.stop() } catch { /* already ended */ } }, ms)
-    })
-    if (current === source) current = null
-  }
-
-  const next = (): void => {
-    if (disposed || playing) return
-    const text = queue.shift()
-    if (text === undefined) {
-      // 只在「刚刚播完一批」时通知一次；未起播的空转不重复触发。
-      if (pending) { pending = false; drain?.() }
-      return
-    }
-    pending = true
-    playing = true
-    void speak(text).finally(() => {
-      playing = false
-      next()
-    })
-  }
+  const runner = createQueueRunner({
+    play(text: string): Promise<void> {
+      return (async () => {
+        const my = ++utteranceGen
+        const ac = getCtx()
+        if (ac === null || disposed) return
+        let data: { ok?: boolean; audio?: string; sampleRate?: number; reason?: string }
+        try {
+          const res = await fetch('/api/asr-voice/tts', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text, voice: tuning.voice }),
+            signal: AbortSignal.timeout(TTS_TIMEOUT_MS),
+          })
+          data = await res.json().catch(() => ({})) as typeof data
+        } catch {
+          return // 网络失败/超时：跳过这句，不阻塞队列
+        }
+        if (disposed || my !== utteranceGen || data.ok !== true || data.audio === undefined) return
+        // base64 → 16k int16 LE → Float32（除以 32768 归一化到 -1~1）。
+        const bin = atob(data.audio)
+        const pcm = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i)
+        const frames = pcm.byteLength >> 1
+        const f32 = new Float32Array(frames)
+        const view = new DataView(pcm.buffer)
+        for (let i = 0; i < frames; i++) f32[i] = view.getInt16(i * 2, true) / 32768
+        if (disposed || my !== utteranceGen || frames === 0) return
+        const buffer = ac.createBuffer(1, frames, data.sampleRate ?? 16000)
+        buffer.copyToChannel(f32, 0)
+        const source = ac.createBufferSource()
+        source.buffer = buffer
+        source.connect(ac.destination)
+        current = source
+        await new Promise<void>((resolve) => {
+          source.onended = () => resolve()
+          source.start()
+          // 保险：start 后超时（如 ctx 被挂起）不能让队列永久卡住。长句按 5s/1000 帧估算。
+          const ms = Math.max(2_000, Math.ceil(frames / 16000) * 1000 + 1_500)
+          setTimeout(() => { try { source.stop() } catch { /* already ended */ } }, ms)
+        })
+        if (current === source) current = null
+      })()
+    },
+    interrupt(): void {
+      utteranceGen += 1
+      if (current !== null) { try { current.stop() } catch { /* already ended */ } }
+      current = null
+    },
+  })
 
   return {
-    enqueue(text: string): void {
-      if (disposed || text.trim() === '') return
-      queue.push(text)
-      next()
-    },
-    get active(): boolean { return playing || queue.length > 0 },
-    cancel(): void {
-      generation += 1 // 作废 in-flight 合成链：fetch 窗口内的句子不得在打断后再起播
-      queue.length = 0
-      pending = false
-      if (current !== null) { try { current.stop() } catch { /* already ended */ } }
-      current = null
-    },
-    set onDrain(fn: (() => void) | null) { drain = fn },
-    get onDrain(): (() => void) | null { return drain },
+    enqueue: (text) => runner.enqueue(text),
+    get active() { return runner.active() },
+    cancel: () => runner.cancel(),
+    set onDrain(fn) { runner.onDrain = fn },
+    get onDrain() { return runner.onDrain },
     dispose(): void {
       disposed = true
-      generation += 1
-      queue.length = 0
-      pending = false
-      if (current !== null) { try { current.stop() } catch { /* already ended */ } }
-      current = null
+      runner.dispose()
       if (ctx !== null) { void ctx.close().catch(() => {}); ctx = null }
     },
     prime(): void {

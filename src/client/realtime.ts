@@ -71,6 +71,12 @@ export interface RealtimeSession {
   disarmBargeIn?(): void
 }
 
+/** 清掉一个可能为空的计时器（返回 null 便于链回变量），browser/segmented 引擎共用。 */
+function clearTimer(timer: ReturnType<typeof setTimeout> | null): null {
+  if (timer !== null) clearTimeout(timer)
+  return null
+}
+
 /** Web Speech 在 onend 后重新拉起前的最小间隔：紧接着 start() 会撞 InvalidStateError。 */
 const RESTART_DELAY_MS = 120
 
@@ -98,16 +104,12 @@ function createSettleGate(
   live: () => boolean,
   commit: () => void,
 ): { arm(hasText: boolean): void; cancel(): void } {
-  const clear = (timer: ReturnType<typeof setTimeout> | null): null => {
-    if (timer !== null) clearTimeout(timer)
-    return null
-  }
   let settleTimer: ReturnType<typeof setTimeout> | null = null
   let tailTimer: ReturnType<typeof setTimeout> | null = null
   return {
     arm(hasText: boolean): void {
-      settleTimer = clear(settleTimer)
-      tailTimer = clear(tailTimer)
+      settleTimer = clearTimer(settleTimer)
+      tailTimer = clearTimer(tailTimer)
       if (!hasText) return
       settleTimer = setTimeout(() => {
         settleTimer = null
@@ -117,8 +119,8 @@ function createSettleGate(
       }, tuning.settleMs)
     },
     cancel(): void {
-      settleTimer = clear(settleTimer)
-      tailTimer = clear(tailTimer)
+      settleTimer = clearTimer(settleTimer)
+      tailTimer = clearTimer(tailTimer)
     },
   }
 }
@@ -148,11 +150,6 @@ export function createBrowserRealtime(
   let lastTurn = ''
   let lastTurnAt = 0
 
-  const clear = (timer: ReturnType<typeof setTimeout> | null): null => {
-    if (timer !== null) clearTimeout(timer)
-    return null
-  }
-
   const latest = (): string => joinText(segment, interim)
 
   /** 交出当前这句，并为下一句清空累加器。 */
@@ -174,7 +171,7 @@ export function createBrowserRealtime(
 
   const clearTimers = (): void => {
     gate.cancel()
-    restartTimer = clear(restartTimer)
+    restartTimer = clearTimer(restartTimer)
   }
 
   const emitPartial = (): void => { events.onPartial(latest()) }
@@ -240,7 +237,7 @@ export function createBrowserRealtime(
       if (recognition === rec) recognition = null
       if (!active || paused || failed) return
       // Chrome 会在一段静音后自行结束 continuous 会话：悄悄续上，用户不该察觉。
-      restartTimer = clear(restartTimer)
+      restartTimer = clearTimer(restartTimer)
       restartTimer = setTimeout(() => {
         restartTimer = null
         if (active && !paused && !failed) openRecognition()
