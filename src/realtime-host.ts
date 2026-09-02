@@ -171,15 +171,25 @@ export class RealtimeHost {
       if (s.pending.length > 64) s.pending.shift()
     }
     this.sessions.set(sid, session)
-    // 空闲守卫：没数据、没消费者太久就拆掉，防泄漏。
-    session.idleTimer = setTimeout(() => {
-      const s = this.sessions.get(sid)
-      if (s === undefined) return
-      const idle = this.opts.now() - s.lastActive
-      if (idle >= this.opts.idleMs) this.closeSession(sid)
-      else this.refreshIdle(sid)
-    }, this.opts.idleMs)
+    this.armIdle(sid)
     return { sid }
+  }
+
+  /**
+   * 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂，
+   * 真正空闲满 idleMs 才拆会话防泄漏。
+   */
+  private armIdle(sid: string): void {
+    const s = this.sessions.get(sid)
+    if (s === undefined) return
+    if (s.idleTimer !== null) clearTimeout(s.idleTimer)
+    s.idleTimer = setTimeout(() => {
+      const cur = this.sessions.get(sid)
+      if (cur === undefined) return
+      const idle = this.opts.now() - cur.lastActive
+      if (idle >= this.opts.idleMs) this.closeSession(sid)
+      else this.armIdle(sid)
+    }, this.opts.idleMs)
   }
 
   /** 刷新空闲计时（每次上行/下行活动调用）。 */
@@ -187,14 +197,7 @@ export class RealtimeHost {
     const s = this.sessions.get(sid)
     if (s === undefined) return
     s.lastActive = this.opts.now()
-    if (s.idleTimer !== null) clearTimeout(s.idleTimer)
-    s.idleTimer = setTimeout(() => {
-      const cur = this.sessions.get(sid)
-      if (cur === undefined) return
-      const idle = this.opts.now() - cur.lastActive
-      if (idle >= this.opts.idleMs) this.closeSession(sid)
-      else this.refreshIdle(sid)
-    }, this.opts.idleMs)
+    this.armIdle(sid)
   }
 
   /** 上行 PCM（16k int16 LE）到指定会话。会话不存在返回 false。 */
