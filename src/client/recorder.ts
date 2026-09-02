@@ -314,6 +314,21 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
   /** 当前转写请求的 AbortController：abort() 时可取消在途的 host 请求。 */
   let transcribeController: AbortController | null = null
 
+  /** 停掉当前麦克风流的所有轨道（onstop/abort/错误各分支共用的收尾）。 */
+  const stopStream = (): void => {
+    if (stream !== null) for (const t of stream.getTracks()) t.stop()
+  }
+
+  /** 把转换前的原始录音抓一份到 host（静音/异常短结果诊断用），失败静默。 */
+  const captureDiagnostic = (blob: Blob): void => {
+    if (blob.size <= 0) return
+    void fetch('/api/asr-voice/transcribe?capture=1', {
+      method: 'POST',
+      headers: { 'content-type': blob.type || 'audio/webm' },
+      body: blob,
+    }).catch(() => {})
+  }
+
   const pickMime = (): string => {
     // webm/opus 优先：Chrome 对 MediaRecorder 产出的 mp4(AAC) 解码不稳定（decodeAudioData
     // 可能解出错误/静音数据 → 上游收到垃圾音频返回空或幻觉文本）。上游统一收
@@ -428,7 +443,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
     stopPromise = new Promise<string>((resolve, reject) => {
       mediaRecorder!.onstop = async () => {
         stopLevelMeter()
-        if (cancelled) { active = false; for (const t of stream!.getTracks()) t.stop(); return }
+        if (cancelled) { active = false; stopStream(); return }
         const type = mediaRecorder?.mimeType?.split(';')[0]?.trim() || 'audio/webm'
         const blob = new Blob(chunks, { type })
         recorder.onState?.('transcribing')
@@ -439,7 +454,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
           let wavPeak = -1 // -1 = 转换失败，无法判定
           try {
             const r = await blobToWav16k(blob)
-            if (cancelled) { active = false; for (const t of stream!.getTracks()) t.stop(); return }
+            if (cancelled) { active = false; stopStream(); return }
             audio = r.wav
             wavPeak = r.peak
           } catch {
@@ -448,15 +463,9 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
           // 静音守卫（ground truth）：转换后的 WAV 真实峰值趋零 → MediaRecorder 确实没录到声，
           // 不发 ASR（避免对静音幻觉出 "yeah"/"no text"）；原始录音也抓一份供诊断对比。
           if (isSilentPeak(wavPeak)) {
-            if (blob.size > 0) {
-              void fetch('/api/asr-voice/transcribe?capture=1', {
-                method: 'POST',
-                headers: { 'content-type': blob.type || 'audio/webm' },
-                body: blob,
-              }).catch(() => {})
-            }
+            captureDiagnostic(blob)
             active = false
-            for (const t of stream!.getTracks()) t.stop()
+            stopStream()
             const label = currentInputLabel()
             // 附上浏览器可见的全部输入设备 + 内核标识，一眼看出是否选错/非主流内核。
             let devices = ''
@@ -480,23 +489,17 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
           transcribeController = controller
           const text = await transcribeViaHost(audio, language, controller.signal)
           transcribeController = null
-          if (cancelled) { active = false; for (const t of stream!.getTracks()) t.stop(); return }
+          if (cancelled) { active = false; stopStream(); return }
           // 异常短结果（疑似静音/听错）：把转换前的原始录音也抓一份到 host，
           // 与转换后的 WAV（host 侧 ≤8 字规则已存）对比定位是采集还是转码问题。
-          if (text.trim().length <= 8 && blob.size > 0) {
-            void fetch('/api/asr-voice/transcribe?capture=1', {
-              method: 'POST',
-              headers: { 'content-type': blob.type || 'audio/webm' },
-              body: blob,
-            }).catch(() => {})
-          }
+          if (text.trim().length <= 8) captureDiagnostic(blob)
           active = false
-          for (const t of stream!.getTracks()) t.stop()
+          stopStream()
           recorder.onDone?.(text)
           resolve(text)
         } catch (error) {
           active = false
-          for (const t of stream!.getTracks()) t.stop()
+          stopStream()
           if (cancelled) return
           const err = error instanceof Error ? error : new Error(String(error))
           recorder.onFail?.(err)
@@ -508,7 +511,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
         active = false
         if (maxTimer) { clearTimeout(maxTimer); maxTimer = null }
         // 录音错误也要释放麦克风流，否则轨道保持活跃（麦克风常亮、占用输入设备）。
-        if (stream) for (const t of stream.getTracks()) t.stop()
+        stopStream()
         const err = new Error('recorder-error')
         // 不经 stop() 直接触发的 MediaRecorder 错误也要送达 onFail，否则 voice-button
         // 永久卡在 recording（后续 stop() 因 !active 只 resolve('')，无 onDone/onFail）。
@@ -551,7 +554,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try { mediaRecorder.stop() } catch { /* noop */ }
     }
-    if (stream) for (const t of stream.getTracks()) t.stop()
+    stopStream()
     stopPromise = null
   }
 
