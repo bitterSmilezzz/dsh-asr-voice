@@ -48,6 +48,11 @@ export declare class RealtimeHost {
     createSession(): Promise<{
         sid: string;
     }>;
+    /**
+     * 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂，
+     * 真正空闲满 idleMs 才拆会话防泄漏。
+     */
+    private armIdle;
     /** 刷新空闲计时（每次上行/下行活动调用）。 */
     private refreshIdle;
     /** 上行 PCM（16k int16 LE）到指定会话。会话不存在返回 false。 */
