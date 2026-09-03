@@ -1,18 +1,14 @@
-/**
- * dsh-asr-voice — host 半区：settings namespace + schema（设置页配置的权威源）。
- *
+/** dsh-asr-voice — host 半区：settings namespace + schema（设置页配置的权威源）。
  * **API key 不在这里**：云端 ASR 的 key 统一存 DSH credentials 服务，引用名由
  * `src/key-ref.ts` 派生（预置供应商与官方 LLM provider 同名，配过 LLM 就直接复用，
  * 用户一次都不用填）；LLM 提示词优化不存 key，它走 DSH 官方通道 ctx.llm。settings
  * 只存有 baseUrl / model / mode 等**无密钥**的供应商元数据，因此浏览器拿到整份
  * 文档也拿不到 key，客户端整段回写也不可能顺手删掉谁的密钥。
- *
  * 两个 `apiKey` 字段是 v0.1/v0.2 的遗留位置，本版本保留只为让 `src/index.ts` 的
  * 一次性迁移读到旧值并搬进 credentials：字段一旦从 schema 消失，schemastery 会把
  * 旧文档里的值直接剥掉，迁移就再也看不见它。它们声明为 `role('secret')`，从此不经
  * `settings.describe` 渡到浏览器（此前是明文过境的，迁移后请自行清理
  * `~/.dsh/settings.yaml` 中的历史残留）。下一版本再删除字段本身。
- *
  * 云端 ASR 支持**多供应商**（v0.2）：`asr.cloud.providers` 为供应商列表（每个含
  * 自己的 name/baseUrl/model/mode），`asr.cloud.active` 指定当前使用的供应商 id。
  * 兼容旧单配置：仍保留 preset/baseUrl/model/mode 顶层字段，读取时若无 providers
@@ -101,24 +97,17 @@ export const AsrVoiceSettingsSchema: any = z.object({
     /** 静音持续多久即自动停止（毫秒，仅在 silenceStop 开启时生效）。 */
     silenceMs: z.natural().min(200).max(60_000).default(2_500),
   }),
-  /**
-   * 实时语音对话：边说边出字 → 停顿即发起 agent 回合 → 把回复读出来。
-   * 与整段模式共用同一条 setDraft/submit 上通路，只是不再需要手动关麦。
-   */
+/** 实时语音对话：边说边出字 → 停顿即发起 agent 回合 → 把回复读出来。 与整段模式共用同一条 setDraft/submit 上通路，只是不再需要手动关麦。 */
   realtime: z.object({
     /** 总开关（默认开）：关掉时实时按钮不注册，一切行为回到整段模式。 */
     enabled: z.boolean().default(true),
-    /**
-     * 实时引擎：browser（Web Speech 连续会话，逐字出字、零配额）/ segmented
-     * （本地能量 VAD 按句切段，走已配置的整段转写通道；每句一次上游调用）/
-     * cloud（16k PCM 上行 host 实时通道，服务端 VAD 判回合——I3 假 provider /
-     * I5 真云端 provider）。
-     */
+/** 实时引擎：browser（Web Speech 连续会话，逐字出字、零配额）/ segmented
+ * （本地能量 VAD 按句切段，走已配置的整段转写通道；每句一次上游调用）/
+ * cloud（16k PCM 上行 host 实时通道，服务端 VAD 判回合——I3 假 provider /
+ * I5 真云端 provider）。
+ */
     engine: z.string().default('browser'),
-    /**
-     * 云端实时 provider（仅 engine=cloud 生效）：'builtin' = 内置模拟（I3/I4 开发态，
-     * host 用假 provider）/ 预置 id（见 REALTIME_PRESETS，I5 真云端）。
-     */
+/** 云端实时 provider（仅 engine=cloud 生效）：'builtin' = 内置模拟（I3/I4 开发态， host 用假 provider）/ 预置 id（见 REALTIME_PRESETS，I5 真云端）。 */
     provider: z.string().default('builtin'),
     /** 回复播报：browser（speechSynthesis，零配置）/ cloud（云端 TTS）/ off（只出字不读）。 */
     tts: z.string().default('browser'),
@@ -166,10 +155,7 @@ export const AsrVoiceSettingsSchema: any = z.object({
   }),
 })
 
-/**
- * 业务侧类型（手写，不依赖 schema 推断——schema 已注解为 Schemastery.Schema
- * 以便声明可移植，TypeT 会退化为 any）。
- */
+/** 业务侧类型（手写，不依赖 schema 推断——schema 已注解为 Schemastery.Schema 以便声明可移植，TypeT 会退化为 any）。 */
 export interface AsrVoiceCloudProvider {
   id: string
   preset: string

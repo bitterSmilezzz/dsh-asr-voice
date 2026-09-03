@@ -1,16 +1,13 @@
-/**
- * dsh-asr-voice — 语音播报出口（SpeakSink）与「流式回复 → 可朗读句子」的分句泵。
- *
+/** dsh-asr-voice — 语音播报出口（SpeakSink）与「流式回复 → 可朗读句子」的分句泵。
  * 一期只有浏览器 `speechSynthesis` 一种实现：它是三浏览器交集内唯一零配置、零密钥、
  * 零依赖的播放通路，且与麦克风走不同的音频路由（回声消除能否吃掉它决定半双工还是
  * 全双工，见 README 的实时对话一节）。接缝留在这里，云 TTS 落地时新增一个实现，
  * 调用方（语音对话按钮）不需要知道播报是谁做的。
- *
  * 两处不显眼但会决定体验的坑：
- *   1. `utterance.onend` 不可信——Chrome 对长句常不回调，队列会永久卡住、麦克风再也不
- *      交还。故每句都挂看门狗（realtime.speech.utteranceWatchdogMs）。
- *   2. agent 回复是**逐块累积**的字符串，不是天生分好句的。泵负责「只朗读已经说完的
- *      句子」，并且在新回合/新 step 使文本流从头开始时，把旧流的尾巴先吐干净。
+ * 1. `utterance.onend` 不可信——Chrome 对长句常不回调，队列会永久卡住、麦克风再也不
+ * 交还。故每句都挂看门狗（realtime.speech.utteranceWatchdogMs）。
+ * 2. agent 回复是**逐块累积**的字符串，不是天生分好句的。泵负责「只朗读已经说完的
+ * 句子」，并且在新回合/新 step 使文本流从头开始时，把旧流的尾巴先吐干净。
  */
 
 /** 一次朗读的最小生命周期回调。 */
@@ -34,11 +31,7 @@ export function isSpeechSynthesisSupported(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window
 }
 
-/**
- * 未闭合句子的硬切上限（字符）。与 utteranceWatchdogMs 是一对：块必须能在看门狗时限
- * 内念完，否则会被看门狗误判成「播完」而截断。正常句长远小于此，只有全程无标点的
- * 退化回复才会撞上。
- */
+/** 未闭合句子的硬切上限（字符）。与 utteranceWatchdogMs 是一对：块必须能在看门狗时限 内念完，否则会被看门狗误判成「播完」而截断。正常句长远小于此，只有全程无标点的 退化回复才会撞上。 */
 export const MAX_UTTERANCE_CHARS = 200
 
 /** 中日韩句读：出现即断句，不需要后接空白。 */
@@ -50,11 +43,7 @@ const LATIN_STOP = '!?;:'
 /** 跟着句末符一起归入上一句的收尾引号/括号。 */
 const CLOSERS = '”’）)』」】'
 
-/**
- * text 中 from 之后**第一个**句子边界的结束下标（含紧随的句末符、收尾符与空白）；
- * 没有边界返回 -1。正向扫描：一次 feed 里含多句时也要切成多段，才能及早可打断、
- * 且每段都落在看门狗盖得住的长度内。
- */
+/** text 中 from 之后**第一个**句子边界的结束下标（含紧随的句末符、收尾符与空白）； 没有边界返回 -1。正向扫描：一次 feed 里含多句时也要切成多段，才能及早可打断、 且每段都落在看门狗盖得住的长度内。 */
 function nextBreak(text: string, from = 0): number {
   for (let i = from; i < text.length; i++) {
     const c = text[i] ?? ''
@@ -78,12 +67,7 @@ function nextBreak(text: string, from = 0): number {
   return -1
 }
 
-/**
- * 创建一个分句泵：喂**累积**文本，吐出「已经说完的句子」。
- *
- * @param firstSentenceMinChars - 首句最少字数：一句太短就继续攒，避免以「好的。」这种
- *   碎片起音（听众会觉得机器人结巴）。仅作用于每个流的第一个切段。
- */
+/** 创建一个分句泵：喂**累积**文本，吐出「已经说完的句子」。 @param firstSentenceMinChars - 首句最少字数：一句太短就继续攒，避免以「好的。」这种 碎片起音（听众会觉得机器人结巴）。仅作用于每个流的第一个切段。 */
 export function createSentencePump(firstSentenceMinChars: number): {
   /** 喂入当前流的累积全文；返回新增的完整句子。 */
   feed(cumulative: string): string[]
@@ -161,16 +145,13 @@ export interface SpeakTuning {
   language: string
 }
 
-/**
- * 排队播放骨架：两条 SpeakSink（浏览器合成/云端 TTS）共用的状态机。
- *
+/** 排队播放骨架：两条 SpeakSink（浏览器合成/云端 TTS）共用的状态机。
  * 单一来源化的语义（历史上一处回归过：drain 处理器首轮后被摘掉，第二回合起
  * 麦克风永远要不回来）：
- *   - 一次一句：上一句 settle 前不起播下一句；
- *   - pending-drain：只在「起播过的一批」排空时触发一次 onDrain，空转不重复；
- *   - cancel：清队列、止住当前句、active 立即为 false，且**吞掉本轮 drain**
- *     （打断后何时还麦由调用方决定）；迟到 settle 一律作废，不抢跑新状态。
- *
+ * - 一次一句：上一句 settle 前不起播下一句；
+ * - pending-drain：只在「起播过的一批」排空时触发一次 onDrain，空转不重复；
+ * - cancel：清队列、止住当前句、active 立即为 false，且**吞掉本轮 drain**
+ * （打断后何时还麦由调用方决定）；迟到 settle 一律作废，不抢跑新状态。
  * 播放细节由实现注入：`play` 一句（Promise 在这句结束——自然/被打断/超时——时
  * settle），`interrupt` 止住正在发声的这一句。
  */
@@ -246,10 +227,7 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesi
     ?? null
 }
 
-/**
- * 浏览器语音合成实现。排队/一次一句/drain 语义在 QueueRunner；这里只提供
- * 「合成并播一句」（onend/onerror/看门狗三者谁先到都算这句结束）与「止住当前句」。
- */
+/** 浏览器语音合成实现。排队/一次一句/drain 语义在 QueueRunner；这里只提供 「合成并播一句」（onend/onerror/看门狗三者谁先到都算这句结束）与「止住当前句」。 */
 export function createSpeechSynthesisSink(tuning: SpeakTuning): SpeakSink {
   const synth = typeof window === 'undefined' ? undefined : window.speechSynthesis
   let voices: SpeechSynthesisVoice[] = []
@@ -341,10 +319,8 @@ export function isCloudTtsSupported(): boolean {
   return Boolean(w?.AudioContext ?? w?.webkitAudioContext)
 }
 
-/**
- * 云端 TTS 实现（I6）：文本 → host 私有路由 → 阿里云百炼 qwen3-tts-flash-realtime
+/** 云端 TTS 实现（I6）：文本 → host 私有路由 → 阿里云百炼 qwen3-tts-flash-realtime
  * → base64 PCM（16k int16 LE）→ `AudioBufferSourceNode → ctx.destination` 播放。
- *
  * 与浏览器 speechSynthesis 同接口（SpeakSink），调用方（语音对话按钮）不感知实现。
  * 排队/drain/打断语义在 QueueRunner；这里只提供「合成并播一句」与「止住当前句」。
  * `onended` 是 Web Audio 的精确事件（不像 speechSynthesis 的 onend 会漏回调），

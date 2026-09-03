@@ -1,221 +1,46 @@
-/**
- * dsh-asr-voice — client 词典（zh / en）。
- *
- * 键按「三步向导 → 高级 → 录音链路」分块。设置卡片改成 draft + 保存后，
- * 旧的即时写回文案（saveFailed / configSaveFailed）与「获取模型」按钮组已删除。
- */
+/** dsh-asr-voice — client 词典（zh / en）。 键按「三步向导 → 高级 → 录音链路」分块。设置卡片改成 draft + 保存后， 旧的即时写回文案（saveFailed / configSaveFailed）与「获取模型」按钮组已删除。 */
 
 /** 词典键（设置卡片 + 录音按钮 + 预览卡共用）。 */
 export type LocaleKey =
   // 卡片抬头
-  | 'cardTitle'
-  | 'cardCopy'
-  | 'readOnlyDoc'
-  | 'howTo'
-  // ① 识别方式
-  | 'stepEngineTitle'
-  | 'engineAuto'
-  | 'engineBrowser'
-  | 'engineCloud'
-  | 'engineHintAuto'
-  | 'engineHintBrowser'
-  | 'engineHintCloud'
-  // ② 服务商
-  | 'stepProviderTitle'
-  | 'stepProviderHint'
-  | 'cloudPresetCustom'
-  | 'addProvider'
-  | 'removeProvider'
-  | 'providersEmpty'
-  // ③ 密钥与自检
-  | 'stepKeyTitle'
-  | 'keyChecking'
-  | 'keyQueryFailed'
-  | 'keyConfigured'
-  | 'keyNeedsValue'
-  | 'keyNameNeeded'
-  | 'keySave'
-  | 'keySaving'
-  | 'keySavedHint'
-  | 'keySaveFailed'
-  | 'keyKeepHint'
-  | 'keyKeepPlaceholder'
-  | 'keyPastePlaceholder'
-  | 'testConnection'
-  | 'testAndSave'
-  | 'testBusy'
-  | 'testOk'
-  | 'testFail'
-  // 保存条
-  | 'save'
-  | 'savingHint'
-  | 'savedHint'
-  | 'saveNotApplied'
-  | 'unsavedHint'
-  | 'discard'
-  // 高级
-  | 'advancedTitle'
-  | 'advancedHint'
-  | 'advancedCollapse'
-  | 'groupAsr'
-  | 'providerNameLabel'
-  | 'providerNameDesc'
-  | 'providerListLabel'
-  | 'providerListDesc'
-  | 'cloudBaseUrlLabel'
-  | 'cloudBaseUrlDesc'
-  | 'cloudModelLabel'
-  | 'cloudModelDesc'
-  | 'cloudModelPicked'
-  | 'cloudModeLabel'
-  | 'cloudModeDesc'
-  | 'cloudModeAuto'
-  | 'cloudModeTranscriptions'
-  | 'cloudModeChat'
-  | 'fetchModelsPick'
-  | 'fetchModelsEmpty'
-  | 'groupOptimize'
-  | 'optimizeModeLabel'
-  | 'optimizeHeuristic'
-  | 'optimizeLlm'
-  | 'optimizePreviewLabel'
-  | 'optimizePreviewDesc'
-  | 'optimizingHint'
-  | 'transcribingHint'
-  | 'cancelBusy'
-  | 'optimizeFailedKeep'
-  | 'llmDefaultHint'
-  | 'llmProviderLabel'
-  | 'llmModelLabel'
-  | 'llmCurrentDefault'
-  | 'llmModelsEmpty'
-  | 'languageLabel'
-  | 'languageAuto'
-  | 'groupBehavior'
-  | 'autoSendLabel'
-  | 'autoSendDesc'
-  | 'silenceStopLabel'
-  | 'silenceStopDesc'
-  | 'holdToTalkLabel'
-  | 'holdToTalkDesc'
-  | 'textModeLabel'
-  | 'textModeDesc'
-  | 'textModeReplace'
-  | 'textModeAppend'
-  | 'copyToClipboardLabel'
-  | 'copyToClipboardDesc'
-  | 'hotkeyLabel'
-  | 'hotkeyDesc'
-  | 'hotkeyPlaceholder'
-  | 'hotkeyClear'
-  | 'maxRecordMsLabel'
-  | 'maxRecordMsDesc'
-  | 'silenceMsLabel'
-  | 'silenceMsDesc'
-  | 'silenceRmsLabel'
-  | 'silenceRmsDesc'
-  // 实时语音对话
-  | 'groupRealtime'
-  | 'realtimeEnableLabel'
-  | 'realtimeEnableDesc'
-  | 'realtimeTtsLabel'
-  | 'realtimeTtsDesc'
-  | 'realtimeTtsBrowser'
-  | 'realtimeTtsOff'
-  | 'realtimeHotkeyLabel'
-  | 'realtimeHotkeyDesc'
-  | 'bargeInLabel'
-  | 'bargeInDesc'
-  | 'realtimeSettleMsLabel'
-  | 'realtimeSettleMsDesc'
-  | 'realtimeTailMsLabel'
-  | 'realtimeTailMsDesc'
-  | 'realtimeEngineLabel'
-  | 'realtimeEngineDesc'
-  | 'realtimeEngineBrowser'
-  | 'realtimeEngineSegmented'
-  | 'realtimeEngineCloud'
-  | 'realtimeProviderLabel'
-  | 'realtimeProviderDesc'
-  | 'realtimeTtsCloud'
-  | 'realtimeTtsVoiceLabel'
-  | 'realtimeTtsVoiceDesc'
-  | 'vadRmsAutoLabel'
-  | 'vadRmsAutoDesc'
-  | 'vadFrameMsLabel'
-  | 'vadFrameMsDesc'
-  | 'vadRmsLabel'
-  | 'vadRmsDesc'
-  | 'vadSilenceMsLabel'
-  | 'vadSilenceMsDesc'
-  | 'vadPrerollMsLabel'
-  | 'vadPrerollMsDesc'
-  | 'vadMinSpeechMsLabel'
-  | 'vadMinSpeechMsDesc'
-  | 'vadMaxSegmentMsLabel'
-  | 'vadMaxSegmentMsDesc'
-  | 'vadMaxPendingLabel'
-  | 'vadMaxPendingDesc'
-  | 'realtimeMaxSessionLabel'
-  | 'realtimeMaxSessionDesc'
-  | 'realtimeFirstSentenceLabel'
-  | 'realtimeFirstSentenceDesc'
-  | 'realtimeWatchdogLabel'
-  | 'realtimeWatchdogDesc'
-  // 语音对话按钮
-  | 'chatTitle'
-  | 'chatListeningTitle'
-  | 'chatThinkingTitle'
-  | 'chatSpeakingTitle'
-  | 'chatWebSpeechFallback'
-  | 'chatThinkingHint'
-  | 'chatSpeakingHint'
-  | 'chatInterrupt'
-  | 'chatEndedLimit'
-  | 'chatNoReply'
-  | 'chatNoTts'
-  | 'chatGap'
-  | 'errSegmentedNeedsCloud'
-  | 'errSegmentedUnsupported'
-  | 'errSegmentedUnreachable'
-  // 录音链路 / 预览卡
-  | 'dismiss'
-  | 'loadFailed'
-  | 'micTitle'
-  | 'recordingTitle'
-  | 'transcribingTitle'
-  | 'optimizingTitle'
-  | 'errNoMic'
-  | 'errNoSound'
-  | 'errNoSpeechSupport'
-  | 'errWebSpeechNetwork'
-  | 'errCloudNotConfigured'
-  | 'noSpeechDetected'
-  | 'fallbackToCloud'
-  | 'errTranscribe'
-  | 'errOptimize'
-  | 'previewTitle'
-  | 'previewOriginal'
-  | 'previewOptimized'
-  | 'previewConfirm'
-  | 'previewCancel'
-  | 'groupStats'
-  | 'statsTitle'
-  | 'statsCount'
-  | 'statsChars'
-  | 'statsLastAt'
-  | 'statsEmpty'
-
-/** 词典值（支持 {x} 插值）。 */
+  'cardTitle' | 'cardCopy' | 'readOnlyDoc' | 'howTo' | 'stepEngineTitle' | 'engineAuto' |
+  'engineBrowser' | 'engineCloud' | 'engineHintAuto' | 'engineHintBrowser' | 'engineHintCloud' | 'stepProviderTitle' |
+  'stepProviderHint' | 'cloudPresetCustom' | 'addProvider' | 'removeProvider' | 'providersEmpty' | 'stepKeyTitle' |
+  'keyChecking' | 'keyQueryFailed' | 'keyConfigured' | 'keyNeedsValue' | 'keyNameNeeded' | 'keySave' |
+  'keySaving' | 'keySavedHint' | 'keySaveFailed' | 'keyKeepHint' | 'keyKeepPlaceholder' | 'keyPastePlaceholder' |
+  'testConnection' | 'testAndSave' | 'testBusy' | 'testOk' | 'testFail' | 'save' |
+  'savingHint' | 'savedHint' | 'saveNotApplied' | 'unsavedHint' | 'discard' | 'advancedTitle' |
+  'advancedHint' | 'advancedCollapse' | 'groupAsr' | 'providerNameLabel' | 'providerNameDesc' | 'providerListLabel' |
+  'providerListDesc' | 'cloudBaseUrlLabel' | 'cloudBaseUrlDesc' | 'cloudModelLabel' | 'cloudModelDesc' | 'cloudModelPicked' |
+  'cloudModeLabel' | 'cloudModeDesc' | 'cloudModeAuto' | 'cloudModeTranscriptions' | 'cloudModeChat' | 'fetchModelsPick' |
+  'fetchModelsEmpty' | 'groupOptimize' | 'optimizeModeLabel' | 'optimizeHeuristic' | 'optimizeLlm' | 'optimizePreviewLabel' |
+  'optimizePreviewDesc' | 'optimizingHint' | 'transcribingHint' | 'cancelBusy' | 'optimizeFailedKeep' | 'llmDefaultHint' |
+  'llmProviderLabel' | 'llmModelLabel' | 'llmCurrentDefault' | 'llmModelsEmpty' | 'languageLabel' | 'languageAuto' |
+  'groupBehavior' | 'autoSendLabel' | 'autoSendDesc' | 'silenceStopLabel' | 'silenceStopDesc' | 'holdToTalkLabel' |
+  'holdToTalkDesc' | 'textModeLabel' | 'textModeDesc' | 'textModeReplace' | 'textModeAppend' | 'copyToClipboardLabel' |
+  'copyToClipboardDesc' | 'hotkeyLabel' | 'hotkeyDesc' | 'hotkeyPlaceholder' | 'hotkeyClear' | 'maxRecordMsLabel' |
+  'maxRecordMsDesc' | 'silenceMsLabel' | 'silenceMsDesc' | 'silenceRmsLabel' | 'silenceRmsDesc' | 'groupRealtime' |
+  'realtimeEnableLabel' | 'realtimeEnableDesc' | 'realtimeTtsLabel' | 'realtimeTtsDesc' | 'realtimeTtsBrowser' | 'realtimeTtsOff' |
+  'realtimeHotkeyLabel' | 'realtimeHotkeyDesc' | 'bargeInLabel' | 'bargeInDesc' | 'realtimeSettleMsLabel' | 'realtimeSettleMsDesc' |
+  'realtimeTailMsLabel' | 'realtimeTailMsDesc' | 'realtimeEngineLabel' | 'realtimeEngineDesc' | 'realtimeEngineBrowser' | 'realtimeEngineSegmented' |
+  'realtimeEngineCloud' | 'realtimeProviderLabel' | 'realtimeProviderDesc' | 'realtimeTtsCloud' | 'realtimeTtsVoiceLabel' | 'realtimeTtsVoiceDesc' |
+  'vadRmsAutoLabel' | 'vadRmsAutoDesc' | 'vadFrameMsLabel' | 'vadFrameMsDesc' | 'vadRmsLabel' | 'vadRmsDesc' |
+  'vadSilenceMsLabel' | 'vadSilenceMsDesc' | 'vadPrerollMsLabel' | 'vadPrerollMsDesc' | 'vadMinSpeechMsLabel' | 'vadMinSpeechMsDesc' |
+  'vadMaxSegmentMsLabel' | 'vadMaxSegmentMsDesc' | 'vadMaxPendingLabel' | 'vadMaxPendingDesc' | 'realtimeMaxSessionLabel' | 'realtimeMaxSessionDesc' |
+  'realtimeFirstSentenceLabel' | 'realtimeFirstSentenceDesc' | 'realtimeWatchdogLabel' | 'realtimeWatchdogDesc' | 'chatTitle' | 'chatListeningTitle' |
+  'chatThinkingTitle' | 'chatSpeakingTitle' | 'chatWebSpeechFallback' | 'chatThinkingHint' | 'chatSpeakingHint' | 'chatInterrupt' |
+  'chatEndedLimit' | 'chatNoReply' | 'chatNoTts' | 'chatGap' | 'errSegmentedNeedsCloud' | 'errSegmentedUnsupported' |
+  'errSegmentedUnreachable' | 'dismiss' | 'loadFailed' | 'micTitle' | 'recordingTitle' | 'transcribingTitle' |
+  'optimizingTitle' | 'errNoMic' | 'errNoSound' | 'errNoSpeechSupport' | 'errWebSpeechNetwork' | 'errCloudNotConfigured' |
+  'noSpeechDetected' | 'fallbackToCloud' | 'errTranscribe' | 'errOptimize' | 'previewTitle' | 'previewOriginal' |
+  'previewOptimized' | 'previewConfirm' | 'previewCancel' | 'groupStats' | 'statsTitle' | 'statsCount' |
+  'statsChars' | 'statsLastAt' | 'statsEmpty'
 export type LocaleDict = Record<LocaleKey, string>
 
 /** 词典绑定后的翻译函数。 */
 export type LocaleT = (key: LocaleKey, vars?: Record<string, string | number>) => string
 
-/**
- * 悬停提示语言：跟随**操作系统**语言（navigator.language），与 DSH 界面语言解耦——
- * 界面设成中文但系统是英文时，按钮 tooltip 仍按系统显示英文（反之亦然）。
- */
+/** 悬停提示语言：跟随**操作系统**语言（navigator.language），与 DSH 界面语言解耦—— 界面设成中文但系统是英文时，按钮 tooltip 仍按系统显示英文（反之亦然）。 */
 export function systemLanguage(): 'zh' | 'en' {
   const lang = typeof navigator !== 'undefined' ? navigator.language : ''
   return lang.toLowerCase().startsWith('zh') ? 'zh' : 'en'
@@ -630,4 +455,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** dsh-asr-voice unified copy (flat string keys). */
     'asr-voice': string
   }
+}
+
+/** 系统语言词典（按钮 tooltip 等「随系统不随界面」的文案共用）。 */
+export function systemDict(): LocaleDict {
+  return systemLanguage() === 'zh' ? zh : en
 }

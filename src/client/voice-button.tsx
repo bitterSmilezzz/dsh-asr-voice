@@ -1,16 +1,12 @@
-/**
- * dsh-asr-voice — client 录音按钮（conversation.input.right 工具行）。
- *
+/** dsh-asr-voice — client 录音按钮（conversation.input.right 工具行）。
  * 流程：点击/快捷键 → 录音（浏览器 Web Speech 实时 / 云端 MediaRecorder）
- *   → 停止 → 转写文本 → 提示词优化（heuristic 即时 / llm 预览卡）
- *   → 填入草稿（inputActions.setDraft），可选自动发送（inputActions.submit）。
- *
+ * → 停止 → 转写文本 → 提示词优化（heuristic 即时 / llm 预览卡）
+ * → 填入草稿（inputActions.setDraft），可选自动发送（inputActions.submit）。
  * 动效（microanimations 原则：反馈/定向/愉悦，克制）：
- *   - 录音：多层呼吸光环（back.out 缓动、错开延迟、非机械）+ 实时频谱条
- *     （cloud 真实 RMS / browser 模拟能量，CSS 变量驱动）
- *   - 状态提示条：滑入 + 呼吸点（recording）/ 转圈（transcribing/optimizing）
- *   - 按钮：hover 微缩放、active 按压缩放
- *
+ * - 录音：多层呼吸光环（back.out 缓动、错开延迟、非机械）+ 实时频谱条
+ * （cloud 真实 RMS / browser 模拟能量，CSS 变量驱动）
+ * - 状态提示条：滑入 + 呼吸点（recording）/ 转圈（transcribing/optimizing）
+ * - 按钮：hover 微缩放、active 按压缩放
  * 独立契约：本组件只依赖官方 slot 标准 kit（inputActions / session / input），
  * 不依赖任何第三方插件；样式 data 标签与命名空间唯一。
  */
@@ -21,7 +17,7 @@ import { cloudConfigured, config, recordBehavior } from './config.ts'
 import { heuristicOptimize, llmOptimize } from './optimize.ts'
 import { createVoiceRecorder, isWebSpeechSupported, type VoiceRecorder } from './recorder.ts'
 import { fromTo } from './animate.ts'
-import { systemLanguage, zh as zhDict, en as enDict } from './locales.ts'
+import { systemDict } from './locales.ts'
 import type { LocaleT } from './locales.ts'
 
 /** 输入动作最小面（来自官方 standard kit 的 inputActions prop）。 */
@@ -80,11 +76,7 @@ export function Spinner(): react.ReactElement {
   return <span className="dshav-spinner" aria-hidden="true" />
 }
 
-/**
- * 频谱条（12 根柱，CSS 变量 --bar 错落）：memo 化——interim 文本每次变化
- * 重渲染按钮（麦克风按钮与对话按钮共用）时柱子的虚拟 DOM 不再重建（柱形是
- * 静态的，仅高度由 CSS 变量 --level 在帧循环驱动）。
- */
+/** 频谱条（12 根柱，CSS 变量 --bar 错落）：memo 化——interim 文本每次变化 重渲染按钮（麦克风按钮与对话按钮共用）时柱子的虚拟 DOM 不再重建（柱形是 静态的，仅高度由 CSS 变量 --level 在帧循环驱动）。 */
 export const SpectrumBars = react.memo((): react.ReactElement => (
   <react.Fragment>
     {Array.from({ length: SPECTRUM_BARS }, (_, i) => (
@@ -93,10 +85,7 @@ export const SpectrumBars = react.memo((): react.ReactElement => (
   </react.Fragment>
 ))
 
-/**
- * 录音按钮 + 状态提示条 + 预览卡。
- * @param props - slot 注入的 owner share + 标准 kit + 翻译函数。
- */
+/** 录音按钮 + 状态提示条 + 预览卡。 @param props - slot 注入的 owner share + 标准 kit + 翻译函数。 */
 export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const { inputActions, t } = props
   // 只有拿不到标准 kit 的 inputActions（无可用会话/惰性输入栏）才禁用。
@@ -304,10 +293,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     showError('transcribe', String(error instanceof Error ? error.message : error))
   }
 
-  /**
-   * 转写完成统一入口（onDone）：默认快速路径（preview=false）——ASR 文本返回后
-   * 立即把清洗版填入草稿，LLM 优化在后台跑；preview / autoSend 走等优化路径。
-   */
+/** 转写完成统一入口（onDone）：默认快速路径（preview=false）——ASR 文本返回后 立即把清洗版填入草稿，LLM 优化在后台跑；preview / autoSend 走等优化路径。 */
   const handleTranscribed = (text: string): void => {
     if (cancelledRef.current) return
     const myGen = generationRef.current
@@ -356,10 +342,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     finalize(heuristicOptimize(cleaned))
   }
 
-  /**
-   * 快速路径（preview=false 默认）：ASR 文本返回后立即把清洗版填入草稿，
-   * LLM 优化在后台跑，完成后仅在用户未编辑草稿时替换。
-   */
+/** 快速路径（preview=false 默认）：ASR 文本返回后立即把清洗版填入草稿， LLM 优化在后台跑，完成后仅在用户未编辑草稿时替换。 */
   const runBackgroundOptimize = async (raw: string): Promise<void> => {
     const myGen = generationRef.current
     try {
@@ -496,7 +479,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
 
   const busy = state !== 'idle'
   // 悬停提示按系统语言（与 DSH 界面语言解耦），其余文案仍随界面语言。
-  const sys = systemLanguage() === 'zh' ? zhDict : enDict
+  const sys = systemDict()
   const title = busy
     ? state === 'recording' ? sys.recordingTitle : state === 'transcribing' ? sys.transcribingTitle : sys.optimizingTitle
     : sys.micTitle

@@ -1,9 +1,6 @@
-/**
- * dsh-asr-voice — client 半区入口（单 fiber）。
- *
+/** dsh-asr-voice — client 半区入口（单 fiber）。
  * 组合：设置卡片（settings.plugin.item）、录音按钮（conversation.input.right）、
  * 快捷键（可选按住说话）。配置由 host settings 服务持有（config.ts）。
- *
  * 独立性契约：入口 id / locale namespace / CSS data 标签 / 路由全部唯一，
  * 只依赖官方 @deepseek-ai/* 服务，不 import 任何第三方插件。
  */

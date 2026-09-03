@@ -1,21 +1,17 @@
-/**
- * dsh-asr-voice — 自适应噪声底估计器（纯逻辑，模块顶层不碰 DOM，node --test 可直跑）。
- *
+/** dsh-asr-voice — 自适应噪声底估计器（纯逻辑，模块顶层不碰 DOM，node --test 可直跑）。
  * 能量 VAD 的阈值是「设备噪声底」的函数，而噪声底随设备/环境变化（内置麦 vs 耳机麦、
  * 空调/风扇/键盘）。本估计器在**静音期**持续观测 RMS，维护一个分位数底噪估计，
  * 供两类消费者使用：
- *
- *   1. `vad.rmsAuto`：segmented 引擎的 VAD 阈值 = max(用户基线, floor × margin)——
- *      噪声环境自动抬高阈值，安静环境自动放低，换设备免重校。
- *   2. barge-in 门控（D19）：播放 TTS 期间以「播放窗 p25」估回声底，人声须显著
- *      超出才打断，不把机器人自己的声音当成说话。
- *
+ * 1. `vad.rmsAuto`：segmented 引擎的 VAD 阈值 = max(用户基线, floor × margin)——
+ * 噪声环境自动抬高阈值，安静环境自动放低，换设备免重校。
+ * 2. barge-in 门控（D19）：播放 TTS 期间以「播放窗 p25」估回声底，人声须显著
+ * 超出才打断，不把机器人自己的声音当成说话。
  * 关键纪律：
- *   - 只吃**静音期**的帧（调用方用 VAD 自身的 inSpeech 判定喂过来）——语音帧会
- *     污染分位数，让底噪被抬高。
- *   - 新加入的帧是「观测值」，不是直接令 floor = 观测值：走环形缓冲分位数，
- *     呼吸/键盘这类瞬时尖峰拉不动中位数。
- *   - threshold 未学到（缓冲未满）时返回 0，调用方回退用户配置的基线阈值。
+ * - 只吃**静音期**的帧（调用方用 VAD 自身的 inSpeech 判定喂过来）——语音帧会
+ * 污染分位数，让底噪被抬高。
+ * - 新加入的帧是「观测值」，不是直接令 floor = 观测值：走环形缓冲分位数，
+ * 呼吸/键盘这类瞬时尖峰拉不动中位数。
+ * - threshold 未学到（缓冲未满）时返回 0，调用方回退用户配置的基线阈值。
  */
 export interface RmsFloorTuning {
   /** 静音期观测窗长（毫秒）：越短对噪声变化越灵敏，越短越容易在说话间隙学错。 */
@@ -47,6 +43,21 @@ export interface RmsFloorEstimator {
   reset(): void
 }
 
+
+/** 环形缓冲 → 排序副本 → 分位数取值（两处消费者共用；插入排序对小窗口最快）。 */
+function quantileOf(buf: Float64Array, sorted: Float64Array, len: number, quantile: number): number {
+  if (len === 0) return 0
+  for (let i = 0; i < len; i++) sorted[i] = buf[i] ?? 0
+  for (let i = 1; i < len; i++) {
+    const v = sorted[i] ?? 0
+    let j = i - 1
+    while (j >= 0 && (sorted[j] ?? 0) > v) { sorted[j + 1] = sorted[j] ?? 0; j -= 1 }
+    sorted[j + 1] = v
+  }
+  const idx = Math.min(len - 1, Math.max(0, Math.floor(len * quantile)))
+  return sorted[idx] ?? 0
+}
+
 /** 构造估计器。`windowMs`/`quantile`/`margin` 来自 tuning。 */
 export function createRmsFloorEstimator(tuning: RmsFloorTuning = DEFAULT_RMS_FLOOR_TUNING): RmsFloorEstimator {
   const cap = Math.max(4, Math.round(tuning.windowMs / tuning.frameMs))
@@ -62,19 +73,7 @@ export function createRmsFloorEstimator(tuning: RmsFloorTuning = DEFAULT_RMS_FLO
     if (len < cap) len += 1
   }
 
-  const floor = (): number => {
-    if (len === 0) return 0
-    for (let i = 0; i < len; i++) sorted[i] = buf[i] ?? 0
-    // 单次帧数非常小，用插入排序的最简实现即可；full 缓冲时顺序已高度接近有序。
-    for (let i = 1; i < len; i++) {
-      const v = sorted[i] ?? 0
-      let j = i - 1
-      while (j >= 0 && (sorted[j] ?? 0) > v) { sorted[j + 1] = sorted[j] ?? 0; j -= 1 }
-      sorted[j + 1] = v
-    }
-    const idx = Math.min(len - 1, Math.max(0, Math.floor(len * tuning.quantile)))
-    return sorted[idx] ?? 0
-  }
+  const floor = (): number => quantileOf(buf, sorted, len, tuning.quantile)
 
   return {
     observe,
@@ -90,10 +89,8 @@ export function createRmsFloorEstimator(tuning: RmsFloorTuning = DEFAULT_RMS_FLO
   }
 }
 
-/**
- * barge-in 回声底门控：播放 TTS 期间估计「回声 + 噪声」的背景水平，人声须超过
+/** barge-in 回声底门控：播放 TTS 期间估计「回声 + 噪声」的背景水平，人声须超过
  * `background × headroom` 并持续 `holdMs` 才判为一次打断（barge-in）。
- *
  * 背景水平 = max(播放窗分位数, 静音底噪估计)。播放窗自带宽限期：刚 arm 时不触发，
  * 先把「TTS 外放在麦克风里的水平」学到，否则机器人开口第一句就会被自己的回声打断。
  */
@@ -120,12 +117,11 @@ export interface BargeInTuning {
   holdMs: number
   /** 帧长（毫秒）。 */
   frameMs: number
-  /**
-   * 最低背景门槛（RMS）：低于它的帧是静音空隙（TTS 停顿/呼吸间），不参与背景
-   * 学习——否则「有声-静音交替」窗口里 p25 会被静音帧拉低，TTS 本身的音量
-   * 反而超出「背景」，把自己的回声当成打断。调用方传 VAD 的 `rms`（引擎侧
-   * 已含 rmsAuto 抬升，语义即「设备上有声音的水平」）。
-   */
+/** 最低背景门槛（RMS）：低于它的帧是静音空隙（TTS 停顿/呼吸间），不参与背景
+ * 学习——否则「有声-静音交替」窗口里 p25 会被静音帧拉低，TTS 本身的音量
+ * 反而超出「背景」，把自己的回声当成打断。调用方传 VAD 的 `rms`（引擎侧
+ * 已含 rmsAuto 抬升，语义即「设备上有声音的水平」）。
+ */
   baselineRms?: number
 }
 
@@ -165,16 +161,7 @@ export function createBargeInGate(tuning: BargeInTuning = DEFAULT_BARGE_IN_TUNIN
   }
 
   const updateBackground = (): void => {
-    if (len === 0) return
-    for (let i = 0; i < len; i++) sorted[i] = buf[i] ?? 0
-    for (let i = 1; i < len; i++) {
-      const v = sorted[i] ?? 0
-      let j = i - 1
-      while (j >= 0 && (sorted[j] ?? 0) > v) { sorted[j + 1] = sorted[j] ?? 0; j -= 1 }
-      sorted[j + 1] = v
-    }
-    const idx = Math.min(len - 1, Math.max(0, Math.floor(len * tuning.quantile)))
-    background = sorted[idx] ?? 0
+    background = quantileOf(buf, sorted, len, tuning.quantile)
   }
 
   const feed = (rms: number, _speechActive: boolean): boolean => {

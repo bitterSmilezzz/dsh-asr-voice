@@ -1,12 +1,9 @@
-/**
- * dsh-asr-voice — 云端实时引擎的浏览器传输层（真实 fetch/SSE 实现）。
- *
+/** dsh-asr-voice — 云端实时引擎的浏览器传输层（真实 fetch/SSE 实现）。
  * 对应 host 半区 `RealtimeHost` 的 4 条 exact 路由：
- *   POST  /api/asr-voice/realtime/session   → { ok, sid }
- *   POST  /api/asr-voice/realtime/audio     → 上行 int16 PCM（?sid=…）
- *   GET   /api/asr-voice/realtime/events    → SSE 下行（?sid=…）
- *   POST  /api/asr-voice/realtime/close     → 关会话（?sid=…）
- *
+ * POST  /api/asr-voice/realtime/session   → { ok, sid }
+ * POST  /api/asr-voice/realtime/audio     → 上行 int16 PCM（?sid=…）
+ * GET   /api/asr-voice/realtime/events    → SSE 下行（?sid=…）
+ * POST  /api/asr-voice/realtime/close     → 关会话（?sid=…）
  * 信任围栏由 host 侧 `isTrusted` 负责（本机回环同源天然通过），client 侧不
  * 携带任何密钥。SSE 用 fetch + ReadableStream 逐行解析 `data: …`（不用
  * EventSource：后者无法带 AbortController 精确关闭，且对错误恢复的控制更弱）。

@@ -1,6 +1,4 @@
-/**
- * dsh-asr-voice — host 半区：ASR 用量统计（计费相关，最小实现）。
- *
+/** dsh-asr-voice — host 半区：ASR 用量统计（计费相关，最小实现）。
  * 记录每次成功转写的次数、累计字符数与最近一次的时间/供应商，经
  * /api/asr-voice/stats 暴露给设置页展示。进程内内存（低优先级特性，
  * 不落盘——重启清零，仅作参考）。
@@ -22,9 +20,7 @@ export declare function createAsrStats(): {
     record(text: string, providerId: string): void;
     snapshot(): AsrStats;
 };
-/**
- * 注册 /api/asr-voice/stats 路由（GET）：返回用量快照。
- */
+/** 注册 /api/asr-voice/stats 路由（GET）：返回用量快照。 */
 export declare function registerStatsRoute(register: (def: {
     kind: 'exact';
     path: string;

@@ -1,12 +1,11 @@
-/**
- * dsh-asr-voice — client 提示词优化。
- *
+/** dsh-asr-voice — client 提示词优化。
  * 两种模式：
- *   - heuristic：本地启发式清洗（免费、离线、即时）——去语气词/口误、补标点、
- *     分段、拉丁语首字母大写。
- *   - llm：把文本 POST 到 host /api/asr-voice/optimize，由服务端用配置的
- *     OpenAI-compatible chat completions 重写（key 不进浏览器）。
+ * - heuristic：本地启发式清洗（免费、离线、即时）——去语气词/口误、补标点、
+ * 分段、拉丁语首字母大写。
+ * - llm：把文本 POST 到 host /api/asr-voice/optimize，由服务端用配置的
+ * OpenAI-compatible chat completions 重写（key 不进浏览器）。
  */
+import { postHostApi } from './recorder.ts'
 
 /** 常见中文语气词/口头禅（按词删除，保守集合）。 */
 const ZH_FILLERS = ['嗯嗯', '嗯', '呃呃', '呃', '啊那个', '那个那个', '那个', '这个这个', '这个', '就是说', '怎么说呢', '然后呢', '然后', '就是', '是吧', '对吧', '好不好', '明白了没']
@@ -92,9 +91,7 @@ function segment(text: string): string {
     .join('\n\n')
 }
 
-/**
- * 本地启发式优化：清洗语气词/口误 → 折叠空白 → 修正标点 → 分段 → 拉丁语句首大写。
- */
+/** 本地启发式优化：清洗语气词/口误 → 折叠空白 → 修正标点 → 分段 → 拉丁语句首大写。 */
 export function heuristicOptimize(raw: string): string {
   if (!raw || raw.trim() === '') return ''
   let text = normalizeSpaces(raw)
@@ -123,32 +120,9 @@ export async function llmOptimize(text: string, target?: OptimizeTarget, externa
     body.provider = target.provider
     body.model = target.model
   }
-  const controller = new AbortController()
-  const onExternalAbort = (): void => controller.abort()
-  if (externalSignal !== undefined) {
-    if (externalSignal.aborted) controller.abort()
-    else externalSignal.addEventListener('abort', onExternalAbort, { once: true })
-  }
-  const timer = setTimeout(() => controller.abort(), OPTIMIZE_TIMEOUT_MS)
-  try {
-    const res = await fetch('/api/asr-voice/optimize', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; text?: string; reason?: string }
-    if (!res.ok || data.ok !== true || typeof data.text !== 'string') {
-      throw new Error(data.reason || 'optimize failed')
-    }
-    return data.text
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('optimize timeout')
-    }
-    throw error
-  } finally {
-    clearTimeout(timer)
-    externalSignal?.removeEventListener('abort', onExternalAbort)
-  }
+  return postHostApi(
+    '/api/asr-voice/optimize',
+    { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    OPTIMIZE_TIMEOUT_MS, 'optimize', externalSignal,
+  )
 }

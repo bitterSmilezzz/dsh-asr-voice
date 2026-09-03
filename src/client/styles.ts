@@ -1,6 +1,4 @@
-/**
- * dsh-asr-voice — client 样式。
- *
+/** dsh-asr-voice — client 样式。
  * 全部用 DSH 主题 CSS 变量（--dsw-*），随明暗主题自适应；data 标签
  * `dsh-asr-voice` 唯一，避免与其它插件样式冲突（独立性契约）。
  * GSAP 驱动的波纹/过渡由 animate.ts 写内联 transform/opacity，本表只提供
@@ -30,12 +28,7 @@ export const CSS = `
 }
 
 /* ── 录音按钮（conversation.input.right） ─────────────────────────── */
-.dshav-mic-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
+.dshav-mic-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center;}
 /* 悬停气泡：不依赖浏览器原生 title（自动化/嵌入浏览器会禁用它），
    文案由组件按系统语言提供；hover/focus 都显示，键盘可达。 */
 .dshav-tooltip {
@@ -60,10 +53,7 @@ export const CSS = `
   transition: opacity .14s ease, visibility .14s ease;
 }
 .dshav-mic-wrap:hover .dshav-tooltip,
-.dshav-mic-wrap:focus-within .dshav-tooltip {
-  opacity: 1;
-  visibility: visible;
-}
+.dshav-mic-wrap:focus-within .dshav-tooltip { opacity: 1; visibility: visible;}
 @media (prefers-reduced-motion: reduce) {
   .dshav-tooltip { transition: none; }
 }
@@ -82,56 +72,24 @@ export const CSS = `
   padding: 0;
   transition: color .18s ease, background .18s ease, transform .14s var(--dshav-ease-bounce, cubic-bezier(.34,1.56,.64,1));
 }
-.dshav-mic-button:hover {
-  background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,.05));
-  color: var(--dshav-text);
-}
+.dshav-mic-button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,.05)); color: var(--dshav-text);}
 .dshav-mic-button:hover svg { transform: scale(1.1); }
 .dshav-mic-button:active { transform: scale(.9); }
-.dshav-mic-button svg {
-  width: 15px;
-  height: 15px;
-  display: block;
-  transition: transform .2s ease;
-}
-.dshav-mic-button[data-state='recording'] {
-  color: var(--dshav-danger);
-  background: color-mix(in srgb, var(--dshav-danger) 12%, transparent);
-}
-.dshav-mic-button[data-state='recording'] .dshav-rec-dot {
-  animation: dshav-blink 1.1s ease-in-out infinite;
-}
+.dshav-mic-button svg { width: 15px; height: 15px; display: block; transition: transform .2s ease;}
+.dshav-mic-button[data-state='recording'] { color: var(--dshav-danger); background: color-mix(in srgb, var(--dshav-danger) 12%, transparent);}
+.dshav-mic-button[data-state='recording'] .dshav-rec-dot { animation: dshav-blink 1.1s ease-in-out infinite;}
 .dshav-mic-button[data-state='transcribing'],
-.dshav-mic-button[data-state='optimizing'] {
-  color: var(--dshav-accent);
-}
-.dshav-mic-button:disabled {
-  opacity: .45;
-  cursor: default;
-}
+.dshav-mic-button[data-state='optimizing'] { color: var(--dshav-accent);}
+.dshav-mic-button:disabled { opacity: .45; cursor: default;}
 
 /* ── 语音对话按钮（复用上面的按钮壳，只有状态色不同） ─────────────── */
-.dshav-chat-button[data-state='listening'] {
-  color: var(--dshav-danger);
-  background: color-mix(in srgb, var(--dshav-danger) 12%, transparent);
-}
-.dshav-chat-button[data-state='listening'] .dshav-rec-dot {
-  animation: dshav-blink 1.1s ease-in-out infinite;
-}
-.dshav-chat-button[data-state='thinking'] {
-  color: var(--dshav-accent);
-}
-.dshav-chat-button[data-state='speaking'] {
-  color: var(--dshav-accent);
-  background: var(--dshav-accent-soft);
-}
+.dshav-chat-button[data-state='listening'] { color: var(--dshav-danger); background: color-mix(in srgb, var(--dshav-danger) 12%, transparent);}
+.dshav-chat-button[data-state='listening'] .dshav-rec-dot { animation: dshav-blink 1.1s ease-in-out infinite;}
+.dshav-chat-button[data-state='thinking'] { color: var(--dshav-accent);}
+.dshav-chat-button[data-state='speaking'] { color: var(--dshav-accent); background: var(--dshav-accent-soft);}
 /* 字幕行：这里上屏的文字就是主角，给它比状态提示更宽的可视区（截断在 JS 做）。 */
-.dshav-hotkey-hint[data-kind='caption'] {
-  max-width: min(520px, calc(100vw - 120px));
-}
-.dshav-hotkey-hint[data-kind='caption'][data-state='speaking'] .dshav-hint-text {
-  color: var(--dshav-accent);
-}
+.dshav-hotkey-hint[data-kind='caption'] { max-width: min(520px, calc(100vw - 120px));}
+.dshav-hotkey-hint[data-kind='caption'][data-state='speaking'] .dshav-hint-text { color: var(--dshav-accent);}
 
 /* 录音实心点（呼吸）。 */
 .dshav-rec-dot {
@@ -143,12 +101,7 @@ export const CSS = `
 }
 
 /* 录音波纹：多层呼吸光环，GSAP 驱动 scale/opacity（此处放降级静态环）。 */
-.dshav-wave {
-  position: absolute;
-  inset: 0;
-  border-radius: 9px;
-  pointer-events: none;
-}
+.dshav-wave { position: absolute; inset: 0; border-radius: 9px; pointer-events: none;}
 .dshav-wave-ring {
   position: absolute;
   inset: -2px;
@@ -235,12 +188,7 @@ export const CSS = `
   background: var(--dshav-danger);
   animation: dshav-blink 1.1s ease-in-out infinite;
 }
-.dshav-hint-text {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.dshav-hint-text { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
 
 /* 频谱条：CSS 变量 --level（0~1）驱动柱高；每柱 --bar 系数错落。 */
 .dshav-spectrum {
@@ -299,17 +247,8 @@ export const CSS = `
   color: var(--dshav-text);
 }
 /* 标题麦克风固定小尺寸（SVG 无 width/height 默认渲染 300px，必须显式约束） */
-.dshav-preview-title svg {
-  width: 15px;
-  height: 15px;
-  color: var(--dshav-accent);
-  display: block;
-}
-.dshav-preview-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+.dshav-preview-title svg { width: 15px; height: 15px; color: var(--dshav-accent); display: block;}
+.dshav-preview-body { display: flex; flex-direction: column; gap: 6px;}
 .dshav-preview-block {
   display: flex;
   flex-direction: column;
@@ -324,12 +263,7 @@ export const CSS = `
   background: color-mix(in srgb, var(--dshav-accent) 6%, var(--dshav-bg-layer));
   border-color: color-mix(in srgb, var(--dshav-accent) 22%, var(--dshav-border));
 }
-.dshav-preview-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--dshav-text-3);
-  letter-spacing: .03em;
-}
+.dshav-preview-label { font-size: 10.5px; font-weight: 600; color: var(--dshav-text-3); letter-spacing: .03em;}
 .dshav-preview-text {
   margin: 0;
   font-size: 13px;
@@ -344,12 +278,7 @@ export const CSS = `
 .dshav-preview-text[data-role='original'] { color: var(--dshav-text-2); }
 /* 优化后：主色加粗突出 */
 .dshav-preview-text[data-role='optimized'] { color: var(--dshav-text); font-weight: 500; }
-.dshav-preview-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
+.dshav-preview-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px;}
 .dshav-button {
   display: inline-flex;
   align-items: center;
@@ -379,21 +308,12 @@ export const CSS = `
   padding: 0 10px;
   border-radius: 14px;
 }
-.dshav-button-primary {
-  background: var(--dsw-alias-button-primary-fill);
-  color: var(--dsw-alias-label-primary-foreground);
-}
+.dshav-button-primary { background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground);}
 .dshav-button-primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }
-.dshav-button-outline {
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: transparent;
-}
+.dshav-button-outline { border: 1px solid var(--dsw-alias-border-l2); background: transparent;}
 .dshav-button-outline:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
 .dshav-button-ghost:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
-.dshav-button:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: 1px;
-}
+.dshav-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px;}
 
 /* ── 设置卡片（对齐官方 PluginCard：折叠 + hover/cardOpen/focus） ── */
 .dshav-card {
@@ -405,10 +325,7 @@ export const CSS = `
   transition: border-color .16s, background .16s;
 }
 .dshav-card:hover { border-color: var(--dsw-alias-label-dimmed); }
-.dshav-card.dshav-card-open {
-  background: var(--dsw-alias-bg-layer-2);
-  border-color: var(--dsw-alias-label-dimmed);
-}
+.dshav-card.dshav-card-open { background: var(--dsw-alias-bg-layer-2); border-color: var(--dsw-alias-label-dimmed);}
 .dshav-header {
   width: 100%;
   appearance: none;
@@ -424,10 +341,7 @@ export const CSS = `
   padding: 14px 16px;
   border-radius: 12px;
 }
-.dshav-header:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: -2px;
-}
+.dshav-header:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px;}
 .dshav-headtext {
   flex: 1;
   min-width: 0;
@@ -437,17 +351,9 @@ export const CSS = `
 }
 .dshav-name { font-size: 15px; font-weight: 600; line-height: 1.4; color: var(--dsw-alias-label-primary); }
 .dshav-desc { margin: 0; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
-.dshav-chevron {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-  transition: transform .16s;
-}
+.dshav-chevron { flex: none; color: var(--dsw-alias-label-tertiary); transition: transform .16s;}
 .dshav-chevron.dshav-open { transform: rotate(180deg); }
-.dshav-body {
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  margin: 0 16px;
-  padding-bottom: 8px;
-}
+.dshav-body { border-top: 1px solid var(--dsw-alias-border-l2); margin: 0 16px; padding-bottom: 8px;}
 .dshav-group { display: flex; flex-direction: column; }
 /* 分组之间用与字段一致的分割线（官方 border-l2）。 */
 .dshav-group + .dshav-group { border-top: 1px solid var(--dsw-alias-border-l2); }
@@ -459,12 +365,7 @@ export const CSS = `
   color: var(--dsw-alias-label-secondary);
 }
 /* 字段：垂直布局（label / control / hint），字段间 border-top —— 对齐官方 fields */
-.dshav-field-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 0;
-}
+.dshav-field-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 0;}
 .dshav-field-item + .dshav-field-item { border-top: 1px solid var(--dsw-alias-border-l2); }
 .dshav-field-head { display: flex; align-items: center; gap: 8px; }
 .dshav-field-label {
@@ -499,10 +400,7 @@ export const CSS = `
   cursor: pointer;
 }
 /* 条件禁用（如 barge-in 仅 segmented 引擎可用）：整行降透明度并去掉指针 */
-.dshav-field-disabled {
-  opacity: 0.55;
-  pointer-events: none;
-}
+.dshav-field-disabled { opacity: 0.55; pointer-events: none;}
 /* ── 原生控件：跟随 DSH 主题（--dsw-alias-*），与官方设置页一致 ── */
 .dshav-field select,
 .dshav-field input[type='text'],
@@ -519,10 +417,7 @@ export const CSS = `
   color: var(--dsw-alias-label-primary);
 }
 .dshav-field select:focus-visible,
-.dshav-field input:focus-visible {
-  outline: none;
-  border-color: var(--dsw-alias-brand-primary);
-}
+.dshav-field input:focus-visible { outline: none; border-color: var(--dsw-alias-brand-primary);}
 .dshav-field input::placeholder { color: var(--dsw-alias-label-dimmed); }
 .dshav-field input:disabled,
 .dshav-field select:disabled { opacity: .6; cursor: default; }
@@ -545,12 +440,7 @@ export const CSS = `
 .dshav-status[data-kind='ok'] { color: var(--dshav-accent); }
 
 /* ── 三步向导 ─────────────────────────────────────────────────────── */
-.dshav-step {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 0 16px;
-}
+.dshav-step { display: flex; flex-direction: column; gap: 8px; padding: 14px 0 16px;}
 .dshav-step-head { display: flex; align-items: center; gap: 8px; }
 .dshav-step-index {
   flex: none;
@@ -565,12 +455,7 @@ export const CSS = `
   font-size: 12px;
   line-height: 1;
 }
-.dshav-step-title {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
-  color: var(--dsw-alias-label-primary);
-}
+.dshav-step-title { font-size: 14px; font-weight: 600; line-height: 20px; color: var(--dsw-alias-label-primary);}
 /* chip 单选行：换行排布，选中态用主色描边 + 浅底（不靠颜色单独表意） */
 .dshav-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .dshav-chip {
@@ -594,10 +479,7 @@ export const CSS = `
   font-weight: 600;
 }
 .dshav-chip:disabled { opacity: .5; cursor: default; }
-.dshav-chip:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: 1px;
-}
+.dshav-chip:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px;}
 /* 密钥已就绪的一行（绿色 ✓ 文案，非输入态） */
 .dshav-ok-line {
   display: flex;
@@ -610,12 +492,7 @@ export const CSS = `
   color: var(--dshav-accent);
 }
 /* 保存条：状态文案在左，按钮在右，常驻避免用户以为没生效 */
-.dshav-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 0;
-}
+.dshav-actions { display: flex; align-items: center; gap: 8px; padding: 12px 0;}
 .dshav-actions > p { flex: 1; min-width: 0; }
 /* 高级折叠：整行可点，展开后列出全部既有字段 */
 .dshav-advanced-toggle {
@@ -634,11 +511,7 @@ export const CSS = `
   cursor: pointer;
 }
 .dshav-advanced-toggle:hover { color: var(--dsw-alias-label-primary); }
-.dshav-advanced-toggle:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: -2px;
-  border-radius: 6px;
-}
+.dshav-advanced-toggle:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; border-radius: 6px;}
 .dshav-provider-list { display: flex; flex-direction: column; gap: 8px; }
 .dshav-provider-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dshav-provider-row > label { flex: 1; min-width: 0; }

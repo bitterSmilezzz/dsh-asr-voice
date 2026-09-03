@@ -1,16 +1,12 @@
-/**
- * dsh-asr-voice — 实时转写引擎·云端通道（cloud）。
- *
+/** dsh-asr-voice — 实时转写引擎·云端通道（cloud）。
  * I4 交付：把 `capture.ts` 的 16k 采集帧上行到 host 实时通道（I3 的
  * `RealtimeHost`），下行经 SSE 收到 `RealtimeProviderEvent`，驱动字幕与回合。
  * 这第三档引擎与 browser（Web Speech）/ segmented（本地 VAD + 整段转写）的
  * 区别：**回合边界由服务端 VAD 给**（provider 发 speech-stopped/final），
  * 本地不再用文字静默判定——换来的是逐字延迟更低的流式体验，代价是必须有
  * 一条 host 实时通道（I3 已交付，I3 阶段用假 provider，I5 换真云端）。
- *
  * 传输层是注入的（`CloudTransport`）：单测直接喂假事件与假采集，不碰网络。
  * 真实的浏览器实现见 `realtime-cloud-transport.ts`。
- *
  * 回合语义：provider 发 `final` 即「这一句说完了」，直接 onTurn；`partial`
  * 驱动字幕；`error` 判死。采集帧在**静音守卫**（趋零不上行）之后量化成
  * int16 LE 字节逐帧上行。
@@ -85,10 +81,7 @@ function createUploadPump(upload: (pcm: Uint8Array) => Promise<void>): {
   }
 }
 
-/**
- * 云端实时引擎：采集帧 → int16 上行 → SSE 事件驱动字幕/回合。
- * @param deps - 采集 + 传输层（测试注入；浏览器用默认实现）。
- */
+/** 云端实时引擎：采集帧 → int16 上行 → SSE 事件驱动字幕/回合。 @param deps - 采集 + 传输层（测试注入；浏览器用默认实现）。 */
 export function createCloudRealtime(
   tuning: { frameMs: number },
   events: RealtimeEvents,

@@ -1,13 +1,10 @@
-/**
- * dsh-asr-voice — 轻量 GSAP 风格动画模块。
- *
+/** dsh-asr-voice — 轻量 GSAP 风格动画模块。
  * 设计约束：构建环境离线，无 gsap 包可装，故提供 GSAP 兼容子集的本地实现
- * （`to` / `fromTo` / `timeline` / `ticker`），API 与调用方式对齐 GSAP，
+ * （`to` / `fromTo`），API 与调用方式对齐 GSAP，
  * 组件里只经本模块驱动动效。将来若引入真 GSAP，只需替换本文件内部实现，
  * 组件调用点不改。
- *
  * 支持：CSS 属性（opacity/scale/x/y/rotate 等变换缩写）、duration/ease/delay、
- * repeat/yoyo、onUpdate/onComplete、timeline 顺序编排。基于 requestAnimationFrame。
+ * repeat/yoyo、onUpdate/onComplete。基于 requestAnimationFrame。
  */
 
 /** 缓动函数签名。 */
@@ -230,78 +227,4 @@ export function to(target: HTMLElement, vars: Record<string, unknown>): TweenHan
 /** GSAP 风格 fromTo。 */
 export function fromTo(target: HTMLElement, from: Record<string, unknown>, to: Record<string, unknown>): TweenHandle {
   return tween(target, to, from)
-}
-
-/** 时间轴：按序播放一组补间/回调。 */
-export interface TimelineHandle {
-  to(target: HTMLElement, vars: Record<string, unknown>): TimelineHandle
-  fromTo(target: HTMLElement, from: Record<string, unknown>, to: Record<string, unknown>): TimelineHandle
-  call(fn: () => void): TimelineHandle
-  play(): void
-  kill(): void
-}
-
-/** 构造时间轴（默认暂停，需手动 play）。 */
-export function timeline(): TimelineHandle {
-  type Segment =
-    | { kind: 'tween'; run: () => TweenHandle }
-    | { kind: 'call'; cb: () => void }
-  const segments: Segment[] = []
-  let index = 0
-  let killed = false
-  let current: TweenHandle | null = null
-
-  const runNext = (): void => {
-    if (killed) return
-    const seg = segments[index]
-    if (seg === undefined) return
-    index += 1
-    if (seg.kind === 'call') {
-      seg.cb()
-      runNext()
-      return
-    }
-    const handle = seg.run()
-    handle.onComplete(() => runNext())
-    current = handle
-  }
-
-  return {
-    to(target, vars) {
-      segments.push({ kind: 'tween', run: () => tween(target, vars) })
-      return this
-    },
-    fromTo(target, from, toVars) {
-      segments.push({ kind: 'tween', run: () => tween(target, toVars, from) })
-      return this
-    },
-    call(fn) {
-      segments.push({ kind: 'call', cb: fn })
-      return this
-    },
-    play() {
-      if (index === 0) runNext()
-    },
-    kill() {
-      killed = true
-      current?.kill()
-    },
-  }
-}
-
-/** rAF ticker（与 GSAP gsap.ticker 同形，供持续动画用）。 */
-export const ticker = {
-  add(fn: (time: number, deltaTime: number) => void): () => void {
-    let running = true
-    let last = performance.now()
-    const loop = (now: number): void => {
-      if (!running) return
-      const delta = now - last
-      last = now
-      fn(now / 1000, delta / 1000)
-      requestAnimationFrame(loop)
-    }
-    requestAnimationFrame(loop)
-    return () => { running = false }
-  },
 }

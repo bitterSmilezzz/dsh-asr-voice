@@ -1,11 +1,8 @@
-/**
- * dsh-asr-voice — 云端 ASR 预置表（host 与 client 共享，双半区各自编译）。
- *
+/** dsh-asr-voice — 云端 ASR 预置表（host 与 client 共享，双半区各自编译）。
  * 全部走 OpenAI-compatible `/audio/transcriptions` 端点，统一字段：
- *   baseUrl  +  apiKey  +  model
+ * baseUrl  +  apiKey  +  model
  * 预置只是「快捷填充」，用户可任意改 baseUrl / model（自定义端点天然兼容
  * 本地/私有部署的 OpenAI-compatible ASR 服务，如 local-ai）。
- *
  * 跨平台说明：云端 ASR 是纯 HTTP，macOS / Windows 行为一致。
  */
 /** 云端 ASR 调用通道：whisper 式 multipart /audio/transcriptions，或 chat-completions input_audio（MiMo / Qwen-ASR）。 */
@@ -29,8 +26,7 @@ export interface CloudPreset {
 export declare const CLOUD_PRESETS: readonly CloudPreset[];
 /** 按 id 取预置（找不到返回 undefined）。 */
 export declare function presetById(id: string): CloudPreset | undefined;
-/**
- * 实时转写 provider 预置（I5：真云端 provider 行）。
+/** 实时转写 provider 预置（I5：真云端 provider 行）。
  * 与 CLOUD_PRESETS 独立：实时走 WebSocket（wss://…/api-ws/v1/realtime），
  * 不是 OpenAI-compatible HTTP。凭据复用同名官方 LLM provider（keyPreset 指回
  * CLOUD_PRESETS 里的预置 id，`keyRefFor` 因此派生成 `<PRESET>_API_KEY`）。

@@ -1,21 +1,17 @@
-/**
- * dsh-asr-voice — I5：真云端实时 provider（阿里云百炼 Qwen-ASR-Realtime）。
- *
+/** dsh-asr-voice — I5：真云端实时 provider（阿里云百炼 Qwen-ASR-Realtime）。
  * 协议（对齐 OpenAI Realtime 兼容面，官方文档：
  * help.aliyun.com/zh/model-studio/qwen-asr-realtime-api）：
- *   WebSocket  URL = `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=<model>`
- *   认证          = 握手阶段 `Authorization: Bearer <api_key>`（失败 = HTTP 401/403）
- *   客户端事件     = session.update（pcm / 16000 / server_vad）→ input_audio_buffer.append
- *                   （base64 PCM）→ … → session.finish（推完必须先发，再关连接）
- *   服务端事件     = session.created / speech_started / speech_stopped /
- *                   conversation.item.input_audio_transcription.text（partial：
- *                   text=已确认前缀 + stash=草稿后缀，拼接即完整预览）/
- *                   …completed（final：transcript）/ …failed / error / session.finished
- *
+ * WebSocket  URL = `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=<model>`
+ * 认证          = 握手阶段 `Authorization: Bearer <api_key>`（失败 = HTTP 401/403）
+ * 客户端事件     = session.update（pcm / 16000 / server_vad）→ input_audio_buffer.append
+ * （base64 PCM）→ … → session.finish（推完必须先发，再关连接）
+ * 服务端事件     = session.created / speech_started / speech_stopped /
+ * conversation.item.input_audio_transcription.text（partial：
+ * text=已确认前缀 + stash=草稿后缀，拼接即完整预览）/
+ * …completed（final：transcript）/ …failed / error / session.finished
  * 接缝契约（src/realtime-provider.ts）：connect() → RealtimeProviderConnection，
  * send(pcm) 上行 int16 LE / onEvent 事件下行 / close() 幂等。I5 只替换 host 侧
  * `createProvider` 的工厂，RealtimeHost 的会话注册表与 4 条路由一行不改。
- *
  * 依赖：Node 全局 WebSocket（undici，Node 22+ 稳定；本仓 tsconfig host 用 Node 类型），
  * 握手带自定义头已由 test/ws-auth.test.mjs 给出真实 socket 上线证据。
  */

@@ -1,6 +1,4 @@
-/**
- * dsh-asr-voice — client 设置卡片（settings.plugin.item, key: 'asr-voice'）。
- *
+/** dsh-asr-voice — client 设置卡片（settings.plugin.item, key: 'asr-voice'）。
  * 三步向导（① 识别方式 → ② 服务商 → ③ 密钥与自检）+ 默认折叠的「高级」。
  * 卡片只编辑一份本地草稿，按「保存」才过线（写回后读回校验，不信 promise）；
  * API key 单独走 credentials 域，既不进草稿也不进浏览器 DOM。
@@ -16,6 +14,7 @@ import {
   type AsrVoiceConfig, type CloudProviderConfig, type ConfigSection, type KeyState,
 } from './config.ts'
 import type { LocaleKey, LocaleT } from './locales.ts'
+import { normalizeKey } from './hotkey.ts'
 
 /** 设置卡片 props（settings.plugin.item 注入 + 翻译函数）。 */
 export interface SettingsCardProps {
@@ -261,9 +260,8 @@ function keyCombo(e: react.KeyboardEvent): string {
   if (e.ctrlKey || e.metaKey) parts.push('Ctrl')
   if (e.altKey) parts.push('Alt')
   if (e.shiftKey) parts.push('Shift')
-  const key = normalizeKey(e.key)
-  if (key === '') return ''
-  parts.push(key)
+  if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta' || e.key === 'Escape') return ''
+  parts.push(normalizeKey(e.key))
   return parts.join('+')
 }
 
@@ -373,14 +371,6 @@ function UsageStats({ t }: { t: LocaleT }): react.ReactElement {
   )
 }
 
-/** 主键规范化（忽略纯修饰键，统一 Space / 字母大写）。 */
-function normalizeKey(key: string): string {
-  if (key === 'Control' || key === 'Alt' || key === 'Shift' || key === 'Meta' || key === 'Escape') return ''
-  if (key === ' ') return 'Space'
-  if (key.length === 1) return key.toUpperCase()
-  const map: Record<string, string> = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace' }
-  return map[key] ?? key
-}
 
 /** 段名 → 分组标题（保存失败时告诉用户到底是哪一段没落盘）。 */
 const SECTION_TITLE: Record<ConfigSection, LocaleKey> = {
@@ -455,11 +445,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
     setNotice({ kind: 'ok', text: t('keySavedHint', { ref }) })
   }
 
-  /**
-   * 测试连接 = 用该供应商列一次模型。
-   * 选它而不是录一段音：不用麦克风、不打扰人，且一次性验掉 key + baseUrl + 网络三件事，
-   * 返回的模型还能直接填进高级里的模型选择。
-   */
+/** 测试连接 = 用该供应商列一次模型。 选它而不是录一段音：不用麦克风、不打扰人，且一次性验掉 key + baseUrl + 网络三件事， 返回的模型还能直接填进高级里的模型选择。 */
   const testConnection = async (): Promise<void> => {
     setTesting(true)
     if (dirty && !(await commit())) { setTesting(false); return }

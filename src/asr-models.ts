@@ -1,6 +1,4 @@
-/**
- * dsh-asr-voice — host 半区：动态获取供应商 ASR 模型列表。
- *
+/** dsh-asr-voice — host 半区：动态获取供应商 ASR 模型列表。
  * GET /api/asr-voice/asr-models?providerId=X —— 用该供应商的 baseUrl+apiKey
  * 调用 OpenAI-compatible `GET {baseUrl}/models`，过滤出 ASR 相关模型
  * （模型名/ID 含 asr/audio/omni/whisper/sensevoice/voice 等），供设置页
@@ -10,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { keyRefFor } from './key-ref.ts';
 import type { KeyRefSource } from './key-ref.ts';
-import { isTrusted, sendJson } from './http.ts';
+import { guardRoute, sendJson } from './http.ts';
 import { resolveApiKey } from './transcribe.ts';
 
 /** 单个供应商配置面（来自 settings providers 列表）。 */
@@ -21,8 +19,7 @@ export interface CloudProviderLike extends KeyRefSource {
   mode: string
 }
 
-/**
- * 模型名/ID 判定为 ASR 相关的正则。
+/** 模型名/ID 判定为 ASR 相关的正则。
  * 只匹配真正的语音识别模型：词边界处的 asr/audio/omni/whisper/transcri，
  * 以及裸 sensevoice（SenseVoiceSmall 中段）。刻意排除 tts/voice（会误抓
  * tts-voiceclone/voicedesign 等语音合成模型）。
@@ -44,8 +41,7 @@ function pickAsrModels(raw: unknown): Array<{ id: string; name: string }> {
   return out
 }
 
-/**
- * 注册 /api/asr-voice/asr-models 路由（GET）。
+/** 注册 /api/asr-voice/asr-models 路由（GET）。
  * @param register - webserver 的 register 方法。
  * @param getProviders - 读取全部已配置供应商列表的 thunk。
  * @param ctx - host context（供 MiMo key 兜底走 credentials 服务）。
@@ -59,8 +55,8 @@ export function registerAsrModelsRoute(
     kind: 'exact',
     path: '/api/asr-voice/asr-models',
     handler: async (req: IncomingMessage, res: ServerResponse) => {
-      if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden' });
-      if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+      const denied = guardRoute(req, ['GET']);
+      if (denied !== null) return sendJson(res, denied.status, denied.payload);
       try {
         const url = new URL(req.url ?? '/', 'http://localhost');
         const providerId = url.searchParams.get('providerId') ?? '';

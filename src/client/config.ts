@@ -1,17 +1,13 @@
-/**
- * dsh-asr-voice — client 配置模型。
- *
+/** dsh-asr-voice — client 配置模型。
  * 配置权威源是 host settings 服务（namespace `asr-voice`），本模块持有运行时快照
  * `config`（录音链路同步读取）与设置页的编辑草稿。**API key 不在此处也不在
  * settings**：它落 DSH credentials 服务，本模块只提供按引用名读写的那几个函数。
- *
  * 两条铁律，都是踩过坑得来的：
- *   1. 宿主快照一律先脱冻再用。`SettingsScopeController.derive()` 把 host 值喂进
- *      immer `produce`，产出的快照连同数组元素是**深度冻结**的（所有构建，不只是
- *      dev）。按引用存进可变快照，之后每一次行内编辑都是严格模式下的冻结写——
- *      抛 TypeError 并被 React onChange 吞掉，界面表现成「下拉点了没反应」。
- *   2. 草稿只 rebuild，不 mutate。所有 `with*` 函数返回新对象，行对象永不原地改。
- *
+ * 1. 宿主快照一律先脱冻再用。`SettingsScopeController.derive()` 把 host 值喂进
+ * immer `produce`，产出的快照连同数组元素是**深度冻结**的（所有构建，不只是
+ * dev）。按引用存进可变快照，之后每一次行内编辑都是严格模式下的冻结写——
+ * 抛 TypeError 并被 React onChange 吞掉，界面表现成「下拉点了没反应」。
+ * 2. 草稿只 rebuild，不 mutate。所有 `with*` 函数返回新对象，行对象永不原地改。
  * settingsScope / credentials 都是「可选服务」：按当前 DSH client 规范由 apply 里的
  * scoped inject 传入（拿不到就只更新本地快照），而不是列成插件级硬依赖。
  */
@@ -167,8 +163,7 @@ export interface CredentialStateLike {
 
 type RpcOutcome<T> = { ok: true; value: T } | { ok: false; error?: { message?: string } }
 
-/**
- * DSH credentials 域的 client 面（alpha.3 官方 `ctx.remote.credentials` 的最小形状）。
+/** DSH credentials 域的 client 面（alpha.3 官方 `ctx.remote.credentials` 的最小形状）。
  * 与旧 `connection.api.credentials`（describe({refs}) 返回 {result}）形状不同：
  * 这里 describe 直接收 refs 数组、返回 { ok, value }。host 半区解析键与展示
  * 语义不变，只是 client 通道换了载体（见 src/client/index.ts 的注入）。
@@ -247,12 +242,7 @@ function normalizeProvider(row: unknown): CloudProviderConfig {
   }
 }
 
-/**
- * 把 host 快照并回本地 config（只覆盖认识的键）。
- *
- * 每个进来的对象/数组都先落成自己的拷贝：宿主值是深度冻结的，漏一个引用进来就是
- * 一处「改了不生效」的静默故障（见文件头铁律 1）。
- */
+/** 把 host 快照并回本地 config（只覆盖认识的键）。 每个进来的对象/数组都先落成自己的拷贝：宿主值是深度冻结的，漏一个引用进来就是 一处「改了不生效」的静默故障（见文件头铁律 1）。 */
 export function mergeHostValue(value: Partial<AsrVoiceConfig>): void {
   if (!isPlainObject(value)) return
   // 铁律：本地默认的形状永不被外来快照顶掉。realtimeTuning() 这类消费方直接解构
@@ -296,16 +286,8 @@ function jsonEqual(a: unknown, b: unknown): boolean {
   return false
 }
 
-/**
- * 绑定 host settings scope 并订阅：首次读取当前值，之后 scope 变化回写本地快照并广播。
- * @param binder - settingsScope 服务的 binder（SettingsScopeBinder）。
- * @returns 订阅 disposer（随 fiber 清理）。
- */
-/**
- * 绑定 host settings scope 并订阅：首次读取当前值，之后 scope 变化回写本地快照并广播。
- * @param binder - settingsScope 服务（官方 SettingsScopeBinder，随 fiber 注入）。
- * @returns 订阅 disposer（随 fiber 清理）。
- */
+/** 绑定 host settings scope 并订阅：首次读取当前值，之后 scope 变化回写本地快照并广播。 @param binder - settingsScope 服务的 binder（SettingsScopeBinder）。 @returns 订阅 disposer（随 fiber 清理）。 */
+/** 绑定 host settings scope 并订阅：首次读取当前值，之后 scope 变化回写本地快照并广播。 @param binder - settingsScope 服务（官方 SettingsScopeBinder，随 fiber 注入）。 @returns 订阅 disposer（随 fiber 清理）。 */
 export function bindConfigScope(binder: SettingsScopeBinder): () => void {
   const scope = binder.bind<AsrVoiceConfig>({ namespace: ASR_VOICE_NS })
   voiceScope = scope
@@ -321,11 +303,7 @@ export function bindConfigScope(binder: SettingsScopeBinder): () => void {
   return unsub
 }
 
-/**
- * 绑定 credentials 域（可选：拿不到时设置页只显示「本机未启用凭据服务」）。
- * 统一收新形状（alpha.3 `remote.credentials`）；旧形状由调用方经
- * {@link adaptLegacyCredentials} 显式转换后再绑。
- */
+/** 绑定 credentials 域（可选：拿不到时设置页只显示「本机未启用凭据服务」）。 统一收新形状（alpha.3 `remote.credentials`）；旧形状由调用方经 {@link adaptLegacyCredentials} 显式转换后再绑。 */
 export function bindCredentialsApi(api: CredentialsApiLike | undefined): void {
   credentialsApi = api
 }
@@ -454,10 +432,7 @@ export function pickPreset(draft: AsrVoiceConfig, id: string, presetId: string):
   return patchProvider(draft, id, { preset: presetId, baseUrl: preset.baseUrl, model: preset.defaultModel, mode: preset.mode })
 }
 
-/**
- * 新增一行供应商，返回新草稿与新行 id。
- * presetId 命中内置预置时按预置填充；未命中（'custom'）建一行空白自定义端点。
- */
+/** 新增一行供应商，返回新草稿与新行 id。 presetId 命中内置预置时按预置填充；未命中（'custom'）建一行空白自定义端点。 */
 export function addProvider(draft: AsrVoiceConfig, presetId = DEFAULT_PRESET_ID, name = ''): { draft: AsrVoiceConfig; id: string } {
   const preset = presetById(presetId)
   const id = newProviderId()
@@ -472,17 +447,18 @@ export function removeProvider(draft: AsrVoiceConfig, id: string): AsrVoiceConfi
   return withProviders(draft, draft.asr.cloud.providers.filter((p) => p.id !== id))
 }
 
-/** 草稿里当前生效的供应商（无行时按旧单配置合成一行 legacy，id 固定以便凭据引用稳定）。 */
-export function draftActiveProvider(draft: AsrVoiceConfig): CloudProviderConfig {
-  const cloud = draft.asr.cloud
+/** 取「active 指向的供应商，缺省取第一行，全空合成 legacy 行」（草稿与运行时快照共用）。 */
+function pickActiveProvider(cloud: AsrVoiceConfig['asr']['cloud']): CloudProviderConfig {
   return cloud.providers.find((p) => p.id === cloud.active) ?? cloud.providers[0]
     ?? { id: 'legacy', preset: cloud.preset, name: '', baseUrl: cloud.baseUrl, model: cloud.model, mode: cloud.mode }
 }
 
-/**
- * 把 v0.1 旧单配置在**草稿里**落成一行 providers（id 固定 'legacy'，凭据引用名随之
- * 稳定）。宿主端本来就优先读 providers，所以这一步只影响编辑中的这份副本，不自动写回。
- */
+/** 草稿里当前生效的供应商（无行时按旧单配置合成一行 legacy，id 固定以便凭据引用稳定）。 */
+export function draftActiveProvider(draft: AsrVoiceConfig): CloudProviderConfig {
+  return pickActiveProvider(draft.asr.cloud)
+}
+
+/** 把 v0.1 旧单配置在**草稿里**落成一行 providers（id 固定 'legacy'，凭据引用名随之 稳定）。宿主端本来就优先读 providers，所以这一步只影响编辑中的这份副本，不自动写回。 */
 export function withLegacyMaterialized(draft: AsrVoiceConfig): AsrVoiceConfig {
   const cloud = draft.asr.cloud
   if (cloud.providers.length > 0 || cloud.baseUrl.trim() === '') return draft
@@ -497,9 +473,7 @@ export function keyRefOf(p: KeyRefSource): string {
   return keyRefFor(p)
 }
 
-/**
- * 保存草稿：只把真正改过的顶层段写回 host，然后**读回校验**。
- *
+/** 保存草稿：只把真正改过的顶层段写回 host，然后**读回校验**。
  * `SettingsScope.set` 会把失败吞掉并重载宿主状态（promise 成功不代表落盘），所以
  * 判定标准只能是写完之后宿主那边到底剩什么——这也正是官方设置卡的做法。
  * @returns 未落盘的段名，undefined 表示全部落定。
@@ -538,9 +512,7 @@ export interface KeyState {
   failure: string | null
 }
 
-/**
- * 解析一次凭据 describe 的「失败原因」（{ok,value} 形状直接返回 error）。
- */
+/** 解析一次凭据 describe 的「失败原因」（{ok,value} 形状直接返回 error）。 */
 function describeFailure(response: CredentialsDescribeOutcome): string | null {
   if (response.ok) return null
   return response.error?.message ?? 'credential request rejected'
@@ -569,8 +541,7 @@ export async function readKeyState(p: KeyRefSource): Promise<KeyState> {
   }
 }
 
-/**
- * 写入或清除某供应商的密钥。
+/** 写入或清除某供应商的密钥。
  * @param p - 供应商身份（决定引用名）。
  * @param value - 新密钥；空串表示清除。
  * @returns 原始失败原因，undefined 表示成功。
@@ -598,9 +569,7 @@ export function cloudConfigured(): boolean {
 
 /** 运行时快照里当前生效的云端供应商（录音链路只关心「配好了没」）。 */
 function activeCloudProvider(): CloudProviderConfig {
-  const cloud = config.asr.cloud
-  return cloud.providers.find((p) => p.id === cloud.active) ?? cloud.providers[0]
-    ?? { id: 'legacy', preset: cloud.preset, name: '', baseUrl: cloud.baseUrl, model: cloud.model, mode: cloud.mode }
+  return pickActiveProvider(config.asr.cloud)
 }
 
 /** 生成供应商唯一 id。 */

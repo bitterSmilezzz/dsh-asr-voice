@@ -1,6 +1,4 @@
-/**
- * dsh-asr-voice — client 快捷键解析与匹配（跨平台）。
- */
+/** dsh-asr-voice — client 快捷键解析与匹配（跨平台）。 */
 
 /** 解析后的组合键规格。 */
 export interface HotkeySpec {
@@ -29,23 +27,13 @@ export function parseHotkey(spec: string): HotkeySpec | null {
 }
 
 /** 主键规范化（与设置卡片录制器一致）。 */
-function normalizeKey(key: string): string {
+/** 主键规范化（设置卡片录制器共用）：空格→Space、单字符大写、方向键/特殊键统一短名。 */
+export function normalizeKey(key: string): string {
   if (key === ' ') return 'Space'
   if (key.length === 1) return key.toUpperCase()
   const map: Record<string, string> = {
     ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
     Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace', Escape: 'Escape', Spacebar: 'Space',
-  }
-  return map[key] ?? key
-}
-
-/** 事件主键规范化。 */
-function eventKey(key: string): string {
-  if (key === ' ') return 'Space'
-  if (key.length === 1) return key.toUpperCase()
-  const map: Record<string, string> = {
-    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-    Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace', Escape: 'Escape', ' ': 'Space',
   }
   return map[key] ?? key
 }
@@ -61,5 +49,5 @@ export function matchHotkey(e: KeyboardEvent, spec: HotkeySpec): boolean {
   // 录制器把 Cmd 记作 Ctrl（keyCombo 中 ctrlKey||metaKey → 'Ctrl'），
   // 所以 spec.ctrl=true 时须同时接受 Ctrl 和 Cmd，与注释「Ctrl 兼容 Cmd」一致。
   const metaOk = spec.ctrl ? true : e.metaKey === spec.meta
-  return ctrlOk && altOk && shiftOk && metaOk && eventKey(e.key) === spec.key
+  return ctrlOk && altOk && shiftOk && metaOk && normalizeKey(e.key) === spec.key
 }

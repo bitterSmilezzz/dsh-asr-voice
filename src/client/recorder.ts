@@ -1,12 +1,9 @@
-/**
- * dsh-asr-voice — client 录音引擎。
- *
+/** dsh-asr-voice — client 录音引擎。
  * 两种引擎，统一 `VoiceRecorder` 接口：
- *   - browser：Web Speech API（webkitSpeechRecognition），实时转写、浏览器本地、
- *     免 key；Chrome/Edge 双平台支持。
- *   - cloud：getUserMedia + MediaRecorder 采集音频，停止后把原始字节 POST 到
- *     host /api/asr-voice/transcribe，由服务端转发云端 ASR（key 不进浏览器）。
- *
+ * - browser：Web Speech API（webkitSpeechRecognition），实时转写、浏览器本地、
+ * 免 key；Chrome/Edge 双平台支持。
+ * - cloud：getUserMedia + MediaRecorder 采集音频，停止后把原始字节 POST 到
+ * host /api/asr-voice/transcribe，由服务端转发云端 ASR（key 不进浏览器）。
  * 两者都带：最长录音上限、interim 文本回调、状态回调；cloud 引擎可选静音自动停止
  * （默认关 = 手动关麦，点停止整段去 ASR，见 behavior.silenceStop）。
  */
@@ -83,10 +80,7 @@ export interface VoiceRecorder {
   onState: ((state: RecordState) => void) | null
   /** 实时音量回调（0~1 RMS；cloud 为真实音量，browser 为模拟能量）。 */
   onLevel: ((rms: number) => void) | null
-  /**
-   * 转写完成回调：无论 stop 由谁触发（手动点击 / 静音自动停止 / 超时自动停止），
-   * 结果文本统一经此送达 UI；被 abort（打断）则不触发。
-   */
+/** 转写完成回调：无论 stop 由谁触发（手动点击 / 静音自动停止 / 超时自动停止）， 结果文本统一经此送达 UI；被 abort（打断）则不触发。 */
   onDone: ((text: string) => void) | null
   /** 转写失败回调（网络/上游/静音守卫等；被 abort 不触发）。 */
   onFail: ((error: unknown) => void) | null
@@ -98,10 +92,7 @@ function resolveLang(language: string): string | undefined {
   return language
 }
 
-/**
- * 装饰性电平：Web Speech 引擎不暴露音频流，用平滑随机波形近似语音起伏驱动频谱条。
- * 只用于视觉反馈，绝不参与任何静音/回合判定。返回幂等的停止函数。
- */
+/** 装饰性电平：Web Speech 引擎不暴露音频流，用平滑随机波形近似语音起伏驱动频谱条。 只用于视觉反馈，绝不参与任何静音/回合判定。返回幂等的停止函数。 */
 export function startLevelSimulation(emit: (level: number) => void): () => void {
   let raf = 0
   let level = 0.05
@@ -341,12 +332,11 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
     return ''
   }
 
-  /**
-   * 实时音量电平（驱动频谱条）。始终启用（能直观看出麦克风是否采到声）；
-   * 仅当 behavior.silenceStop 开启时附带静音自动停止逻辑。
-   * 注意：静音判定不依赖此处（Web Audio 双消费/挂起会误读），改由 onstop 里
-   * 基于「转换后 WAV 的真实峰值」判定，此处只做实时反馈。
-   */
+/** 实时音量电平（驱动频谱条）。始终启用（能直观看出麦克风是否采到声）；
+ * 仅当 behavior.silenceStop 开启时附带静音自动停止逻辑。
+ * 注意：静音判定不依赖此处（Web Audio 双消费/挂起会误读），改由 onstop 里
+ * 基于「转换后 WAV 的真实峰值」判定，此处只做实时反馈。
+ */
   const startLevelMeter = (): void => {
     try {
       const audioCtx = getMeterCtx()
@@ -561,8 +551,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
   return recorder
 }
 
-/**
- * 把浏览器录音 blob（webm/m4a/ogg…）解码重编码成 16kHz 单声道 16-bit PCM WAV。
+/** 把浏览器录音 blob（webm/m4a/ogg…）解码重编码成 16kHz 单声道 16-bit PCM WAV。
  * MiMo-V2.5-ASR 只接受 wav/mp3（实测 webm/m4a 报 Param Incorrect）；whisper 式
  * 通道也兼容 wav，故统一走 WAV。纯浏览器 Web Audio API，无外部依赖。
  * 返回转换结果 + 归一化前的原始峰值（供静音守卫做 ground-truth 判定）。
@@ -607,32 +596,31 @@ async function blobToWav16k(blob: Blob): Promise<{ wav: Blob; peak: number }> {
   }
 }
 
-/** 上传音频到 host 转写代理（带超时，防上游卡死钉住 UI）。实时按句引擎共用这一条通道。 */
-export async function transcribeViaHost(blob: Blob, language: string, externalSignal?: AbortSignal): Promise<string> {
-  const lang = resolveLang(language)
-  const query = lang ? `?language=${encodeURIComponent(lang)}` : ''
+/** 宿主 API POST 骨架（transcribe/optimize 共用）：外部信号桥接 + 超时 + {ok,text,reason} 解析 + AbortError→timeout 转换。 */
+export async function postHostApi(
+  path: string,
+  init: { headers: Record<string, string>; body: BodyInit },
+  timeoutMs: number,
+  label: string,
+  externalSignal?: AbortSignal,
+): Promise<string> {
   const controller = new AbortController()
   const onExternalAbort = (): void => controller.abort()
   if (externalSignal !== undefined) {
     if (externalSignal.aborted) controller.abort()
     else externalSignal.addEventListener('abort', onExternalAbort, { once: true })
   }
-  const timer = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const res = await fetch(`/api/asr-voice/transcribe${query}`, {
-      method: 'POST',
-      headers: { 'content-type': blob.type || 'audio/webm' },
-      body: blob,
-      signal: controller.signal,
-    })
+    const res = await fetch(path, { method: 'POST', ...init, signal: controller.signal })
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; text?: string; reason?: string }
     if (!res.ok || data.ok !== true || typeof data.text !== 'string') {
-      throw new Error(data.reason || 'transcribe failed')
+      throw new Error(data.reason || `${label} failed`)
     }
     return data.text
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('transcribe timeout')
+      throw new Error(`${label} timeout`)
     }
     throw error
   } finally {
@@ -641,8 +629,18 @@ export async function transcribeViaHost(blob: Blob, language: string, externalSi
   }
 }
 
-/**
- * 创建统一录音控制器。
+/** 上传音频到 host 转写代理（带超时，防上游卡死钉住 UI）。实时按句引擎共用这一条通道。 */
+export async function transcribeViaHost(blob: Blob, language: string, externalSignal?: AbortSignal): Promise<string> {
+  const lang = resolveLang(language)
+  const query = lang ? `?language=${encodeURIComponent(lang)}` : ''
+  return postHostApi(
+    `/api/asr-voice/transcribe${query}`,
+    { headers: { 'content-type': blob.type || 'audio/webm' }, body: blob },
+    TRANSCRIBE_TIMEOUT_MS, 'transcribe', externalSignal,
+  )
+}
+
+/** 创建统一录音控制器。
  * @param engine - browser | cloud。
  * @param language - auto / zh-CN / en-US 等。
  * @param onError - 错误回调（错误码字符串）。

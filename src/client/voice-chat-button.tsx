@@ -1,16 +1,12 @@
-/**
- * dsh-asr-voice — 语音对话按钮（conversation.input.right，与麦克风并列）。
- *
+/** dsh-asr-voice — 语音对话按钮（conversation.input.right，与麦克风并列）。
  * 闭环：开始 → 边说边上字幕 → 停顿即把这句 setDraft+submit 发起 agent 回合
- *   → 读 session.partial 的流式回复，分句交给 SpeakSink 朗读
- *   → 念完自动把麦克风还回来，进入下一句。
- *
+ * → 读 session.partial 的流式回复，分句交给 SpeakSink 朗读
+ * → 念完自动把麦克风还回来，进入下一句。
  * 三条不可让的规矩：
- *   1. **半双工**：一切实弹/播报期间引擎都是 pause() 的。浏览器 AEC 能不能吃掉
- *      我们自己的 TTS 尚未实测，不赌；实测通过前不做语音插话。
- *   2. **一次一个在途回合**：turnRef 非空就是闩，任何路径都不允许第二个提交插进去。
- *   3. **麦克风不无人值守**：realtime.maxSessionMs 到点自动结束并交还设备。
- *
+ * 1. **半双工**：一切实弹/播报期间引擎都是 pause() 的。浏览器 AEC 能不能吃掉
+ * 我们自己的 TTS 尚未实测，不赌；实测通过前不做语音插话。
+ * 2. **一次一个在途回合**：turnRef 非空就是闩，任何路径都不允许第二个提交插进去。
+ * 3. **麦克风不无人值守**：realtime.maxSessionMs 到点自动结束并交还设备。
  * 实时路径不做提示词优化：对话要的是即时，不是清洗过的转写。
  */
 import * as react from 'react'
@@ -22,7 +18,7 @@ import { isPcmCaptureSupported } from './capture.ts'
 import { createSentencePump, createSpeechSynthesisSink, createCloudTtsSink, isSpeechSynthesisSupported, isCloudTtsSupported, type SpeakSink } from './speech-out.ts'
 import { isWebSpeechSupported } from './recorder.ts'
 import { RecDot, SpectrumBars, Spinner } from './voice-button.tsx'
-import { systemLanguage, zh as zhDict, en as enDict } from './locales.ts'
+import { systemDict } from './locales.ts'
 import type { LocaleT } from './locales.ts'
 
 /** 输入动作最小面（官方 standard kit 的 inputActions）。 */
@@ -87,10 +83,7 @@ function replyTextOf(blocks: readonly ReplyBlock[] | undefined): string {
   return blocks.reduce((acc, b) => (b.kind === 'text' ? acc + (b.text ?? '') : acc), '')
 }
 
-/**
- * 「语音对话」按钮。
- * @param props - slot 注入的 owner share + 标准 kit + 翻译函数。
- */
+/** 「语音对话」按钮。 @param props - slot 注入的 owner share + 标准 kit + 翻译函数。 */
 export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement {
   const { inputActions, t } = props
   const disabled = !inputActions
@@ -352,7 +345,7 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
 
   const busy = phase !== 'idle'
   // 悬停提示按系统语言（与 DSH 界面语言解耦），其余文案仍随界面语言。
-  const sys = systemLanguage() === 'zh' ? zhDict : enDict
+  const sys = systemDict()
   const title = phase === 'idle' ? sys.chatTitle
     : phase === 'listening' ? sys.chatListeningTitle
       : phase === 'thinking' ? sys.chatThinkingTitle

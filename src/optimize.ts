@@ -1,18 +1,15 @@
-/**
- * dsh-asr-voice — host 半区：LLM 提示词优化。
- *
+/** dsh-asr-voice — host 半区：LLM 提示词优化。
  * 提示词优化只使用 **DSH 已配置好的模型**（ctx.llm 通道）：
- *   - 请求可指定 { provider, model }（必须是 DSH 模型列表里已配置的）
- *   - 未指定 → 用当前所选 LLM（ctx.agentDefaultModel.currentSelection()）
+ * - 请求可指定 { provider, model }（必须是 DSH 模型列表里已配置的）
+ * - 未指定 → 用当前所选 LLM（ctx.agentDefaultModel.currentSelection()）
  * 要自定义模型，须先到 DSH 原生模型列表添加（本插件不做独立 baseUrl/apiKey）。
- *
  * /api/asr-voice/models 枚举 DSH 已配置模型（供设置页选择器）。
  * API key 由 DSH provider 管理，全程在服务端；跨平台。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
-import { isTrusted, readJsonBody, sendJson } from './http.ts';
+import { guardRoute, readJsonBody, sendJson } from './http.ts';
 
 /** 最小当前模型选择面（由 DSH 的 agentDefaultModel 服务提供，peer 不 import）。 */
 interface AgentDefaultModelLike {
@@ -66,10 +63,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-/**
- * 枚举 DSH 已配置模型（ctx.llm.listProviders + listModels）。
- * 枚举失败/不可用/超时的 provider 给空模型列表（不阻断整体）。
- */
+/** 枚举 DSH 已配置模型（ctx.llm.listProviders + listModels）。 枚举失败/不可用/超时的 provider 给空模型列表（不阻断整体）。 */
 export async function enumerateModels(ctx: Context): Promise<DshProviderEntry[]> {
   const providers = ctx.llm.listProviders();
   const results = await Promise.all(providers.map(async (p) => {
@@ -126,11 +120,7 @@ async function optimizeWithLlm(ctx: Context, text: string, target?: OptimizeTarg
   return output.trim();
 }
 
-/**
- * 注册 /api/asr-voice/optimize 路由。
- * 请求体：{ text, provider?, model? }——provider/model 须为 DSH 已配置模型；
- * 缺省用当前所选 LLM。
- */
+/** 注册 /api/asr-voice/optimize 路由。 请求体：{ text, provider?, model? }——provider/model 须为 DSH 已配置模型； 缺省用当前所选 LLM。 */
 export function registerOptimizeRoute(
   register: (def: { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void,
   ctx: Context,
@@ -139,8 +129,8 @@ export function registerOptimizeRoute(
     kind: 'exact',
     path: '/api/asr-voice/optimize',
     handler: async (req: IncomingMessage, res: ServerResponse) => {
-      if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
-      if (req.method !== 'POST') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+      const denied = guardRoute(req);
+      if (denied !== null) return sendJson(res, denied.status, denied.payload);
       try {
         const body = (await readJsonBody(req)) as { text?: unknown; provider?: unknown; model?: unknown };
         if (typeof body.text !== 'string' || body.text.trim() === '') {
@@ -159,9 +149,7 @@ export function registerOptimizeRoute(
   });
 }
 
-/**
- * 注册 /api/asr-voice/models 路由：枚举 DSH 已配置模型（设置页选择器用）。
- */
+/** 注册 /api/asr-voice/models 路由：枚举 DSH 已配置模型（设置页选择器用）。 */
 export function registerModelsRoute(
   register: (def: { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void,
   ctx: Context,
@@ -170,8 +158,8 @@ export function registerModelsRoute(
     kind: 'exact',
     path: '/api/asr-voice/models',
     handler: async (req: IncomingMessage, res: ServerResponse) => {
-      if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
-      if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+      const denied = guardRoute(req, ['GET']);
+      if (denied !== null) return sendJson(res, denied.status, denied.payload);
       try {
         const providers = await enumerateModels(ctx);
         return sendJson(res, 200, { ok: true, providers });

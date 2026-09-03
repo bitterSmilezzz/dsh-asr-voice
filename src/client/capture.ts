@@ -1,10 +1,7 @@
-/**
- * dsh-asr-voice — 麦克风 → 16 kHz 单声道 PCM 帧（AudioWorklet，port 回调驱动）。
- *
+/** dsh-asr-voice — 麦克风 → 16 kHz 单声道 PCM 帧（AudioWorklet，port 回调驱动）。
  * 实时链路的采集底座，本地 VAD 引擎与后续 host 上行通道（I3/I4）共用它。分帧必须由
  * worklet port 回调驱动，**不能用 `setInterval` 排片**：后台标签页定时器被节流到 1/s
  * 会直接饿死上行。
- *
  * 与整段模式相反，这里必须显式请求回声消除：播报期间我们自己的 TTS 会被同一支麦克风
  * 收回来，`{ echoCancellation: true }` 是唯一能白拿的抵消手段（`recorder.ts:59-62` 那组
  * 「故意不设」是另一条路径的教训——显式 `false` 在部分 macOS 设备上会得到纯静音）。
@@ -14,11 +11,7 @@ import { PCM_SAMPLE_RATE, peakAbs, resampleLinear } from './pcm.ts'
 /** 采集失败码（由 UI 映射成文案）。 */
 export type CaptureFailure = 'no-mic' | 'no-audio-context' | 'no-worklet' | 'silent-device'
 
-/**
- * 设备链路失效判据：探测期内峰值连噪声底都没到，说明轨道根本没在产出数据
- * （协商失败时浏览器给的是数字零，而不是环境噪声）。阈值刻意远低于
- * `SILENCE_PEAK_FLOOR`：那是「用户没说话」的量级，这里是「没有声音」。
- */
+/** 设备链路失效判据：探测期内峰值连噪声底都没到，说明轨道根本没在产出数据 （协商失败时浏览器给的是数字零，而不是环境噪声）。阈值刻意远低于 `SILENCE_PEAK_FLOOR`：那是「用户没说话」的量级，这里是「没有声音」。 */
 const DEAD_DEVICE_PEAK = 0.0005
 
 /** 判死前的观察窗口（毫秒）：安静房间里前几秒没有峰值是常态，别急着报错。 */
@@ -27,10 +20,7 @@ const DEAD_DEVICE_PROBE_MS = 4_000
 /** worklet 处理器名。 */
 const WORKLET_NAME = 'dshav-pcm-slicer'
 
-/**
- * worklet 源码按行拼接：直接写一大段 JS 字面量会撞上本仓已知的输出静默截断坑。
- * 改动这里必须回读 `lib/client.js` 确认落盘。
- */
+/** worklet 源码按行拼接：直接写一大段 JS 字面量会撞上本仓已知的输出静默截断坑。 改动这里必须回读 `lib/client.js` 确认落盘。 */
 const WORKLET_LINES = [
   'class DshavPcmSlicer extends AudioWorkletProcessor {',
   '  constructor(options) {',
@@ -62,10 +52,7 @@ const WORKLET_LINES = [
 export interface PcmCapture {
   /** 停轨 + 断图 + 撤销模块 URL（幂等）。 */
   stop(): void
-  /**
-   * 半双工门控：关轨道而不是丢帧——轨道 enabled=false 让设备真正停止产出，
-   * 播报期间既省电平表也少一份回声输入。
-   */
+/** 半双工门控：关轨道而不是丢帧——轨道 enabled=false 让设备真正停止产出， 播报期间既省电平表也少一份回声输入。 */
   setMuted(muted: boolean): void
 }
 
@@ -116,9 +103,7 @@ function micConstraints(): MediaStreamConstraints {
 
 const NOOP_CAPTURE: PcmCapture = { stop: () => {}, setMuted: () => {} }
 
-/**
- * 打开麦克风并按 `frameMs` 产出 16k 帧。
- *
+/** 打开麦克风并按 `frameMs` 产出 16k 帧。
  * 不 reject：所有失败都以 `onFail(code)` 送达并返回一个空操作会话，调用方只有一条
  * 错误出口。前若干语句是同步的——Safari 只在用户激活上下文里允许建立音频会话，
  * 所以调用方必须在点击回调里同步调它。

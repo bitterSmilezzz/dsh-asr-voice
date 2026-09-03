@@ -1,15 +1,12 @@
-/**
- * dsh-asr-voice — host 半区（组合器）。
- *
+/** dsh-asr-voice — host 半区（组合器）。
  * 职责：
- *   - 注册插件配置 namespace `asr-voice`（设置页「语音输入」卡片的权威源）
- *   - /api/asr-voice/transcribe —— 云端 ASR 代理（浏览器上传音频，host 转发；支持多供应商）
- *   - /api/asr-voice/optimize    —— LLM 提示词优化代理
- *   - /api/asr-voice/models      —— 枚举 DSH 已配置模型（优化模型选择器）
- *   - /api/asr-voice/asr-models  —— 动态获取某供应商的 ASR 模型（设置页「获取模型」）
- *   - /api/asr-voice/stats       —— ASR 用量统计（计费相关，低优先级）
- *   - 启动时一次性迁移：settings 里的遗留明文 key → DSH credentials，随后抹掉明文
- *
+ * - 注册插件配置 namespace `asr-voice`（设置页「语音输入」卡片的权威源）
+ * - /api/asr-voice/transcribe —— 云端 ASR 代理（浏览器上传音频，host 转发；支持多供应商）
+ * - /api/asr-voice/optimize    —— LLM 提示词优化代理
+ * - /api/asr-voice/models      —— 枚举 DSH 已配置模型（优化模型选择器）
+ * - /api/asr-voice/asr-models  —— 动态获取某供应商的 ASR 模型（设置页「获取模型」）
+ * - /api/asr-voice/stats       —— ASR 用量统计（计费相关，低优先级）
+ * - 启动时一次性迁移：settings 里的遗留明文 key → DSH credentials，随后抹掉明文
  * LLM 优化默认走 DSH 当前所选 LLM（ctx.agentDefaultModel + ctx.llm），无需
  * 插件单独配 key。云端 ASR 支持多供应商（asr.cloud.providers + active），但
  * settings 里只有 baseUrl / model / mode 等无密钥元数据：API key 存 DSH

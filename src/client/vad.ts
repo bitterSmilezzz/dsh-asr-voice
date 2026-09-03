@@ -1,10 +1,7 @@
-/**
- * dsh-asr-voice — 本地能量 VAD（纯函数，模块顶层不碰 DOM，可被 node --test 直接跑源码）。
- *
+/** dsh-asr-voice — 本地能量 VAD（纯函数，模块顶层不碰 DOM，可被 node --test 直接跑源码）。
  * 近实时引擎用它把连续麦克风切成一句一句，每句走已有的整段转写通道：不需要新协议，
  * 也不需要任何云商 key。判据只有 RMS，因此阈值是**设备噪声底**的函数——调高会切掉
  * 轻声句尾，调低会把呼吸和键盘当成话；两者都是可预期的失效，不是 bug。
- *
  * 段边界规则：有声窗开启一段并带上 `prerollMs` 的段前缓冲（否则第一个音节必被切掉），
  * 连续静音 `silenceMs` 关闭一段，实际语音时长不足 `minSpeechMs` 的段直接丢弃（杂音不
  * 该花一次上游配额），说到 `maxSegmentMs` 还没停则强制轮换——它同时是单次上传体大小
@@ -55,10 +52,7 @@ export interface EnergyVad {
   readonly inSpeech: boolean
 }
 
-/**
- * 分析窗长（毫秒）。固定不开放：窗长是判定的时间分辨率而不是偏好，放到设置里
- * 就允许出现 `silenceMs < frameMs` 这类自相矛盾的组合。
- */
+/** 分析窗长（毫秒）。固定不开放：窗长是判定的时间分辨率而不是偏好，放到设置里 就允许出现 `silenceMs < frameMs` 这类自相矛盾的组合。 */
 const WINDOW_MS = 20
 
 /** 把若干窗拼成一段连续采样。 */
@@ -74,11 +68,7 @@ function concatWindows(windows: Float32Array[]): Float32Array {
   return out
 }
 
-/**
- * 构造一个能量 VAD。`sampleRate` 必须是投喂帧的采样率（本项目为 PCM_SAMPLE_RATE）。
- * `floor` 可选：`tuning.rmsAuto` 时 VAD 每窗把 RMS 与语音期判定反馈给它，并用
- * `floor.threshold`（未学到时为 0）抬高/放低实际判据。
- */
+/** 构造一个能量 VAD。`sampleRate` 必须是投喂帧的采样率（本项目为 PCM_SAMPLE_RATE）。 `floor` 可选：`tuning.rmsAuto` 时 VAD 每窗把 RMS 与语音期判定反馈给它，并用 `floor.threshold`（未学到时为 0）抬高/放低实际判据。 */
 export function createEnergyVad(sampleRate: number, tuning: VadTuning, events: VadEvents, floor?: RmsFloorSource | null): EnergyVad {
   const windowSamples = Math.max(1, Math.round((sampleRate * WINDOW_MS) / 1000))
   const prerollWindows = Math.max(0, Math.round(tuning.prerollMs / WINDOW_MS))

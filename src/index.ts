@@ -1,15 +1,12 @@
-/**
- * dsh-asr-voice — host 半区（组合器）。
- *
+/** dsh-asr-voice — host 半区（组合器）。
  * 职责：
- *   - 注册插件配置 namespace `asr-voice`（设置页「语音输入」卡片的权威源）
- *   - /api/asr-voice/transcribe —— 云端 ASR 代理（浏览器上传音频，host 转发；支持多供应商）
- *   - /api/asr-voice/optimize    —— LLM 提示词优化代理
- *   - /api/asr-voice/models      —— 枚举 DSH 已配置模型（优化模型选择器）
- *   - /api/asr-voice/asr-models  —— 动态获取某供应商的 ASR 模型（设置页「获取模型」）
- *   - /api/asr-voice/stats       —— ASR 用量统计（计费相关，低优先级）
- *   - 启动时一次性迁移：settings 里的遗留明文 key → DSH credentials，随后抹掉明文
- *
+ * - 注册插件配置 namespace `asr-voice`（设置页「语音输入」卡片的权威源）
+ * - /api/asr-voice/transcribe —— 云端 ASR 代理（浏览器上传音频，host 转发；支持多供应商）
+ * - /api/asr-voice/optimize    —— LLM 提示词优化代理
+ * - /api/asr-voice/models      —— 枚举 DSH 已配置模型（优化模型选择器）
+ * - /api/asr-voice/asr-models  —— 动态获取某供应商的 ASR 模型（设置页「获取模型」）
+ * - /api/asr-voice/stats       —— ASR 用量统计（计费相关，低优先级）
+ * - 启动时一次性迁移：settings 里的遗留明文 key → DSH credentials，随后抹掉明文
  * LLM 优化默认走 DSH 当前所选 LLM（ctx.agentDefaultModel + ctx.llm），无需
  * 插件单独配 key。云端 ASR 支持多供应商（asr.cloud.providers + active），但
  * settings 里只有 baseUrl / model / mode 等无密钥元数据：API key 存 DSH
@@ -107,9 +104,7 @@ interface CredentialsLike {
   set(ref: unknown, value: string): Promise<void>
 }
 
-/**
- * 一次性迁移：把 settings 里遗留的明文 API key 搬进 DSH credentials，全部搬成功后抹掉明文。
- *
+/** 一次性迁移：把 settings 里遗留的明文 API key 搬进 DSH credentials，全部搬成功后抹掉明文。
  * 任一条搬不动（凭据服务缺席、该引用被只读来源拒绝）就整批原样留着——抹掉一把无处可寻的
  * key 比留一份本机明文更糟。{@link resolveApiKey} 始终先读 settings，所以未迁移状态下功能
  * 不降级；迁移成功后 settings 里的 key 恒为空，密钥只剩 credentials 一个来源。
@@ -149,13 +144,12 @@ async function migrateLegacyKeys(
   log.info(`moved ${pending.length} API key(s) from plugin settings into DSH credentials`)
 }
 
-/**
- * 实时 provider 工厂（I5）：按 `realtime.provider` 设置分派。
- *  '' / 'builtin' → 内置假 provider（I3/I4 开发态，不花配额）；
- *  预置 id（如 'dashscope-realtime'）→ 真云端 provider，凭据复用 DSH credentials
- *  （keyPreset 指回 CLOUD_PRESETS 预置，`keyRefFor` 派生成 `<PRESET>_API_KEY`，
- *  配过同名 LLM 的用户天然命中同一把 key）。无 key 时 connect 抛错，让会话路由
- *  502 带原因，客户端可见「provider-unreachable」而不是静默降级。
+/** 实时 provider 工厂（I5）：按 `realtime.provider` 设置分派。
+ * '' / 'builtin' → 内置假 provider（I3/I4 开发态，不花配额）；
+ * 预置 id（如 'dashscope-realtime'）→ 真云端 provider，凭据复用 DSH credentials
+ * （keyPreset 指回 CLOUD_PRESETS 预置，`keyRefFor` 派生成 `<PRESET>_API_KEY`，
+ * 配过同名 LLM 的用户天然命中同一把 key）。无 key 时 connect 抛错，让会话路由
+ * 502 带原因，客户端可见「provider-unreachable」而不是静默降级。
  */
 function createRealtimeProvider(
   ctx: AsrVoiceHostContext,

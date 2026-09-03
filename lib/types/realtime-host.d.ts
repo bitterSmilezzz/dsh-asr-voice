@@ -48,10 +48,7 @@ export declare class RealtimeHost {
     createSession(): Promise<{
         sid: string;
     }>;
-    /**
-     * 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂，
-     * 真正空闲满 idleMs 才拆会话防泄漏。
-     */
+    /** 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂， 真正空闲满 idleMs 才拆会话防泄漏。 */
     private armIdle;
     /** 刷新空闲计时（每次上行/下行活动调用）。 */
     private refreshIdle;
@@ -63,10 +60,7 @@ export declare class RealtimeHost {
     closeSession(sid: string): void;
     /** 会话是否存活（供测试/诊断）。 */
     hasSession(sid: string): boolean;
-    /**
-     * 注册 4 条 exact 路由（全部过 isTrusted）。
-     * @returns 全部路由的 disposer（由 ctx.effect 挂载/回收）。
-     */
+    /** 注册 4 条 exact 路由（全部过 isTrusted）。 @returns 全部路由的 disposer（由 ctx.effect 挂载/回收）。 */
     registerRoutes(register: RealtimeRouteRegister): () => void;
 }
 //# sourceMappingURL=realtime-host.d.ts.map

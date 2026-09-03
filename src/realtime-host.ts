@@ -1,28 +1,23 @@
-/**
- * dsh-asr-voice — host 半区：实时转写会话注册表 + SSE 下行（I3 交付）。
- *
+/** dsh-asr-voice — host 半区：实时转写会话注册表 + SSE 下行（I3 交付）。
  * 纯管道：浏览器 PCM 上行（POST audio）→ RealtimeProvider 接缝 → SSE 下行
  * （GET events）。`sid` 由 **host 铸造**（crypto.randomUUID），客户端只拿到
  * 不透明 token，无法伪造会话；4 条 exact 路由全部过 `isTrusted` 信任围栏。
- *
  * 会话生命周期：
- *   - POST   /api/asr-voice/realtime/session   → { ok, sid }（建会话）
- *   - POST   /api/asr-voice/realtime/audio     → { ok }（PCM 上行，?sid=…）
- *   - GET    /api/asr-voice/realtime/events    → SSE 下行（?sid=…）
- *   - POST   /api/asr-voice/realtime/close     → { ok }（关会话，?sid=…）
- *
+ * - POST   /api/asr-voice/realtime/session   → { ok, sid }（建会话）
+ * - POST   /api/asr-voice/realtime/audio     → { ok }（PCM 上行，?sid=…）
+ * - GET    /api/asr-voice/realtime/events    → SSE 下行（?sid=…）
+ * - POST   /api/asr-voice/realtime/close     → { ok }（关会话，?sid=…）
  * 4 条路由路径互不相同：webserver 的 register 对重复 (kind, path) 直接抛错，
  * 同一路径挂两个 method 会撞——所以关闭走独立的 /close 路径而不是 /session 的 DELETE。
  * SSE 背压：Node `res.write()` 返回 false 表示内核缓冲已满（下行慢于上行）。
  * 这里不无限缓冲——partial（可丢的中间结果）coalesce 成最新一条，final /
  * speech-stopped（不可丢的回合边界）**必须**最终送达。drain 后按序冲刷。
- *
  * 每会话一条 SSE（浏览器是单一消费者）；SSE 断开 / 会话超时都会拆掉整个会话，
  * 防止麦克风数据在 host 侧无人认领地堆积。
  */
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { isTrusted, readRawBody, sendJson } from './http.ts';
+import { guardRoute, readRawBody, sendJson } from './http.ts';
 import type { RealtimeProviderConnection, RealtimeProviderEvent } from './realtime-provider.ts';
 
 /** 单次 PCM 上行体上限（16k int16 ≈ 每 100ms 3200B；40ms 帧 1280B）。 */
@@ -175,10 +170,7 @@ export class RealtimeHost {
     return { sid }
   }
 
-  /**
-   * 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂，
-   * 真正空闲满 idleMs 才拆会话防泄漏。
-   */
+/** 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂， 真正空闲满 idleMs 才拆会话防泄漏。 */
   private armIdle(sid: string): void {
     const s = this.sessions.get(sid)
     if (s === undefined) return
@@ -245,18 +237,15 @@ export class RealtimeHost {
     return this.sessions.has(sid)
   }
 
-  /**
-   * 注册 4 条 exact 路由（全部过 isTrusted）。
-   * @returns 全部路由的 disposer（由 ctx.effect 挂载/回收）。
-   */
+/** 注册 4 条 exact 路由（全部过 isTrusted）。 @returns 全部路由的 disposer（由 ctx.effect 挂载/回收）。 */
   registerRoutes(register: RealtimeRouteRegister): () => void {
     const disposers = [
       register({
         kind: 'exact',
         path: '/api/asr-voice/realtime/session',
         handler: async (req: IncomingMessage, res: ServerResponse) => {
-          if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
-          if (req.method !== 'POST') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+          const denied = guardRoute(req);
+          if (denied !== null) return sendJson(res, denied.status, denied.payload);
           try {
             const { sid } = await this.createSession();
             return sendJson(res, 200, { ok: true, sid });
@@ -269,8 +258,8 @@ export class RealtimeHost {
         kind: 'exact',
         path: '/api/asr-voice/realtime/audio',
         handler: async (req: IncomingMessage, res: ServerResponse) => {
-          if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
-          if (req.method !== 'POST') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+          const denied = guardRoute(req);
+          if (denied !== null) return sendJson(res, denied.status, denied.payload);
           const sid = sidOf(req);
           if (sid === '') return sendJson(res, 400, { ok: false, reason: 'missing sid' });
           try {
@@ -287,8 +276,8 @@ export class RealtimeHost {
         kind: 'exact',
         path: '/api/asr-voice/realtime/events',
         handler: async (req: IncomingMessage, res: ServerResponse) => {
-          if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
-          if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+          const denied = guardRoute(req, ['GET']);
+          if (denied !== null) return sendJson(res, denied.status, denied.payload);
           const sid = sidOf(req);
           if (sid === '') return sendJson(res, 400, { ok: false, reason: 'missing sid' });
           if (!this.hasSession(sid)) return sendJson(res, 404, { ok: false, reason: 'no such session' });
@@ -310,8 +299,8 @@ export class RealtimeHost {
         kind: 'exact',
         path: '/api/asr-voice/realtime/close',
         handler: async (req: IncomingMessage, res: ServerResponse) => {
-          if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden: host/origin not trusted' });
-          if (req.method !== 'POST') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+          const denied = guardRoute(req);
+          if (denied !== null) return sendJson(res, denied.status, denied.payload);
           const sid = sidOf(req);
           if (sid === '') return sendJson(res, 400, { ok: false, reason: 'missing sid' });
           this.closeSession(sid);

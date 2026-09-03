@@ -1,15 +1,11 @@
-/**
- * dsh-asr-voice — host 半区：实时转写 provider 接缝 + 假 provider（I3 交付）。
- *
+/** dsh-asr-voice — host 半区：实时转写 provider 接缝 + 假 provider（I3 交付）。
  * `RealtimeProvider` 是 host 与上游实时 ASR 之间的最小契约：浏览器 PCM 上行经
  * `RealtimeHost`（realtime-host.ts）转发到这里，provider 回吐流式事件
  * （speech-started / partial / final / speech-stopped / error），再由 host 经
  * SSE 下行推给浏览器。
- *
  * 为什么要有接缝：I3 阶段没有真云端可连（真 provider 是 I5 的 qwen3-asr-flash-realtime，
  * 走 OpenAI-compatible Realtime API over WebSocket）。接缝让 host 通道先于真实上游
  * 建成并单测，I5 只新增一个 `RealtimeProvider` 实现，接缝与 host 通道一行不改。
- *
  * 假 provider 用能量 VAD 把进来的 PCM 切成「句」：句内周期吐 partial、句尾吐 final +
  * speech-stopped——行为形状对齐真流式通道（先 partial 后 final，服务端 VAD 断句），
  * 因此 I4 用它能端到端验证字幕与播放。纯 Node 标准库，macOS / Windows 双平台。
@@ -21,10 +17,7 @@ const SAMPLE_RATE = 16_000
 /** 分析窗长（毫秒）：VAD 的时间分辨率，不开放。 */
 const WINDOW_MS = 20
 
-/**
- * 上游实时 ASR 事件（host → 浏览器 SSE 行）。形状对齐 qwen3-asr-flash-realtime：
- * 服务端 VAD 断句（speech_started / speech_stopped），流式转写（先 partial 后 final）。
- */
+/** 上游实时 ASR 事件（host → 浏览器 SSE 行）。形状对齐 qwen3-asr-flash-realtime： 服务端 VAD 断句（speech_started / speech_stopped），流式转写（先 partial 后 final）。 */
 export type RealtimeProviderEvent =
   /** 一句话的中间结果：字幕更新用（可丢、可合并，背压时 coalesce）。 */
   | { type: 'partial'; text: string }
@@ -52,9 +45,7 @@ export interface RealtimeProvider {
   connect(): Promise<RealtimeProviderConnection>
 }
 
-/**
- * 假 provider 的 VAD 调参（仅测试/开发用，不进 settings：真 provider 的断句在服务端）。
- */
+/** 假 provider 的 VAD 调参（仅测试/开发用，不进 settings：真 provider 的断句在服务端）。 */
 export interface FakeRealtimeTuning {
   /** RMS 判有声阈值（0~1，按 int16 全幅 32768 归一）。 */
   rms: number
@@ -148,16 +139,19 @@ class FakeRealtimeConnection implements RealtimeProviderConnection {
     }
     // 静音闭合一段，或说到段上限强制轮换：都算「这一句说完了」。
     if (this.silenceRun >= this.silenceWindows || this.speechWindows >= this.maxSegmentWindows) {
-      this.speaking = false
-      if (this.speechWindows >= this.minSpeechWindows) {
-        // 段长达标才交 final（杂音/咳嗽不足 minSpeechMs 不该占一次回合）。
-        this.segNo += 1
-        this.emit({ type: 'speech-stopped' })
-        this.emit({ type: 'final', text: `模拟转写·第${this.segNo}段` })
-      } else {
-        // 太短的段：VAD 边界照常（speech-stopped），但没有转写内容。
-        this.emit({ type: 'speech-stopped' })
-      }
+      this.closeSegment()
+    }
+  }
+
+  /** 收口当前段：段长达标交 final（杂音/咳嗽不占回合），太短只发 VAD 边界。 */
+  private closeSegment(): void {
+    this.speaking = false
+    if (this.speechWindows >= this.minSpeechWindows) {
+      this.segNo += 1
+      this.emit({ type: 'speech-stopped' })
+      this.emit({ type: 'final', text: `模拟转写·第${this.segNo}段` })
+    } else {
+      this.emit({ type: 'speech-stopped' })
     }
   }
 
@@ -182,16 +176,7 @@ class FakeRealtimeConnection implements RealtimeProviderConnection {
     if (this.closed) return
     // 收尾：正在说的一段也交掉，别让最后一句凭空消失（对齐真实通道的 session.finish）。
     // 必须在置 closed=true 之前 emit——emit() 会拒绝已关闭连接上的事件。
-    if (this.speaking) {
-      this.speaking = false
-      if (this.speechWindows >= this.minSpeechWindows) {
-        this.segNo += 1
-        this.emit({ type: 'speech-stopped' })
-        this.emit({ type: 'final', text: `模拟转写·第${this.segNo}段` })
-      } else {
-        this.emit({ type: 'speech-stopped' })
-      }
-    }
+    if (this.speaking) this.closeSegment()
     this.closed = true
   }
 }

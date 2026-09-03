@@ -1,12 +1,10 @@
-/**
- * dsh-asr-voice — host 半区：ASR 用量统计（计费相关，最小实现）。
- *
+/** dsh-asr-voice — host 半区：ASR 用量统计（计费相关，最小实现）。
  * 记录每次成功转写的次数、累计字符数与最近一次的时间/供应商，经
  * /api/asr-voice/stats 暴露给设置页展示。进程内内存（低优先级特性，
  * 不落盘——重启清零，仅作参考）。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { isTrusted, sendJson } from './http.ts';
+import { guardRoute, sendJson } from './http.ts';
 
 /** 用量快照。 */
 export interface AsrStats {
@@ -36,9 +34,7 @@ export function createAsrStats(): { record(text: string, providerId: string): vo
   }
 }
 
-/**
- * 注册 /api/asr-voice/stats 路由（GET）：返回用量快照。
- */
+/** 注册 /api/asr-voice/stats 路由（GET）：返回用量快照。 */
 export function registerStatsRoute(
   register: (def: { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void,
   getStats: () => AsrStats,
@@ -47,8 +43,8 @@ export function registerStatsRoute(
     kind: 'exact',
     path: '/api/asr-voice/stats',
     handler: async (req: IncomingMessage, res: ServerResponse) => {
-      if (!isTrusted(req)) return sendJson(res, 403, { ok: false, reason: 'forbidden' });
-      if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method not allowed' });
+      const denied = guardRoute(req, ['GET']);
+      if (denied !== null) return sendJson(res, denied.status, denied.payload);
       return sendJson(res, 200, { ok: true, stats: getStats() });
     },
   });

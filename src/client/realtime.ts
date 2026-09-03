@@ -1,16 +1,12 @@
-/**
- * dsh-asr-voice — 实时转写引擎（连续会话 + 本地回合判定）。
- *
+/** dsh-asr-voice — 实时转写引擎（连续会话 + 本地回合判定）。
  * 与 recorder.ts 的整段模式是两种活法：整段模式靠一次点击划回合，实时模式没有那次
  * 点击，边界只能自己判。浏览器 Web Speech 不给任何 VAD/回合信号，所以判定落在
  * **文字稳定性**上：连续 settleMs 没有新结果、再多等 tailMs 接住最后一个词的迟到
  * final，就把这句交出去。云端实时引擎会直接给 speech_stopped，届时这条
  * 本地兜底只在它沉默时起作用。
- *
  * 两个引擎共用同一份回合判定（`createSettleGate`）：换引擎不该换回合边界。
- *   - browser：连续 Web Speech 会话，零 key、零 host 改动。
- *   - segmented：本地能量 VAD 切段 + 已有整段转写通道，逐句出字，同样不需要新协议。
- *
+ * - browser：连续 Web Speech 会话，零 key、零 host 改动。
+ * - segmented：本地能量 VAD 切段 + 已有整段转写通道，逐句出字，同样不需要新协议。
  * 引擎选择不在此处：调用方拿到的就是 RealtimeSession（`createRealtime` 负责分派）。
  */
 import { isWebSpeechSupported, startLevelSimulation, transcribeViaHost, type SpeechRecognitionLike } from './recorder.ts'
@@ -51,10 +47,7 @@ export interface TurnTuning {
 export interface RealtimeSession {
   /** 开始监听（幂等）。 */
   start(): void
-  /**
-   * 半双工门控：不收音。播报期间必须走这条——浏览器 AEC 吃不吃得掉我们自己的
-   * TTS 尚未实测，先不赌；同时它也是「提交后不再进新词」的闩。
-   */
+/** 半双工门控：不收音。播报期间必须走这条——浏览器 AEC 吃不吃得掉我们自己的 TTS 尚未实测，先不赌；同时它也是「提交后不再进新词」的闩。 */
   pause(): void
   /** 交还麦克风，从干净的一句开始。 */
   resume(): void
@@ -62,10 +55,7 @@ export interface RealtimeSession {
   stop(): void
   /** 是否正在收音。 */
   readonly listening: boolean
-  /**
-   * 语音插话（barge-in，D19）：播放回复期间恢复采集并武装回声门控。只有带本地
-   * 能量门控的引擎（segmented）实现；browser/cloud 引擎保持半双工（pause 静音）。
-   */
+/** 语音插话（barge-in，D19）：播放回复期间恢复采集并武装回声门控。只有带本地 能量门控的引擎（segmented）实现；browser/cloud 引擎保持半双工（pause 静音）。 */
   armBargeIn?(): void
   /** 解除回声门控（播放自然排空/被打断时调用）。 */
   disarmBargeIn?(): void
@@ -91,10 +81,8 @@ function joinText(...parts: string[]): string {
   return parts.filter((p) => p !== '').join(' ').replace(/\s+/g, ' ').trim()
 }
 
-/**
- * 回合判定：连续 `settleMs` 没有新结果、再宽限 `tailMs` 接住最后一个词的迟到结果，
+/** 回合判定：连续 `settleMs` 没有新结果、再宽限 `tailMs` 接住最后一个词的迟到结果，
  * 才交出这一句。两个引擎共用它，所以换引擎不会换回合边界。
- *
  * `arm(hasText)` 每次调用都重新计时——静默才是「说完了」，噪声式抖动不会提前收尾；
  * `hasText === false` 时不排 timer（空句不该提交）。timer 到点先问 `live()`：
  * 会话已停/已暂停就什么也不做，交出动作由 `commit` 承担。
@@ -308,10 +296,7 @@ export interface SegmentedTuning extends TurnTuning {
   vad: VadTuning
 }
 
-/**
- * 可注入依赖。`capture` 永不 reject（失败以 onFail 送达），`transcribe` 以抛错表示
- * 这段没转出来。单测借此跑真状态机，不碰 DOM。
- */
+/** 可注入依赖。`capture` 永不 reject（失败以 onFail 送达），`transcribe` 以抛错表示 这段没转出来。单测借此跑真状态机，不碰 DOM。 */
 export interface SegmentedDeps {
   capture(options: PcmCaptureOptions): Promise<PcmCapture>
   transcribe(pcm: Float32Array, language: string, signal: AbortSignal): Promise<string>
@@ -331,9 +316,7 @@ const DEFAULT_SEGMENTED_DEPS: SegmentedDeps = {
   transcribe: transcribeWavSegment,
 }
 
-/**
- * 按句转写引擎：本地能量 VAD 切段 + 已有整段转写通道。
- *
+/** 按句转写引擎：本地能量 VAD 切段 + 已有整段转写通道。
  * 出字节奏由「声学段边界 + 上游往返」决定，不是逐字流式：每句在说完 `silenceMs`
  * 后约一个往返才上屏。它换来的是零新协议、零新 key，并且用真实麦克风电平驱动电平表
  * （浏览器引擎只能模拟）。
@@ -361,10 +344,7 @@ export function createSegmentedRealtime(
   const queue: Float32Array[] = []
   /** 在途请求按代际登记：pause/resume/stop 递增代际并 abort，旧代结果一律作废。 */
   const inflight = new Map<number, AbortController>()
-  /**
-   * 代际。用它而不是逐个标志位：一段语音的转写请求可能在说话人已经开始下一句之后
-   * 才回来，不作废就会把上一句的字幕倒灌进新一句。
-   */
+/** 代际。用它而不是逐个标志位：一段语音的转写请求可能在说话人已经开始下一句之后 才回来，不作废就会把上一句的字幕倒灌进新一句。 */
   let generation = 0
 
   const commit = (): void => {
@@ -375,10 +355,7 @@ export function createSegmentedRealtime(
     events.onTurn(out)
   }
 
-  /**
-   * 还在出声时不交出回合：转写有往返，先落地的半句字幕不该把一句话说成两半。
-   * 静音边沿（onSpeech(false)）会重新计时，所以这里挡下来的一定还有下一次机会。
-   */
+/** 还在出声时不交出回合：转写有往返，先落地的半句字幕不该把一句话说成两半。 静音边沿（onSpeech(false)）会重新计时，所以这里挡下来的一定还有下一次机会。 */
   const gate = createSettleGate(tuning, () => active && !paused && !(vad?.inSpeech ?? false), commit)
 
   const abortAll = (): void => {
