@@ -186,7 +186,12 @@ async function upstreamTranscribeChat(cfg: CloudAsrConfig, audio: Buffer, mime: 
     throw new Error(`upstream ASR returned no text (${audio.length}B ${mime})`);
   }
   // auto 语言模式会带 <chinese>/<english> 等标签，去掉。
-  const text = content.replace(/<[^>]+>/g, '').trim();
+  // 仅在 auto（未显式指定语言）时清洗，且只匹配已知语言标签，
+  // 避免误删口述内容中的尖括号（如「用 <div> 包起来」）。
+  const text = (lang === undefined
+    ? content.replace(/<\/?(?:chinese|english|zh|en|ja|japanese|ko|korean)>/gi, '')
+    : content
+  ).trim();
   if (text === '') throw new Error(`upstream ASR returned no text (${audio.length}B ${mime})`);
   return { text };
 }

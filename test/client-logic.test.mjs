@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 // client 半区被 tsdown 打成单一 lib/client.js，无独立可 import 的产物；
 // 这两个模块顶层只有常量与函数（无 DOM 副作用），故直接用 node 的 TS 剥离跑源码。
 import { heuristicOptimize } from '../src/client/optimize.ts'
-import { parseHotkey } from '../src/client/hotkey.ts'
+import { parseHotkey, matchHotkey } from '../src/client/hotkey.ts'
 
 test('heuristicOptimize: 空与纯空白归一为空串', () => {
   assert.equal(heuristicOptimize(''), '')
@@ -79,4 +79,54 @@ test('parseHotkey: 空串 / 纯修饰键 / 无主键 返回 null', () => {
 
 test('parseHotkey: 单键无修饰符也可解析', () => {
   assert.deepEqual(parseHotkey('F5'), { ctrl: false, alt: false, shift: false, meta: false, key: 'F5' })
+})
+
+/** 构造按下的键事件（Node 无 DOM KeyboardEvent，用最小垫片）。 */
+function keyEvent(partial) {
+  return {
+    key: 'k',
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    metaKey: false,
+    ...partial,
+  }
+}
+
+test('matchHotkey: Ctrl 规格兼容 Cmd（macOS 上 Control/Command 都算）', () => {
+  const spec = parseHotkey('ctrl+k')
+  assert.ok(spec)
+  // 常规 Ctrl 命中
+  assert.ok(matchHotkey(keyEvent({ key: 'k', ctrlKey: true }), spec))
+  // macOS Cmd 命中（录制器把 Cmd 记成 Ctrl，匹配须等价的回归钉）
+  assert.ok(matchHotkey(keyEvent({ key: 'k', metaKey: true }), spec))
+  // 无修饰键不命中
+  assert.ok(!matchHotkey(keyEvent({ key: 'k' }), spec))
+  // 主键不符不命中
+  assert.ok(!matchHotkey(keyEvent({ key: 'j', ctrlKey: true }), spec))
+})
+
+test('matchHotkey: Meta 规格只认 Cmd，不认 Ctrl', () => {
+  const spec = parseHotkey('cmd+k')
+  assert.ok(spec)
+  assert.ok(matchHotkey(keyEvent({ key: 'k', metaKey: true }), spec))
+  assert.ok(!matchHotkey(keyEvent({ key: 'k', ctrlKey: true }), spec))
+  assert.ok(!matchHotkey(keyEvent({ key: 'k' }), spec))
+})
+
+test('matchHotkey: 纯修饰键按下本身不消费（避免 Ctrl 自身触发）', () => {
+  const spec = parseHotkey('ctrl+k')
+  assert.ok(spec)
+  assert.ok(!matchHotkey(keyEvent({ key: 'Control', ctrlKey: true }), spec))
+  assert.ok(!matchHotkey(keyEvent({ key: 'Meta', metaKey: true }), spec))
+})
+
+test('matchHotkey: 修饰键组合的精确匹配', () => {
+  const spec = parseHotkey('ctrl+shift+Space')
+  assert.ok(spec)
+  assert.ok(matchHotkey(keyEvent({ key: ' ', ctrlKey: true, shiftKey: true }), spec))
+  assert.ok(!matchHotkey(keyEvent({ key: ' ', ctrlKey: true }), spec))
+  assert.ok(!matchHotkey(keyEvent({ key: ' ', ctrlKey: true, altKey: true, shiftKey: true }), spec))
+  // Cmd+Shift 等价（Ctrl 兼容 Cmd）
+  assert.ok(matchHotkey(keyEvent({ key: ' ', metaKey: true, shiftKey: true }), spec))
 })

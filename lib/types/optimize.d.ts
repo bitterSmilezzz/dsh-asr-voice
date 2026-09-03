@@ -11,7 +11,6 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { StreamChunk } from '@deepseek-ai/dsh-llm';
 /** 一个 DSH 已配置模型的条目（给设置页选择器用）。 */
 export interface DshModelEntry {
     id: string;
@@ -51,5 +50,4 @@ export declare function registerModelsRoute(register: (def: {
     path: string;
     handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
 }) => () => void, ctx: Context): () => void;
-export type { StreamChunk };
 //# sourceMappingURL=optimize.d.ts.map

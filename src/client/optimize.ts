@@ -152,9 +152,3 @@ export async function llmOptimize(text: string, target?: OptimizeTarget, externa
     externalSignal?.removeEventListener('abort', onExternalAbort)
   }
 }
-
-/** 按当前模式优化（heuristic 即时返回；llm 异步，带可选模型目标）。 */
-export function optimizeText(text: string, mode: 'heuristic' | 'llm', target?: OptimizeTarget): Promise<string> {
-  if (mode === 'llm') return llmOptimize(text, target)
-  return Promise.resolve(heuristicOptimize(text))
-}

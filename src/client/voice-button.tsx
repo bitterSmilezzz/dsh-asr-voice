@@ -347,8 +347,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       }
       // 快速路径（默认）：立即填入清洗版，优化后台替换。
       const fast = clean || cleaned
-      insertedRef.current = fast
-      finalize(fast)
+      insertedRef.current = finalize(fast)
       setOptimizingDraft(true)
       setPhase('optimizing')
       void runBackgroundOptimize(cleaned)
@@ -421,19 +420,19 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setPhase('idle')
   }
 
-  /** 把最终文本填入草稿（完整替换 / 末尾追加）+ 可选剪贴板。 */
-  const finalize = (text: string): void => {
-    if (text === '') { setPhase('idle'); return }
+  /** 把最终文本填入草稿（完整替换 / 末尾追加）+ 可选剪贴板。
+   *  返回实际写入草稿的字符串（append 模式下 = existing + sep + text）。 */
+  const finalize = (text: string): string => {
+    if (text === '') { setPhase('idle'); return text }
     if (inputActions) {
       if (config.behavior.textMode === 'append') {
         // draftRef 是草稿的权威镜像（effect 同步 props 异步回写）；props.input?.draft
         // 是本渲染帧快照，录音期间的编辑会读不到，append 会覆盖丢字。
         const existing = draftRef.current
         const sep = existing !== '' && !/[ \n]$/.test(existing) ? ' ' : ''
-        inputActions.setDraft(existing + sep + text)
-      } else {
-        inputActions.setDraft(text)
+        text = existing + sep + text
       }
+      inputActions.setDraft(text)
       if (config.behavior.autoSend) inputActions.submit()
     }
     if (config.behavior.copyToClipboard) {
@@ -442,6 +441,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       } catch { /* noop */ }
     }
     setPhase('idle')
+    return text
   }
   // 最新闭包转发的挂载点：所有 handler 定义完毕后更新，供冻结的 instance 调用。
   handlersRef.current = { begin, finish, cancel }

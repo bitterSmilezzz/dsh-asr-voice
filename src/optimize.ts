@@ -12,7 +12,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
-import type { StreamChunk } from '@deepseek-ai/dsh-llm';
 import { isTrusted, readJsonBody, sendJson } from './http.ts';
 
 /** 最小当前模型选择面（由 DSH 的 agentDefaultModel 服务提供，peer 不 import）。 */
@@ -72,8 +71,8 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * 枚举失败/不可用/超时的 provider 给空模型列表（不阻断整体）。
  */
 export async function enumerateModels(ctx: Context): Promise<DshProviderEntry[]> {
-  const out: DshProviderEntry[] = [];
-  for (const p of ctx.llm.listProviders()) {
+  const providers = ctx.llm.listProviders();
+  const results = await Promise.all(providers.map(async (p) => {
     let models: DshModelEntry[] = [];
     try {
       const listed = await withTimeout(Promise.resolve(ctx.llm.listModels(p.id)), LIST_MODELS_TIMEOUT_MS);
@@ -81,9 +80,9 @@ export async function enumerateModels(ctx: Context): Promise<DshProviderEntry[]>
     } catch {
       // 该 provider 不可枚举（含超时）：跳过模型（仍保留 provider 行，便于提示）。
     }
-    out.push({ provider: p.id, name: p.name, models });
-  }
-  return out;
+    return { provider: p.id, name: p.name, models };
+  }));
+  return results;
 }
 
 /** 用 DSH 的 LLM 通道重写文本（target 缺省 = 当前所选模型）。 */
@@ -183,6 +182,3 @@ export function registerModelsRoute(
     },
   });
 }
-
-// 保留类型导出（供测试/文档）。
-export type { StreamChunk };

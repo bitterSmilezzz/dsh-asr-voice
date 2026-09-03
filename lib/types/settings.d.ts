@@ -147,6 +147,4 @@ export interface AsrVoiceSettings {
         };
     };
 }
-/** 设置默认值（与 schema default 一致；client 侧也用同一份，避免双源漂移）。 */
-export declare const DEFAULT_SETTINGS: AsrVoiceSettings;
 //# sourceMappingURL=settings.d.ts.map

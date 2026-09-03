@@ -66,7 +66,8 @@ function ToggleRow({ title, desc, checked, onChange, disabled }: { title: string
   )
 }
 
-/** 数值输入字段（min/max 与 host schema 的同一组约束）。 */
+/** 数值输入字段（min/max 与 host schema 的同一组约束）。
+ *  本地 string state 允许逐字输入 "0." 等中间态，blur 时 clamp 回写。 */
 function NumberRow({ title, desc, value, onChange, min, max, step = 1 }: {
   title: string
   desc?: string
@@ -76,6 +77,22 @@ function NumberRow({ title, desc, value, onChange, min, max, step = 1 }: {
   max: number
   step?: number
 }): react.ReactElement {
+  const [editValue, setEditValue] = react.useState<string>(String(value))
+  // value prop 从外部变化（清空/重置）时同步本地，但编辑中不覆盖。
+  const [isFocused, setFocused] = react.useState(false)
+  react.useEffect(() => {
+    if (!isFocused) setEditValue(String(value))
+  }, [value, isFocused])
+  const commit = react.useCallback((): void => {
+    const n = Number(editValue)
+    if (editValue === '' || !Number.isFinite(n)) {
+      setEditValue(String(value))
+      return
+    }
+    const clamped = Math.min(max, Math.max(min, n))
+    setEditValue(String(clamped))
+    onChange(clamped)
+  }, [editValue, value, min, max, onChange])
   return (
     <Field
       title={title}
@@ -84,16 +101,19 @@ function NumberRow({ title, desc, value, onChange, min, max, step = 1 }: {
         <div className="dshav-field">
           <input
             type="number"
-            value={String(value)}
+            value={editValue}
             min={min}
             max={max}
             step={step}
+            onFocus={() => setFocused(true)}
+            onBlur={() => { setFocused(false); commit() }}
             onChange={(e: react.ChangeEvent<HTMLInputElement>) => {
-              // 清空/非法输入不回写：草稿留着上一个合法值。宿主拿到 NaN 会让
-              // setTimeout 立刻触发，把每一次录音都切成零长。
-              const next = Number(e.target.value)
-              if (e.target.value === '' || !Number.isFinite(next)) return
-              onChange(Math.min(max, Math.max(min, next)))
+              setEditValue(e.target.value)
+              // 合法且有限时即刻回传（如其他 UI 联动），非法值保留在本地。
+              if (e.target.value !== '' && /^-?\d*\.?\d*$/.test(e.target.value)) {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n)) onChange(Math.min(max, Math.max(min, n)))
+              }
             }}
           />
         </div>
