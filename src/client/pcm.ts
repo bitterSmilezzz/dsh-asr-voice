@@ -28,8 +28,11 @@ export function isSilentPeak(peak: number): boolean {
 export function downmixToMono(channels: readonly Float32Array[], length: number): Float32Array {
   const mono = new Float32Array(length)
   if (channels.length === 0) return mono
+  // 等权增益提出内层循环：长音频每采样少一次除法（实时 16k 帧路径每帧都在跑）。
+  const gain = 1 / channels.length
   for (const data of channels) {
-    for (let i = 0; i < length; i++) mono[i] = (mono[i] ?? 0) + (data[i] ?? 0) / channels.length
+    const n = Math.min(length, data.length)
+    for (let i = 0; i < n; i++) mono[i] = (mono[i] ?? 0) + (data[i] ?? 0) * gain
   }
   return mono
 }

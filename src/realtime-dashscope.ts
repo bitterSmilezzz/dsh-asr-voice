@@ -49,6 +49,8 @@ class DashscopeRealtimeConnection implements RealtimeProviderConnection {
   private readonly ws: WebSocket
   private closed = false
   private sessionUpdateSent = false
+  /** 建连超时：close() 也要清（否则连接在 CONNECTING 中被关，15s 后 fail() 空转一次）。 */
+  private readonly connectTimer: ReturnType<typeof setTimeout>
   onEvent: ((ev: RealtimeProviderEvent) => void) | null = null
 
   constructor(url: string, private readonly opts: DashscopeRealtimeOptions) {
@@ -56,21 +58,22 @@ class DashscopeRealtimeConnection implements RealtimeProviderConnection {
     const fail = (code: string): void => {
       if (this.closed) return
       this.closed = true
+      clearTimeout(this.connectTimer)
       try { this.ws.close() } catch { /* already closed */ }
       this.onEvent?.({ type: 'error', code })
     }
-    const connectTimer = setTimeout(() => fail('provider-timeout'), CONNECT_TIMEOUT_MS)
+    this.connectTimer = setTimeout(() => fail('provider-timeout'), CONNECT_TIMEOUT_MS)
     this.ws.onopen = (): void => {
-      clearTimeout(connectTimer)
+      clearTimeout(this.connectTimer)
       if (this.closed) return
       this.sendSessionUpdate()
     }
     this.ws.onerror = (): void => {
-      clearTimeout(connectTimer)
+      clearTimeout(this.connectTimer)
       fail('provider-unreachable')
     }
     this.ws.onclose = (): void => {
-      clearTimeout(connectTimer)
+      clearTimeout(this.connectTimer)
       if (this.closed) return
       this.closed = true
       // 正常由 close() 主动关闭（已发 session.finish）→ 不报错；对端异常断开才算错。
@@ -118,11 +121,16 @@ class DashscopeRealtimeConnection implements RealtimeProviderConnection {
     if (this.closed) return
     this.byGracefulClose = true
     this.closed = true
+    clearTimeout(this.connectTimer)
     // VAD 模式下必须先发 session.finish 再关连接，否则服务端丢弃在途 final。
     try {
       this.sendRaw({ type: 'session.finish' })
     } catch { /* socket gone */ }
     const dispose = (): void => {
+      // 兜底关闭也要摘掉监听：收尾期间加的 onFinished 挂在 ws 上，不摘会随连接
+      // 一起滞留到 GC，且 session.finished 迟到时会 clear 一个已触发的 timer（无害
+      // 但仍是无效操作）。幂等：ws.close() 对已关连接无副作用。
+      this.ws.removeEventListener('message', onFinished)
       try { this.ws.close() } catch { /* already closed */ }
     }
     // 收到 session.finished 提前关；到点兜底强制关。

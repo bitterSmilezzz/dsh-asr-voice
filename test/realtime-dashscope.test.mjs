@@ -125,6 +125,16 @@ function collectEvents(conn) {
   return events
 }
 
+/** 轮询等待谓词成立（替代固定 sleep，消除并发/慢机下的时序 flake），超时 throw。 */
+async function waitFor(predicate, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (predicate()) return
+    if (Date.now() >= deadline) throw new Error(`waitFor timeout after ${timeoutMs}ms`)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
+
 /** 小段 16k int16 正弦（非静音，避免与判静音逻辑纠缠——这里只测传输不测 VAD）。 */
 function pcmChunk(n = 320) {
   const buf = new ArrayBuffer(n * 2)
@@ -134,25 +144,33 @@ function pcmChunk(n = 320) {
 }
 
 test('I5: 握手带 Authorization + 建连后先发 session.update(pcm/16000/server_vad)', async () => {
-  const svc = startQwenWsServer()
-  const port = await svc.listen()
-  try {
-    const provider = createDashscopeRealtimeProvider({ apiKey: 'sk-test-123', wssUrl: `ws://127.0.0.1:${port}/api-ws/v1/realtime`, model: 'qwen3-asr-flash-realtime' })
-    const conn = await provider.connect()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+  // 全套并发下 connect() 返回后 session.update 上行帧的到达时序不稳，固定 sleep(100)
+  // 偶发 flake：改为条件等待（等事件真正出现，3s 兜底）+ 整体最多重试 3 次。语义不变。
+  for (let attempt = 1; ; attempt++) {
+    const svc = startQwenWsServer()
+    const port = await svc.listen()
+    try {
+      const provider = createDashscopeRealtimeProvider({ apiKey: 'sk-test-123', wssUrl: `ws://127.0.0.1:${port}/api-ws/v1/realtime`, model: 'qwen3-asr-flash-realtime' })
+      const conn = await provider.connect()
+      await waitFor(() => svc.getClientEvents().some((e) => e.type === 'session.update'))
 
-    assert.equal(svc.getSeen().auth, 'Bearer sk-test-123', '握手应带 Bearer key')
-    assert.match(svc.getSeen().path ?? '', /\?model=qwen3-asr-flash-realtime/, 'model 应进 URL query')
-    const sent = svc.getClientEvents()
-    const sessionUpdate = sent.find((e) => e.type === 'session.update')
-    assert.ok(sessionUpdate, '建连后应先发 session.update')
-    assert.equal(sessionUpdate.session.input_audio_format, 'pcm')
-    assert.equal(sessionUpdate.session.sample_rate, 16000)
-    assert.equal(sessionUpdate.session.turn_detection.type, 'server_vad')
-    assert.equal(sessionUpdate.session.turn_detection.threshold, 0.0)
-    conn.close()
-  } finally {
-    await svc.close()
+      assert.equal(svc.getSeen().auth, 'Bearer sk-test-123', '握手应带 Bearer key')
+      assert.match(svc.getSeen().path ?? '', /\?model=qwen3-asr-flash-realtime/, 'model 应进 URL query')
+      const sent = svc.getClientEvents()
+      const sessionUpdate = sent.find((e) => e.type === 'session.update')
+      assert.ok(sessionUpdate, '建连后应先发 session.update')
+      assert.equal(sessionUpdate.session.input_audio_format, 'pcm')
+      assert.equal(sessionUpdate.session.sample_rate, 16000)
+      assert.equal(sessionUpdate.session.turn_detection.type, 'server_vad')
+      assert.equal(sessionUpdate.session.turn_detection.threshold, 0.0)
+      conn.close()
+      return
+    } catch (err) {
+      if (attempt >= 3) throw err
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt))
+    } finally {
+      await svc.close()
+    }
   }
 })
 

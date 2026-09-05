@@ -52,15 +52,26 @@ export interface OptimizeTarget {
 /** 单个 provider 模型枚举的竞速超时：上游网络卡死不该拖死整个 /models 响应。 */
 const LIST_MODELS_TIMEOUT_MS = 20_000;
 
-/** 给 promise 套整体超时（listModels 是否支持 AbortSignal 不确定，用竞速兜底）。 */
+/**
+ * 给 promise 套整体超时。
+ * ctx.llm.listModels 的接口签名没有 AbortSignal（见 dsh-llm 的 LlmService.listModels，
+ * 与 LlmAdapter.listModels 一致），无法真正取消底层调用——竞速是唯一手段：超时后
+ * 外层立刻 settle，迟到的底层结果经 settled 标志丢弃（不会 unhandled rejection）。
+ * 两个分支都 clearTimeout，timer 不泄漏。
+ */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`listModels timed out after ${ms}ms`)), ms);
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error(`listModels timed out after ${ms}ms`))
+    }, ms)
     p.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
-    );
-  });
+      (v) => { if (settled) return; settled = true; clearTimeout(timer); resolve(v) },
+      (e) => { if (settled) return; settled = true; clearTimeout(timer); reject(e) },
+    )
+  })
 }
 
 /** 枚举 DSH 已配置模型（ctx.llm.listProviders + listModels）。 枚举失败/不可用/超时的 provider 给空模型列表（不阻断整体）。 */

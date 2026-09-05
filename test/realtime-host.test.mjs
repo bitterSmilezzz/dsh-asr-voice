@@ -273,6 +273,36 @@ test('SSE 背压：backed 期间 speech-stopped 也不丢', async () => {
   channel.close()
 })
 
+test('SSE 背压：连续两句 final 都不丢（旧的单 coalesce 槽会顶掉第一句）', async () => {
+  const fakeRes = new FakeRes()
+  const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })
+  fakeRes.backed = true
+  channel.enqueue({ type: 'final', text: '第一句的最终结果' })
+  channel.enqueue({ type: 'partial', text: '第二句的草稿' }) // 会被随后的 final₂ 合并（冗余预览）
+  channel.enqueue({ type: 'final', text: '第二句的最终结果' })
+  fakeRes.backed = false
+  fakeRes.drainCb()
+  const events = sseEvents(fakeRes)
+  assert.deepEqual(events.map((e) => e.type), ['final', 'final'], '两句的 final 都必须送达（backed 期的 partial 被后续 final 合并）')
+  assert.equal(events[0].text, '第一句的最终结果')
+  assert.equal(events[1].text, '第二句的最终结果')
+  channel.close()
+})
+
+test('SSE 背压：final 之后的 partial 不得覆盖 final（同句 partial 才原位合并）', async () => {
+  const fakeRes = new FakeRes()
+  const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })
+  fakeRes.backed = true
+  channel.enqueue({ type: 'final', text: '这句说完了' })
+  channel.enqueue({ type: 'partial', text: '下一句的预览' })
+  fakeRes.backed = false
+  fakeRes.drainCb()
+  const events = sseEvents(fakeRes)
+  assert.deepEqual(events.map((e) => e.type), ['final', 'partial'], 'final 不可被后续 partial 顶掉')
+  assert.equal(events[0].text, '这句说完了')
+  channel.close()
+})
+
 test('SSE close 幂等：重复 close 不抛、end 只调用一次', async () => {
   const fakeRes = new FakeRes()
   const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })

@@ -148,6 +148,9 @@ export function tween(
   const baseMatrix = hasTransform ? baseTranslateOf(target) : undefined
 
   let startTime: number | null = null
+  /** delay 只在首帧应用一次：repeat/yoyo 的后续周期从当前帧重新起算，
+   *  否则 `repeat: Infinity, delay: .24` 这类循环每圈都白等 delay。 */
+  let delayApplied = false
   let cycles = 0
   let killed = false
   let progressVal = 0
@@ -156,7 +159,8 @@ export function tween(
   const tick = (now: number): void => {
     if (killed) return
     if (startTime === null) {
-      startTime = now + delay * 1000
+      startTime = now + (delayApplied ? 0 : delay * 1000)
+      delayApplied = true
       onStart?.()
     }
     if (now < startTime) {

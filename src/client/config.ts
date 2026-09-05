@@ -232,13 +232,15 @@ function num(value: unknown, fallback: number): number {
 /** 逐字段重建供应商行：只取本客户端认识的字段（宿主多出来的键一律不带走）。 */
 function normalizeProvider(row: unknown): CloudProviderConfig {
   const src = isPlainObject(row) ? row : {}
+  const preset = str(src.preset)
+  const mode = str(src.mode)
   return {
     id: str(src.id),
-    preset: str(src.preset) === '' ? 'openai' : str(src.preset),
+    preset: preset === '' ? 'openai' : preset,
     name: str(src.name),
     baseUrl: str(src.baseUrl),
     model: str(src.model),
-    mode: str(src.mode) === '' ? 'auto' : str(src.mode),
+    mode: mode === '' ? 'auto' : mode,
   }
 }
 

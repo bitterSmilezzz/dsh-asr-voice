@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 // client 半区被 tsdown 打成单一 lib/client.js，无独立可 import 的产物；
 // 这两个模块顶层只有常量与函数（无 DOM 副作用），故直接用 node 的 TS 剥离跑源码。
 import { heuristicOptimize } from '../src/client/optimize.ts'
-import { parseHotkey, matchHotkey } from '../src/client/hotkey.ts'
+import { parseHotkey, matchHotkey, normalizeKey, bareKeyAllowed } from '../src/client/hotkey.ts'
 
 test('heuristicOptimize: 空与纯空白归一为空串', () => {
   assert.equal(heuristicOptimize(''), '')
@@ -79,6 +79,34 @@ test('parseHotkey: 空串 / 纯修饰键 / 无主键 返回 null', () => {
 
 test('parseHotkey: 单键无修饰符也可解析', () => {
   assert.deepEqual(parseHotkey('F5'), { ctrl: false, alt: false, shift: false, meta: false, key: 'F5' })
+})
+
+test('parseHotkey: 无修饰的单字母/数字/符号/空格/回车/方向键一律拒绝（防打字劫持）', () => {
+  // client 的监听挂在 window capture（不豁免输入框）：单字母 hotkey 命中后
+  // preventDefault 会把用户在草稿里敲的字符吞掉。宁可解析失效也不劫持输入。
+  for (const bad of ['a', 'A', '1', ' ', 'Space', 'Enter', 'Tab', 'Backspace', 'ArrowUp', 'Up', '=', '。']) {
+    assert.equal(parseHotkey(bad), null, `应拒绝单键 ${JSON.stringify(bad)}`)
+  }
+  // 带修饰键的同主键不受影响。
+  assert.deepEqual(parseHotkey('ctrl+a'), { ctrl: true, alt: false, shift: false, meta: false, key: 'A' })
+  assert.deepEqual(parseHotkey('ctrl+Space'), { ctrl: true, alt: false, shift: false, meta: false, key: 'Space' })
+})
+
+test('parseHotkey: F 功能键放行（F1~F24 不产生字符，不劫持输入）', () => {
+  assert.deepEqual(parseHotkey('F1'), { ctrl: false, alt: false, shift: false, meta: false, key: 'F1' })
+  assert.deepEqual(parseHotkey('F12'), { ctrl: false, alt: false, shift: false, meta: false, key: 'F12' })
+  assert.deepEqual(parseHotkey('F24'), { ctrl: false, alt: false, shift: false, meta: false, key: 'F24' })
+  assert.equal(parseHotkey('F25'), null, 'F25 超出功能键范围')
+})
+
+test('normalizeKey / bareKeyAllowed 直接断言', () => {
+  assert.equal(normalizeKey(' '), 'Space')
+  assert.equal(normalizeKey('k'), 'K')
+  assert.equal(normalizeKey('ArrowDown'), 'Down')
+  assert.equal(normalizeKey('Spacebar'), 'Space')
+  assert.equal(normalizeKey('Escape'), 'Escape')
+  assert.ok(bareKeyAllowed('F5') && bareKeyAllowed('F12') && bareKeyAllowed('F24'))
+  assert.ok(!bareKeyAllowed('a') && !bareKeyAllowed('1') && !bareKeyAllowed(' ') && !bareKeyAllowed('Enter'))
 })
 
 /** 构造按下的键事件（Node 无 DOM KeyboardEvent，用最小垫片）。 */

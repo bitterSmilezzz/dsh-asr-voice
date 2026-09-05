@@ -14,7 +14,7 @@ import {
   type AsrVoiceConfig, type CloudProviderConfig, type ConfigSection, type KeyState,
 } from './config.ts'
 import type { LocaleKey, LocaleT } from './locales.ts'
-import { normalizeKey } from './hotkey.ts'
+import { bareKeyAllowed, normalizeKey } from './hotkey.ts'
 
 /** 设置卡片 props（settings.plugin.item 注入 + 翻译函数）。 */
 export interface SettingsCardProps {
@@ -254,13 +254,16 @@ function HotkeyRecorder({ value, onChange, t }: { value: string; onChange: (v: s
   )
 }
 
-/** 把键盘事件转成规范组合键字符串（修饰键 + 主键，跨平台）。 */
+/** 把键盘事件转成规范组合键字符串（修饰键 + 主键，跨平台）。
+ *  无修饰键时只录 F 功能键：单字母/数字/符号/空格/回车/方向键会劫持输入
+ *  （parseHotkey 同口径拒绝，两端一致）。 */
 function keyCombo(e: react.KeyboardEvent): string {
   const parts: string[] = []
   if (e.ctrlKey || e.metaKey) parts.push('Ctrl')
   if (e.altKey) parts.push('Alt')
   if (e.shiftKey) parts.push('Shift')
   if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta' || e.key === 'Escape') return ''
+  if (parts.length === 0 && !bareKeyAllowed(e.key)) return ''
   parts.push(normalizeKey(e.key))
   return parts.join('+')
 }

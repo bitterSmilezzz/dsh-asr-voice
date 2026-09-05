@@ -68,7 +68,10 @@ function createUploadPump(upload: (pcm: Uint8Array) => Promise<void>): {
     const next = queue.shift()
     if (next === undefined) return
     inFlight = true
-    void upload(next).finally(() => { inFlight = false; pump() })
+    // upload 失败（HTTP 非 2xx / AbortSignal.timeout 超时）静默丢这帧、继续下一帧——
+    // 实时上行没有重试价值（重试的旧帧已过时）。catch 必须消费 rejection，否则
+    // fetch 超时路径会留 unhandled rejection。
+    void upload(next).catch(() => {}).finally(() => { inFlight = false; pump() })
   }
   return {
     push(pcm) {

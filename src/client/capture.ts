@@ -140,6 +140,11 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
   const sourceRate = ctx.sampleRate
   let probePeak = 0
   let probeDone = false
+  /** 半双工静音态：探针窗口内 setMuted(true) 会让轨道产出全零帧，探针会
+   *  误判成「设备静音」把好端端的会话杀掉（4s 探针期内用户说完一句即 pause
+   *  的短句对话必然命中）。静音期既不累积峰值，也把探针视为完成——静音守卫
+   *  （isSilentPeak）在段级继续兜底真实无声，这里只负责「链路是否产出过数据」。 */
+  let muted = false
 
   const teardown = (): void => {
     if (stopped) return
@@ -161,7 +166,7 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
     if (stopped) return
     const raw = event.data
     const pcm = sourceRate === PCM_SAMPLE_RATE ? raw : resampleLinear(raw, sourceRate, PCM_SAMPLE_RATE)
-    if (!probeDone) {
+    if (!probeDone && !muted) {
       probePeak = Math.max(probePeak, peakAbs(pcm))
     }
     options.onFrame(pcm)
@@ -197,7 +202,9 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
 
   probeTimer = setTimeout(() => {
     probeDone = true
-    if (stopped || probePeak >= DEAD_DEVICE_PEAK) return
+    // 探针窗口内处于半双工静音：该会话已证明在收音（pause 前有产出），
+    // 静音守卫在段级兜底，这里不再判死。
+    if (stopped || muted || probePeak >= DEAD_DEVICE_PEAK) return
     teardown()
     options.onFail('silent-device')
   }, DEAD_DEVICE_PROBE_MS)
@@ -206,8 +213,9 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
     stop(): void {
       teardown()
     },
-    setMuted(muted: boolean): void {
-      stream.getAudioTracks().forEach((t) => { t.enabled = !muted })
+    setMuted(next: boolean): void {
+      muted = next
+      stream.getAudioTracks().forEach((t) => { t.enabled = !next })
     },
   }
 }

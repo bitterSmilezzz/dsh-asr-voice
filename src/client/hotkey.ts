@@ -9,6 +9,15 @@ export interface HotkeySpec {
   key: string
 }
 
+/** 无修饰键时是否放行（单键 hotkey）：只允许 F 功能键（F1~F24）。
+ *  字母/数字/符号/空格/回车/方向键等在文本输入里会打出字符或移动焦点，
+ *  而 client 的监听挂在 window capture（不豁免输入框），命中后 preventDefault
+ *  会把字符吞掉——单字母快捷键 = 打字劫持。F 键不产生字符（浏览器默认行为
+ *  如刷新/全屏被 preventDefault 接管，是用户自选的配置），故保留。 */
+export function bareKeyAllowed(key: string): boolean {
+  return /^F([1-9]|1\d|2[0-4])$/.test(key)
+}
+
 /** 把规范字符串（如 "Ctrl+Shift+Space"）解析为规格；空/非法返回 null。 */
 export function parseHotkey(spec: string): HotkeySpec | null {
   if (!spec || spec.trim() === '') return null
@@ -23,6 +32,10 @@ export function parseHotkey(spec: string): HotkeySpec | null {
     else out.key = normalizeKey(part)
   }
   if (out.key === '') return null
+  // 无修饰键时只放行 F 功能键（见 bareKeyAllowed）：单字母/数字/符号/空格/回车/
+  // 方向键会劫持打字。旧配置里误录的单键（如 "A"）解析返回 null = 快捷键失效，
+  // 宁可失效也不吞用户输入。
+  if (!out.ctrl && !out.alt && !out.shift && !out.meta && !bareKeyAllowed(out.key)) return null
   return out
 }
 

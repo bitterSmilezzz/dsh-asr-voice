@@ -382,11 +382,20 @@ export function createCloudTtsSink(tuning: { language: string; voice?: string })
         source.connect(ac.destination)
         current = source
         await new Promise<void>((resolve) => {
-          source.onended = () => resolve()
+          let playTimer: ReturnType<typeof setTimeout> | null = null
+          const finishPlay = (): void => {
+            if (playTimer !== null) { clearTimeout(playTimer); playTimer = null }
+            resolve()
+          }
+          source.onended = () => finishPlay()
           source.start()
           // 保险：start 后超时（如 ctx 被挂起）不能让队列永久卡住。长句按 5s/1000 帧估算。
-          const ms = Math.max(2_000, Math.ceil(frames / 16000) * 1000 + 1_500)
-          setTimeout(() => { try { source.stop() } catch { /* already ended */ } }, ms)
+          // 自然播完/打断都会经 onended 清掉这个 timer——不留空转的兜底（它会在音频
+          // 结束后仍对已释放的 source 调 stop，dispose 后还会拖住节点引用）。
+          playTimer = setTimeout(() => {
+            try { source.stop() } catch { /* already ended */ }
+            finishPlay()
+          }, Math.max(2_000, Math.ceil(frames / 16000) * 1000 + 1_500))
         })
         if (current === source) current = null
       })()

@@ -6,24 +6,37 @@ export type RealtimeRouteRegister = (def: {
     path: string;
     handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
 }) => () => void;
-/** SSE 下行通道：带背压（partial coalesce / final 必达）与心跳。 */
+/** SSE 下行通道：带背压（partial 原位合并 / final 必达）与心跳。 */
 export declare class SseChannel {
     private readonly res;
     private backedUp;
-    /** 背压期间只保留最新一条待发事件（final/stopped 覆盖 partial）。 */
-    private coalesced;
+    /** 背压期间排队待发的事件（有界）。partial 会被更新的 partial 原位替换（coalesce），
+     *  final/speech-stopped 追加保序——drain 后按序冲刷，**任何 final 都不丢**。
+     *  此前单一 coalesce 槽会被后续 final/partial 直接覆盖：背压中连续两句收口时，
+     *  第一句的 final 被第二句顶掉，客户端永远只看到 partial（缺句）。 */
+    private pending;
+    /** pending 上限：与会话侧 pending 缓冲同量级；极端积压（客户端几乎不读）时丢最旧
+     *  事件降级，会话最终由 disconnect / 空闲守卫拆除。 */
+    private static readonly PENDING_CAP;
     private closed;
     /** 空闲心跳：防止中间代理把长连接掐掉（部分代理 30s 无数据即断）。 */
     private heartbeat;
     private readonly onDisconnect;
+    /** 当前挂着的 drain 监听（close/disconnect 时移除，避免监听随响应滞留到 GC）。 */
+    private drainHandler;
     constructor(res: ServerResponse, opts?: {
         heartbeatMs?: number;
         onDisconnect?: () => void;
     });
-    /** 排入一条事件：背压时 coalesce，drain 后按序冲刷。 */
+    /** 排入一条事件：空闲直写；背压时 partial 原位合并、final/stopped 排队保序。
+     *  首次直写即命中背压（write 返回 false）的事件也会入队，等 drain 后再送——
+     *  不能只把 backedUp 挂上就让事件丢失。 */
     enqueue(ev: RealtimeProviderEvent): void;
-    private write;
-    /** 结束下行（幂等）：清心跳、断 close 监听。 */
+    /** 按序冲刷排队的事件（final 不丢、partial 保最新）；缓冲满则挂 drain 等恢复。 */
+    private flush;
+    /** 挂一次 drain 监听（同一时间只挂一个；close/disconnect 时摘掉）。 */
+    private armDrain;
+    /** 结束下行（幂等）：清心跳、断 close/drain 监听。 */
     close(): void;
     private readonly disconnect;
 }
