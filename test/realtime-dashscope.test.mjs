@@ -70,14 +70,16 @@ function wsAccept(key) {
 
 /**
  * 起一个 qwen 协议的 WS 服务。
- * @param {{ handshakeDelayMs?: number }} [opts] - handshakeDelayMs > 0 时延迟写 101
- *   响应，让客户端停留在 CONNECTING（模拟真实网络握手窗口，测上行缓冲）。
- * @returns {Promise<{port, sendServerEvent, getClientEvents, seen, close}>}
+ * @param {{ handshakeDelayMs?: number, holdHandshake?: boolean }} [opts] -
+ *   handshakeDelayMs > 0 时延迟写 101 响应，让客户端停留在 CONNECTING（模拟真实网络
+ *   握手窗口，测上行缓冲）；holdHandshake = true 时 101 永不发送（测建连超时路径）。
+ * @returns {Promise<{port, sendServerEvent, getClientEvents, seen, dropConnections, getOpenSocketCount, close}>}
  *   sendServerEvent(ev) 向客户端推一条服务端事件；getClientEvents() 返回客户端发来的
- *   JSON 事件数组；seen = {auth, path}；close() 断开全部。
+ *   JSON 事件数组；seen = {auth, path}；dropConnections() 断开全部 socket（不关服务，
+ *   模拟对端异常断连）；getOpenSocketCount() 当前存活 socket 数；close() 断开全部并关服务。
  */
 function startQwenWsServer(opts = {}) {
-  const { handshakeDelayMs = 0 } = opts
+  const { handshakeDelayMs = 0, holdHandshake = false } = opts
   const seen = { auth: null, path: null }
   const sockets = new Set()
   const received = []
@@ -96,11 +98,20 @@ function startQwenWsServer(opts = {}) {
         `Sec-WebSocket-Accept: ${wsAccept(key)}\r\n\r\n`,
       )
     }
-    if (handshakeDelayMs > 0) setTimeout(sendHandshake, handshakeDelayMs)
+    if (holdHandshake) {
+      // 101 永不发送：客户端停留在 CONNECTING，直到自己的建连超时兜底。
+    } else if (handshakeDelayMs > 0) setTimeout(sendHandshake, handshakeDelayMs)
     else sendHandshake()
     let acc = Buffer.alloc(0)
     socket.on('data', (chunk) => {
       acc = Buffer.concat([acc, chunk])
+      // 客户端回显 close 帧（opcode 8）→ 完成 RFC6455 关闭握手：销毁 socket。
+      // 不回不销毁时 undici 会挂起等待（收到 close 帧后它要等对端收尾才触发
+      // close 事件），测「对端主动关闭」的用例必须走完这一拍。
+      if (acc.length >= 2 && (acc[0] & 0x0f) === 0x8) {
+        socket.destroy()
+        return
+      }
       const frames = decodeFrame(acc)
       if (frames.length > 0) acc = Buffer.alloc(0) // 测试是逐个发事件，够用
       for (const text of frames) {
@@ -118,6 +129,15 @@ function startQwenWsServer(opts = {}) {
     },
     getClientEvents: () => received,
     getSeen: () => seen,
+    dropConnections() {
+      for (const s of sockets) s.destroy()
+    },
+    /** 向所有 socket 写一条 WebSocket close 帧（对端主动挥手，但未走协议收尾）。 */
+    sendCloseFrame(code = 1000) {
+      const frame = Buffer.from([0x88, 2, (code >> 8) & 0xff, code & 0xff])
+      for (const s of sockets) s.write(frame)
+    },
+    getOpenSocketCount: () => sockets.size,
     async close() {
       for (const s of sockets) s.destroy()
       await new Promise((resolve) => server.close(resolve))
@@ -305,6 +325,87 @@ test('I5: 无关服务端事件（session.created/updated 等）不产生事件'
     svc.sendServerEvent({ type: 'input_audio_buffer.committed' })
     await new Promise((resolve) => setTimeout(resolve, 100))
     assert.equal(events.length, 0, '无关事件应被忽略')
+    conn.close()
+  } finally {
+    await svc.close()
+  }
+})
+
+test('I5: 握手未完成超时 → provider-timeout 判死（connectTimer 是唯一兜底）', async () => {
+  // 服务端接受 upgrade 但永不回 101：客户端停留在 CONNECTING，connectTimer 是唯一
+  // 兜底。注入 connectTimeoutMs=120 避免等真实 15s。
+  // 注：不断言服务端 socket 归零——undici 对 CONNECTING 态的 close() 不立即关闭
+  // 底层 socket（要等握手完成），这是 undici 行为限制、非本实现可控；判死本身
+  // （error 事件 + closed 语义）才是本测试钉的对象。
+  const svc = startQwenWsServer({ holdHandshake: true })
+  const port = await svc.listen()
+  try {
+    const provider = createDashscopeRealtimeProvider({
+      apiKey: 'sk-test-123',
+      wssUrl: `ws://127.0.0.1:${port}/api-ws/v1/realtime`,
+      connectTimeoutMs: 120,
+    })
+    const conn = await provider.connect()
+    const events = collectEvents(conn)
+    await waitFor(() => events.some((e) => e.type === 'error'), 3000)
+    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-timeout' }])
+    // 判死后连接已 closed：多等一拍确认没有重复报错或迟到事件。
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.equal(events.length, 1, '超时判死应恰报一次')
+    conn.close()
+  } finally {
+    await svc.close()
+  }
+})
+
+test('I5: 对端 socket 被销毁（异常断连）→ provider-unreachable，且只报一次', async () => {
+  // undici 对 RST/销毁式断连先触发 onerror 再触发 onclose：onerror 判死（fail 置
+  // closed），onclose 早退不重复报——这里钉住「异常断连恰报一次、code 正确」。
+  const svc = startQwenWsServer()
+  const port = await svc.listen()
+  try {
+    const provider = createDashscopeRealtimeProvider({ apiKey: 'sk-test-123', wssUrl: `ws://127.0.0.1:${port}/api-ws/v1/realtime` })
+    const conn = await provider.connect()
+    const events = collectEvents(conn)
+    // 服务端 socket 出现 ≠ 客户端握手完成：undici 在 CONNECTING 收到 close 帧会
+    // 吞掉。以收到 session.update 为准（客户端 onopen 后第一帧）。
+    await waitFor(() => svc.getClientEvents().some((e) => e.type === 'session.update'), 3000)
+
+    svc.dropConnections()
+    await waitFor(() => events.some((e) => e.type === 'error'), 3000)
+    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-unreachable' }])
+    // 报错后连接已 closed：后续事件不再被接受。
+    svc.sendServerEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: '迟到' })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.equal(events.length, 1, 'closed 后不得再产生任何事件')
+    conn.close()
+  } finally {
+    await svc.close()
+  }
+})
+
+test('I5: 对端发 close 帧（非优雅、无 session.finished）→ provider-closed', async () => {
+  // undici 下三条对端关闭路径的行为（实测）：
+  //   RST/销毁         → 先 onerror → provider-unreachable（onclose 早退，见上例）
+  //   CONNECTING 收帧  → 握手失败 → provider-unreachable（超时用例同族）
+  //   open 收 close 帧 → 回帧等对端收尾，服务端完成关闭握手后触发 onclose：
+  //                      closed=false → provider-closed（本用例）
+  // 即 onclose 的非优雅报错分支真实可达——与被删的 byGracefulClose（纯逻辑死标志，
+  // close() 必先置 closed）不同，不可再删。
+  const svc = startQwenWsServer()
+  const port = await svc.listen()
+  try {
+    const provider = createDashscopeRealtimeProvider({ apiKey: 'sk-test-123', wssUrl: `ws://127.0.0.1:${port}/api-ws/v1/realtime` })
+    const conn = await provider.connect()
+    const events = collectEvents(conn)
+    // 服务端 socket 出现 ≠ 客户端握手完成（undici 异步建连）：以收到 session.update
+    // 为准（客户端 onopen 后第一帧），否则 close 帧会落在 CONNECTING 上被吞/走错路。
+    await waitFor(() => svc.getClientEvents().some((e) => e.type === 'session.update'), 3000)
+
+    svc.sendCloseFrame(1001)
+    await waitFor(() => events.some((e) => e.type === 'error'), 3000)
+    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-closed' }])
+    assert.equal(events.length, 1, '断连判死应恰报一次（不重复报）')
     conn.close()
   } finally {
     await svc.close()

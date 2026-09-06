@@ -50,7 +50,9 @@ export const inject = ['webServer', 'llm'];
  * @param idFallback 行缺 id 时的兜底 id。
  * @param modeOverride 显式 mode（undefined = 取行内 mode，缺省 'auto'）。
  */
-function providerView(
+// 内部导出（非插件公共 API）：纯函数 + 可注入依赖，node 单测直连
+// （test/index-logic.test.mjs），不为此搭 Cordis mock 基座。
+export function providerView(
   row: { id?: string; preset?: string; name?: string; baseUrl?: string; apiKey?: string; model?: string; mode?: string },
   idFallback: string,
   modeOverride?: string,
@@ -66,8 +68,9 @@ function providerView(
   }
 }
 
-/** 从 settings 解析当前生效的云端 ASR 供应商（多供应商 active/首个，或旧单配置）。 */
-function resolveCloudProvider(v: AsrVoiceSettings | undefined): CloudAsrConfig | undefined {
+/** 从 settings 解析当前生效的云端 ASR 供应商（多供应商 active/首个，或旧单配置）。
+ * 内部导出：单测直连。 */
+export function resolveCloudProvider(v: AsrVoiceSettings | undefined): CloudAsrConfig | undefined {
   if (!v) return undefined
   const cloud = v.asr.cloud
   if (Array.isArray(cloud.providers) && cloud.providers.length > 0) {
@@ -78,8 +81,9 @@ function resolveCloudProvider(v: AsrVoiceSettings | undefined): CloudAsrConfig |
   return providerView({ ...cloud, id: 'legacy' }, 'legacy')
 }
 
-/** 读取全部已配置供应商（多供应商列表；旧单配置合成一个 'legacy'）。 */
-function listProviders(v: AsrVoiceSettings | undefined): CloudProviderLike[] {
+/** 读取全部已配置供应商（多供应商列表；旧单配置合成一个 'legacy'）。
+ * 内部导出：单测直连。 */
+export function listProviders(v: AsrVoiceSettings | undefined): CloudProviderLike[] {
   if (!v) return []
   const cloud = v.asr.cloud
   if (Array.isArray(cloud.providers) && cloud.providers.length > 0) {
@@ -100,8 +104,9 @@ interface CredentialsLike {
  * 任一条搬不动（凭据服务缺席、该引用被只读来源拒绝）就整批原样留着——抹掉一把无处可寻的
  * key 比留一份本机明文更糟。{@link resolveApiKey} 始终先读 settings，所以未迁移状态下功能
  * 不降级；迁移成功后 settings 里的 key 恒为空，密钥只剩 credentials 一个来源。
+ * 内部导出（非插件公共 API）：scope/credentials/log 全部可注入，node 单测直连。
  */
-async function migrateLegacyKeys(
+export async function migrateLegacyKeys(
   scope: { get(): AsrVoiceSettings; update(patch: object): Promise<void> },
   credentials: CredentialsLike | undefined,
   log: { warn(message: string): void; info(message: string): void },

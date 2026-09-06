@@ -26,6 +26,8 @@ export interface DashscopeRealtimeOptions {
     wssUrl?: string;
     /** 识别语言（可选；省略 = 服务端自动检测）。 */
     language?: string;
+    /** 建连兜底超时（毫秒），默认 15s。测试注入小值以确定性覆盖超时路径。 */
+    connectTimeoutMs?: number;
     /** 服务端 VAD 参数（可选；默认对齐官方推荐）。 */
     vad?: {
         /** VAD 灵敏度（-1~1，推荐 0.0）。 */

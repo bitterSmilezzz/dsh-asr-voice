@@ -38,8 +38,10 @@ export const CloudProviderSchema = z.object({
 })
 
 /** 云端 ASR 配置：多供应商列表 + active（含旧单配置兼容字段）。 */
-// 显式注解为 any：数组 default 会让推断类型引用 cosmokit 的 Dict，声明发射时报
-// TS2883（不可移植）；业务类型用下方手写 AsrVoiceSettings 接口兜底。
+// 显式注解为 any（有注释的移植性妥协，**刻意保留**）：providers 数组的 default 会让
+// 推断类型引用 cosmokit 的 Dict，声明发射时报 TS2883（不可移植到其他 tsconfig）；
+// 业务侧用下方手写 AsrVoiceSettings 接口兜底，不受影响。留待 schemastery 依赖升级
+// 后改回精确类型，届时需重跑双半区 tsc + build 确认声明可移植。
 export const CloudSchema: any = z.object({
   /** 多供应商列表（新 shape）。 */
   providers: z.array(CloudProviderSchema).default([] as never[]),
@@ -61,6 +63,7 @@ export const LlmSchema = z.object({
 })
 
 /** 插件设置 schema（与 client 的 AsrVoiceConfig 结构一致）。 */
+// 同上 CloudSchema：TS2883 移植性妥协（有注释，刻意保留），业务类型见下方手写接口。
 export const AsrVoiceSettingsSchema: any = z.object({
   /** ASR 引擎：auto（默认，浏览器 Web Speech 优先、失败自动切云端）/ browser / cloud。 */
   asr: z.object({

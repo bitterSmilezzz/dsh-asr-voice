@@ -115,13 +115,15 @@ export function createCloudRealtime(
     capture = null
   }
 
+  // failNow 全程同步：单线程内无人能中途改代际（generation 只在 start/stop 入口变更），
+  // `gen === generation` 恒真。真正需要代际守卫的是异步回调节点（start 的
+  // createSession.then 已各自带 `gen === generation` 守卫），此处直接判死送达。
   const failNow = (code: string): void => {
     active = false
     paused = true
-    const gen = generation
     teardown()
     if (sid !== '') void deps.transport.closeSession(sid).catch(() => {})
-    if (gen === generation) events.onFail(code)
+    events.onFail(code)
   }
 
   const onProviderEvent = (ev: CloudProviderEvent): void => {

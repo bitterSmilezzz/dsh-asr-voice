@@ -32,6 +32,8 @@ export interface DashscopeRealtimeOptions {
   wssUrl?: string
   /** 识别语言（可选；省略 = 服务端自动检测）。 */
   language?: string
+  /** 建连兜底超时（毫秒），默认 15s。测试注入小值以确定性覆盖超时路径。 */
+  connectTimeoutMs?: number
   /** 服务端 VAD 参数（可选；默认对齐官方推荐）。 */
   vad?: {
     /** VAD 灵敏度（-1~1，推荐 0.0）。 */
@@ -67,7 +69,7 @@ class DashscopeRealtimeConnection implements RealtimeProviderConnection {
       try { this.ws.close() } catch { /* already closed */ }
       this.onEvent?.({ type: 'error', code })
     }
-    this.connectTimer = setTimeout(() => fail('provider-timeout'), CONNECT_TIMEOUT_MS)
+    this.connectTimer = setTimeout(() => fail('provider-timeout'), opts.connectTimeoutMs ?? CONNECT_TIMEOUT_MS)
     this.ws.onopen = (): void => {
       clearTimeout(this.connectTimer)
       if (this.closed) return
@@ -81,10 +83,14 @@ class DashscopeRealtimeConnection implements RealtimeProviderConnection {
     }
     this.ws.onclose = (): void => {
       clearTimeout(this.connectTimer)
+      // closed 已置位 = 由 close()/fail() 主动收尾（graceful 或已报过错），不重复报。
+      // 走到这里 = 对端主动关闭且未报过错：RST/销毁式断连会先触发 onerror（→
+      // provider-unreachable，onclose 早退）；对端 close 帧完成关闭握手后只触发
+      // onclose → 走下方报 provider-closed——该分支实测可达（见
+      // test/realtime-dashscope.test.mjs「对端发 close 帧」），不可再删。
       if (this.closed) return
       this.closed = true
-      // 正常由 close() 主动关闭（已发 session.finish）→ 不报错；对端异常断开才算错。
-      if (!this.byGracefulClose) this.onEvent?.({ type: 'error', code: 'provider-closed' })
+      this.onEvent?.({ type: 'error', code: 'provider-closed' })
     }
     this.ws.onmessage = (msg: MessageEvent): void => {
       if (this.closed) return
@@ -92,9 +98,6 @@ class DashscopeRealtimeConnection implements RealtimeProviderConnection {
       if (ev !== null) this.onEvent?.(ev)
     }
   }
-
-  /** 是否正由 close() 的优雅收尾阶段关闭（避免 onclose 误报 error）。 */
-  private byGracefulClose = false
 
   /** 连接建立后第一时间发 session.update（pcm/16000/server_vad）。 */
   private sendSessionUpdate(): void {
@@ -143,7 +146,6 @@ class DashscopeRealtimeConnection implements RealtimeProviderConnection {
   /** 结束会话（幂等）：先发 session.finish，等 session.finished 或超时再关 WS。 */
   close(): void {
     if (this.closed) return
-    this.byGracefulClose = true
     this.closed = true
     clearTimeout(this.connectTimer)
     // VAD 模式下必须先发 session.finish 再关连接，否则服务端丢弃在途 final。
