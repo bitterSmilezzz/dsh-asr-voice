@@ -14,6 +14,7 @@
  * 整段 PCM 一次返回即可（数秒语音 ≈ 几十 KB），不需要会话注册表与流式下行——
  * 无状态、无泄漏面，比 TTS 版 RealtimeHost 简单得多。音色默认 Cherry。
  */
+import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { guardRoute, readJsonBody, sendJson } from './http.ts'
 import { resolveApiKey, type CloudAsrConfig } from './transcribe.ts'
@@ -144,11 +145,11 @@ function ev(): string {
   return `ev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-/** 注册 TTS 路由：POST /api/asr-voice/tts。 */
+/** 注册 TTS 路由：POST /api/asr-voice/tts。签名与兄弟路由（transcribe/optimize）同构。 */
 export function registerTtsRoute(
   register: (def: { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void,
-  getTtsConfig: () => { preset: string; name: string; baseUrl: string; apiKey: string; model: string; mode: string } | undefined,
-  ctx: unknown,
+  getTtsConfig: () => CloudAsrConfig | undefined,
+  ctx: Context,
 ): () => void {
   return register({
     kind: 'exact',
@@ -165,8 +166,8 @@ export function registerTtsRoute(
       const text = (body.text ?? '').trim()
       if (text === '') return sendJson(res, 400, { ok: false, reason: 'empty text' })
       if (text.length > MAX_TEXT_CHARS) return sendJson(res, 400, { ok: false, reason: `text too long (${text.length} > ${MAX_TEXT_CHARS})` })
-      const cfg = getTtsConfig() ?? { preset: 'dashscope', name: '', baseUrl: '', apiKey: '', model: '', mode: 'chat' }
-      const apiKey = await resolveApiKey(ctx as never, cfg as CloudAsrConfig)
+      const cfg = getTtsConfig() ?? { id: 'tts', preset: 'dashscope', name: '', baseUrl: '', apiKey: '', model: '', mode: 'chat' }
+      const apiKey = await resolveApiKey(ctx, cfg)
       if (!apiKey) {
         return sendJson(res, 400, { ok: false, reason: 'no API key: set the credential DASHSCOPE_API_KEY in DSH (a same-named LLM key is reused automatically)' })
       }

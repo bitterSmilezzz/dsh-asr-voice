@@ -14,6 +14,9 @@ export interface CloudProviderLike extends KeyRefSource {
     model: string;
     mode: string;
 }
+/** 上游模型列表抓取超时（毫秒）：上游网络卡死不该拖死整个响应。optimize.ts 的
+ * ctx.llm.listModels 竞速用同一常数——「枚举模型」的等待上限全仓一致。 */
+export declare const LIST_MODELS_TIMEOUT_MS = 20000;
 /** 注册 /api/asr-voice/asr-models 路由（GET）。
  * @param register - webserver 的 register 方法。
  * @param getProviders - 读取全部已配置供应商列表的 thunk。

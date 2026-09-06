@@ -73,6 +73,9 @@ export declare class RealtimeHost {
     closeSession(sid: string): void;
     /** 会话是否存活（供测试/诊断）。 */
     hasSession(sid: string): boolean;
+    /** 释放全部会话（插件卸载/热重载时由 fiber disposer 调用）：逐个 closeSession
+     *  （幂等），SSE 心跳、idle timer、provider 连接全部随之释放。 */
+    dispose(): void;
     /** 注册 4 条 exact 路由（全部过 isTrusted）。 @returns 全部路由的 disposer（由 ctx.effect 挂载/回收）。 */
     registerRoutes(register: RealtimeRouteRegister): () => void;
 }

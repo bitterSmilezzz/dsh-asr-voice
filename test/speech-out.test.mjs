@@ -144,9 +144,13 @@ test('播报一次一句，前一句 onend 后自动接下一句', async () => {
     assert.equal(fake.spoken.length, 1, '上一句没结束前不得并发播报')
     assert.equal(sink.active, true)
     fake.end()
-    await Promise.resolve() // onend → settle → 队列推进是微任务（真实浏览器 onend 本就异步）
+    // onend → settle → 队列推进是微任务（真实浏览器 onend 本就异步）。play 的
+    // rejection 经 catch 消费后再走 finally，主链多一跳：这里要两拍才见到第二句。
+    await Promise.resolve()
+    await Promise.resolve()
     assert.deepEqual(fake.spoken.map((u) => u.text), ['第一句。', '第二句。'])
     fake.end()
+    await Promise.resolve()
     await Promise.resolve()
     assert.equal(sink.active, false)
     sink.dispose()
@@ -161,18 +165,23 @@ test('onDrain 每一轮都触发——第二轮回复也要把麦克风还回来
     sink.enqueue('第一句。')
     sink.enqueue('第二句。')
     fake.end()
+    // 两拍微任务：catch 消费 rejection 先于 finally 收尾（见「播报一次一句」测试注释）。
+    await Promise.resolve()
     await Promise.resolve()
     assert.equal(drains, 0, '队列还有内容时不算排空')
     fake.end()
+    await Promise.resolve()
     await Promise.resolve()
     assert.equal(drains, 1)
     // 关键回归点：处理器不得在首次触发后被摘掉，否则第二个回合起永远卡在「朗读中」。
     sink.enqueue('第三句。')
     fake.end()
     await Promise.resolve()
+    await Promise.resolve()
     assert.equal(drains, 2)
     sink.enqueue('第四句。')
     fake.end()
+    await Promise.resolve()
     await Promise.resolve()
     assert.equal(drains, 3)
     sink.dispose()

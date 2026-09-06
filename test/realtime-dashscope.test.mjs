@@ -70,11 +70,14 @@ function wsAccept(key) {
 
 /**
  * 起一个 qwen 协议的 WS 服务。
+ * @param {{ handshakeDelayMs?: number }} [opts] - handshakeDelayMs > 0 时延迟写 101
+ *   响应，让客户端停留在 CONNECTING（模拟真实网络握手窗口，测上行缓冲）。
  * @returns {Promise<{port, sendServerEvent, getClientEvents, seen, close}>}
  *   sendServerEvent(ev) 向客户端推一条服务端事件；getClientEvents() 返回客户端发来的
  *   JSON 事件数组；seen = {auth, path}；close() 断开全部。
  */
-function startQwenWsServer() {
+function startQwenWsServer(opts = {}) {
+  const { handshakeDelayMs = 0 } = opts
   const seen = { auth: null, path: null }
   const sockets = new Set()
   const received = []
@@ -85,12 +88,16 @@ function startQwenWsServer() {
     seen.auth = req.headers['authorization'] ?? null
     seen.path = req.url ?? null
     const key = String(req.headers['sec-websocket-key'])
-    socket.write(
-      'HTTP/1.1 101 Switching Protocols\r\n' +
-      'Upgrade: websocket\r\n' +
-      'Connection: Upgrade\r\n' +
-      `Sec-WebSocket-Accept: ${wsAccept(key)}\r\n\r\n`,
-    )
+    const sendHandshake = () => {
+      socket.write(
+        'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        `Sec-WebSocket-Accept: ${wsAccept(key)}\r\n\r\n`,
+      )
+    }
+    if (handshakeDelayMs > 0) setTimeout(sendHandshake, handshakeDelayMs)
+    else sendHandshake()
     let acc = Buffer.alloc(0)
     socket.on('data', (chunk) => {
       acc = Buffer.concat([acc, chunk])
@@ -191,6 +198,37 @@ test('I5: send() 把 int16 PCM 转 base64 上行 input_audio_buffer.append', asy
     const decoded = Buffer.from(append.audio, 'base64')
     assert.equal(decoded.length, pcm.length, 'base64 解码后字节数与上行一致')
     assert.deepEqual([...decoded], [...pcm], '字节内容一致')
+    conn.close()
+  } finally {
+    await svc.close()
+  }
+})
+
+test('I5: CONNECTING 期 send() 入有界缓冲，open 后按序冲刷（会话开头帧不丢）', async () => {
+  // 握手延迟 150ms：connect() 立即返回连接（WS 仍在 CONNECTING），这正是真实网络里
+  // 会话开头 ~100-500ms 的丢帧窗口——旧实现直接静默丢弃这些帧。
+  const svc = startQwenWsServer({ handshakeDelayMs: 150 })
+  const port = await svc.listen()
+  try {
+    const provider = createDashscopeRealtimeProvider({ apiKey: 'sk-test-123', wssUrl: `ws://127.0.0.1:${port}/api-ws/v1/realtime` })
+    const conn = await provider.connect()
+    // CONNECTING 期上行 40 帧（每帧字节 = 序号，可区分内容）：缓冲上限 32 → 丢最旧 8 帧。
+    const frames = []
+    for (let i = 0; i < 40; i++) {
+      const f = new Uint8Array(16)
+      f.fill(i)
+      frames.push(f)
+      conn.send(f)
+    }
+    await waitFor(() => svc.getClientEvents().filter((e) => e.type === 'input_audio_buffer.append').length === 32)
+    const events = svc.getClientEvents()
+    assert.equal(events[0].type, 'session.update', '协议要求 session.update 先于一切 append')
+    const appends = events.filter((e) => e.type === 'input_audio_buffer.append')
+    assert.equal(appends.length, 32, '缓冲上限 32：40 帧丢最旧 8 帧，其余必达')
+    const first = Buffer.from(appends[0].audio, 'base64')
+    assert.ok(first.every((b) => b === 8), `最旧的 8 帧（0..7）被丢弃，首帧应为第 8 帧，实得 ${[...first]}`)
+    const last = Buffer.from(appends[31].audio, 'base64')
+    assert.ok(last.every((b) => b === 39), '最新帧（39）必达且按序在队尾')
     conn.close()
   } finally {
     await svc.close()

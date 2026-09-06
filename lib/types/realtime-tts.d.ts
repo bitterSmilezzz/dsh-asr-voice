@@ -14,7 +14,9 @@
  * 整段 PCM 一次返回即可（数秒语音 ≈ 几十 KB），不需要会话注册表与流式下行——
  * 无状态、无泄漏面，比 TTS 版 RealtimeHost 简单得多。音色默认 Cherry。
  */
+import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { type CloudAsrConfig } from './transcribe.ts';
 /** TTS 请求体（浏览器上行，无密钥材料）。 */
 export interface TtsRequest {
     /** 要合成的文本（一整句；空或超长拒绝）。 */
@@ -31,17 +33,10 @@ export interface TtsResult {
 }
 /** 建一条 DashScope TTS 连接并合成一整句。 */
 export declare function synthesize(apiKey: string, text: string, voice?: string, wssUrl?: string): Promise<TtsResult>;
-/** 注册 TTS 路由：POST /api/asr-voice/tts。 */
+/** 注册 TTS 路由：POST /api/asr-voice/tts。签名与兄弟路由（transcribe/optimize）同构。 */
 export declare function registerTtsRoute(register: (def: {
     kind: 'exact';
     path: string;
     handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
-}) => () => void, getTtsConfig: () => {
-    preset: string;
-    name: string;
-    baseUrl: string;
-    apiKey: string;
-    model: string;
-    mode: string;
-} | undefined, ctx: unknown): () => void;
+}) => () => void, getTtsConfig: () => CloudAsrConfig | undefined, ctx: Context): () => void;
 //# sourceMappingURL=realtime-tts.d.ts.map

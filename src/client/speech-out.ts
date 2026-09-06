@@ -184,7 +184,9 @@ function createQueueRunner(deps: QueueRunnerDeps): {
     }
     pending = true
     const my = ++token
-    void deps.play(text).finally(() => {
+    // play 的 rejection 必须消费（否则 unhandled rejection），且不能打断队列：
+    // catch 放在 finally 之前，保证任何结果都走收尾（作废迟到 settle + 续播下一句）。
+    void deps.play(text).catch(() => {}).finally(() => {
       // 迟到的旧代 settle（cancel/dispose 后）：不得动新状态（新句可能已在播）。
       if (disposed || my !== token) return
       token = 0

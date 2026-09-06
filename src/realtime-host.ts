@@ -93,9 +93,18 @@ export class SseChannel {
       }
       this.pending.push(ev)
     }
-    // 有界：极端积压（客户端几乎不读）时丢最旧一条降级，防无界增长
-    // （会话最终由 disconnect / 空闲守卫拆除）。
-    if (this.pending.length > SseChannel.PENDING_CAP) this.pending.shift()
+    // 有界：极端积压（客户端几乎不读）时降级防无界增长（会话最终由 disconnect /
+    // 空闲守卫拆除）。降级顺序不能破坏「final 必达」契约：先丢队尾 partial（可丢的
+    // 中间结果，final 到达后冗余），只有整队都是 final（不可丢的回合边界）才丢最旧
+    // 一条——新来的事件绝不顶掉已入队的 final。
+    if (this.pending.length > SseChannel.PENDING_CAP) {
+      while (this.pending.length > SseChannel.PENDING_CAP) {
+        const tail = this.pending[this.pending.length - 1]
+        if (tail === undefined || tail.type !== 'partial') break
+        this.pending.pop()
+      }
+      if (this.pending.length > SseChannel.PENDING_CAP) this.pending.shift()
+    }
     // 空闲（无背压）才立即冲刷：背压中只入队等 drain 恢复后按序送出。
     if (!this.backedUp) this.flush()
   }
@@ -282,6 +291,12 @@ export class RealtimeHost {
   /** 会话是否存活（供测试/诊断）。 */
   hasSession(sid: string): boolean {
     return this.sessions.has(sid)
+  }
+
+  /** 释放全部会话（插件卸载/热重载时由 fiber disposer 调用）：逐个 closeSession
+   *  （幂等），SSE 心跳、idle timer、provider 连接全部随之释放。 */
+  dispose(): void {
+    for (const sid of [...this.sessions.keys()]) this.closeSession(sid)
   }
 
 /** 注册 4 条 exact 路由（全部过 isTrusted）。 @returns 全部路由的 disposer（由 ctx.effect 挂载/回收）。 */

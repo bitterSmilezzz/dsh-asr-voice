@@ -223,6 +223,11 @@ export function apply(ctx: AsrVoiceHostContext): void {
       createProvider: () => createRealtimeProvider(ctx, () => settingsScope?.get()).connect(),
     });
     const disposeRoutes = host.registerRoutes((def) => ctx.webServer.register(def));
-    return () => disposeRoutes();
+    return () => {
+      disposeRoutes();
+      // 会话清理归 fiber（在注销路由之外）：卸载/热重载时逐个拆掉活动会话——
+      // SSE 心跳、idle timer、provider WS 全部随 closeSession 释放，不泄漏到进程结束。
+      host.dispose();
+    };
   }, 'asr-voice: realtime routes');
 }

@@ -26,6 +26,10 @@ export interface CloudProviderLike extends KeyRefSource {
  */
 const ASR_MODEL_RE = /(^|[/_.-])(asr|audio|omni|whisper|transcri)([/_.-]|$)|sensevoice/i
 
+/** 上游模型列表抓取超时（毫秒）：上游网络卡死不该拖死整个响应。optimize.ts 的
+ * ctx.llm.listModels 竞速用同一常数——「枚举模型」的等待上限全仓一致。 */
+export const LIST_MODELS_TIMEOUT_MS = 20_000
+
 /** 从上游 /models 响应里提取 ASR 模型条目。 */
 function pickAsrModels(raw: unknown): Array<{ id: string; name: string }> {
   const data = raw as { data?: Array<{ id?: unknown; name?: unknown; owned_by?: unknown }> }
@@ -72,7 +76,7 @@ export function registerAsrModelsRoute(
         const base = provider.baseUrl.replace(/\/+$/, '');
         const upstream = await fetch(`${base}/models`, {
           headers: { Authorization: `Bearer ${apiKey}` },
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(LIST_MODELS_TIMEOUT_MS),
         });
         const raw = (await upstream.json().catch(() => ({}))) as { error?: unknown; message?: unknown };
         if (!upstream.ok) {

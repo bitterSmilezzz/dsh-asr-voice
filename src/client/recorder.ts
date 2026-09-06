@@ -244,6 +244,10 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void,
 
   recorder.abort = () => {
     cancelled = true
+    // 挂起的 stop() 必须 settle：abort 后 settle() 的 cancelled 分支不再 resolve，
+    // 不在这里把 endResolve 收掉，stop() 的 promise 会永久挂起。语义保持 cancelled
+    // （resolve 空结果，但不触发 deliver/onDone 的正常完成路径）。
+    if (endResolve) { endResolve(''); endResolve = null }
     try {
       recognition.abort()
     } catch {
@@ -297,6 +301,10 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
   let chunks: Blob[] = []
   let maxTimer: ReturnType<typeof setTimeout> | null = null
   let stopPromise: Promise<string> | null = null
+  /** 挂起 stop() 的 resolve 句柄：abort() 时强制 resolve('')，保证 stop() 一定 settle
+   *  （abort 后 onstop 的 cancelled 分支不再 resolve/reject；reject 各分支直接走
+   *   executor 里的 reject，无需在此捕获）。 */
+  let stopResolve: ((text: string) => void) | null = null
   let active = false
   let cancelled = false
   // 授权弹窗挂起（getUserMedia 未返回）期间收到 stop/abort：start 的 post-await
@@ -431,6 +439,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
       if (e.data && e.data.size > 0) chunks.push(e.data)
     }
     stopPromise = new Promise<string>((resolve, reject) => {
+      stopResolve = resolve
       mediaRecorder!.onstop = async () => {
         stopLevelMeter()
         if (cancelled) { active = false; stopStream(); return }
@@ -472,6 +481,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
             const extra = [label, devices, `浏览器:${br}`].filter(Boolean).join(' | ')
             const err = new Error(extra === '' ? 'no-sound' : `no-sound:${extra}`)
             recorder.onFail?.(err)
+            stopResolve = null
             reject(err)
             return
           }
@@ -486,6 +496,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
           active = false
           stopStream()
           recorder.onDone?.(text)
+          stopResolve = null
           resolve(text)
         } catch (error) {
           active = false
@@ -493,6 +504,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
           if (cancelled) return
           const err = error instanceof Error ? error : new Error(String(error))
           recorder.onFail?.(err)
+          stopResolve = null
           reject(err)
         }
       }
@@ -506,6 +518,7 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
         // 不经 stop() 直接触发的 MediaRecorder 错误也要送达 onFail，否则 voice-button
         // 永久卡在 recording（后续 stop() 因 !active 只 resolve('')，无 onDone/onFail）。
         if (!cancelled) recorder.onFail?.(err)
+        stopResolve = null
         reject(err)
         // onerror 可能在无 stop() 调用方时触发：标记 rejection 已消费，避免 unhandledrejection。
         stopPromise?.catch(() => {})
@@ -541,6 +554,11 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
     if (maxTimer) clearTimeout(maxTimer)
     transcribeController?.abort()
     transcribeController = null
+    // 挂起的 stop() 必须 settle：abort 后 onstop 的 cancelled 分支不再 resolve/reject，
+    // 不在这里收掉 stopPromise 会永久挂起。语义保持 cancelled——resolve 空结果，
+    // 但不触发 onDone 的正常完成路径。
+    stopResolve?.('')
+    stopResolve = null
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try { mediaRecorder.stop() } catch { /* noop */ }
     }

@@ -321,3 +321,43 @@ test('空闲超时：会话自动拆除（防泄漏）', async () => {
   await new Promise((r) => setTimeout(r, 700))
   assert.ok(!host.hasSession(sid), '空闲会话应被自动拆除')
 })
+
+test('dispose()：插件卸载时逐个关闭活动会话（幂等，挂着的 SSE 一起释放）', async () => {
+  const host = makeHost()
+  const { sid: sid1 } = await host.createSession()
+  const { sid: sid2 } = await host.createSession()
+  // 给 sid1 挂一条 SSE：dispose 必须把下行通道一起关掉（心跳/close 监听随之释放）。
+  const sseRes = new FakeRes()
+  assert.equal(host.attachSse(sid1, sseRes), true)
+  assert.ok(host.hasSession(sid1) && host.hasSession(sid2))
+
+  host.dispose()
+  assert.ok(!host.hasSession(sid1) && !host.hasSession(sid2), 'dispose 后所有会话应被拆除')
+  assert.equal(sseRes.ended, true, '挂着的 SSE 下行应随 dispose 关闭')
+  assert.equal(host.feedAudio(sid1, toneBytes(100)), false, '已拆除会话不再接受上行')
+  // 幂等：重复 dispose 不抛、无副作用。
+  host.dispose()
+})
+
+test('SSE 背压：pending 满 cap 时溢出只丢 partial/最旧 final，新 final 必达', async () => {
+  const fakeRes = new FakeRes()
+  const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })
+  fakeRes.backed = true
+  // 填满 64 条 final（全队都是不可丢的回合边界）。
+  for (let i = 1; i <= 64; i++) channel.enqueue({ type: 'final', text: `final-${i}` })
+  // 再来一条 partial：溢出必须优先丢新来的 partial，64 条 final 一条不能少
+  //（旧实现 shift() 会丢掉最旧的 final，违反「final 必达」契约）。
+  channel.enqueue({ type: 'partial', text: '可丢的中间结果' })
+  // 再来一条 final：此时全队都是 final，才允许丢最旧（丢 final-1，保 final-65）。
+  channel.enqueue({ type: 'final', text: 'final-65' })
+
+  fakeRes.backed = false
+  fakeRes.drainCb()
+  const events = sseEvents(fakeRes)
+  assert.equal(events.length, 64, '队列有界：溢出只降级，不无界增长')
+  assert.equal(events[0].text, 'final-2', '全 final 溢出丢最旧（final-1），新 final 保序')
+  assert.equal(events[63].text, 'final-65', '最新 final 必达')
+  assert.ok(!events.some((e) => e.type === 'partial'), '溢出优先丢新来的 partial')
+  assert.ok(!events.some((e) => e.text === 'final-1'), '仅当全队都是 final 才允许丢最旧')
+  channel.close()
+})

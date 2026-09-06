@@ -210,9 +210,16 @@ export function adaptLegacyCredentials(legacy: LegacyCredentialsApiLike | undefi
 let voiceScope: SettingsScopeLike<AsrVoiceConfig> | undefined
 let credentialsApi: CredentialsApiLike | undefined
 
-/** 广播配置变更（设置卡片/录音按钮监听，驱动重渲染）。 */
+/** 广播配置变更（设置卡片/录音按钮监听，驱动重渲染）。
+ * 单个 listener 抛错不得中断其余（某处渲染异常不应让整次广播失效）。 */
 export function announce(): void {
-  for (const fn of listeners) fn()
+  for (const fn of listeners) {
+    try {
+      fn()
+    } catch {
+      // 隔离：继续通知下一个 listener
+    }
+  }
 }
 
 /** 是否普通数据对象（数组与 null 都不算）。 */

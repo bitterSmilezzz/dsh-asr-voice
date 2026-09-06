@@ -10,6 +10,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { guardRoute, readJsonBody, sendJson } from './http.ts';
+import { LIST_MODELS_TIMEOUT_MS } from './asr-models.ts';
 
 /** 最小当前模型选择面（由 DSH 的 agentDefaultModel 服务提供，peer 不 import）。 */
 interface AgentDefaultModelLike {
@@ -49,8 +50,7 @@ export interface OptimizeTarget {
   model: string
 }
 
-/** 单个 provider 模型枚举的竞速超时：上游网络卡死不该拖死整个 /models 响应。 */
-const LIST_MODELS_TIMEOUT_MS = 20_000;
+/** 单个 provider 模型枚举的竞速超时：与 asr-models 的抓取超时同源（见该处导出）。 */
 
 /**
  * 给 promise 套整体超时。

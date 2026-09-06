@@ -55,6 +55,10 @@ export function floatToInt16Le(pcm: Float32Array, gain = 1): Uint8Array {
 /** 连续失败判死阈值（上游 error 达此数即结束会话）。 */
 const CLOUD_FAIL_LIMIT = 3
 
+/** 上行泵队列上限：镜像 host 侧 pending 缓冲 cap（64 帧 ≈ 2.6s @40ms）。
+ * 网络上行慢于采集时队列有界，满了丢最旧帧——实时音频无重放价值，保新不保旧。 */
+const UPLOAD_PUMP_CAP = 64
+
 /** 上行串行泵：采集帧在回调里来，网络上行是异步的——必须排队逐帧发，不能并发堆叠。 */
 function createUploadPump(upload: (pcm: Uint8Array) => Promise<void>): {
   push(pcm: Uint8Array): void
@@ -75,6 +79,9 @@ function createUploadPump(upload: (pcm: Uint8Array) => Promise<void>): {
   }
   return {
     push(pcm) {
+      // 有界：上行慢于采集（网络慢/挂起）时不能无界堆叠；cap 与 host 侧一致，
+      // 满了丢最旧帧（镜像 host 的 SSE 降级策略：保新不保旧）。
+      if (queue.length >= UPLOAD_PUMP_CAP) queue.shift()
       queue.push(pcm)
       pump()
     },
