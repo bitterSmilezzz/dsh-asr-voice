@@ -538,5 +538,6 @@ export const CSS = `
   .dshav-hotkey-hint .dshav-dot,
   .dshav-spinner { animation: none !important; transition: none !important; }
   .dshav-hotkey-hint { animation: none !important; }
+  .dshav-preview { animation: none !important; }
 }
 `

@@ -13,6 +13,7 @@ import * as react from 'react'
 // Type-only: pulls the ui-conversation SlotMap merge (input seats + standard kit).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { cloudConfigured, config, realtimeTuning, type RealtimeTuning } from './config.ts'
+import { appendDraftText } from './draft.ts'
 import { createRealtime, type RealtimeSession } from './realtime.ts'
 import { isPcmCaptureSupported } from './capture.ts'
 import { createSentencePump, createSpeechSynthesisSink, createCloudTtsSink, isSpeechSynthesisSupported, isCloudTtsSupported, type SpeakSink } from './speech-out.ts'
@@ -177,8 +178,8 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
     if (text === '' || tuning === null || actions === undefined) return
     let merged = text
     if (config.behavior.textMode === 'append') {
-      const existing = draftRef.current
-      if (existing !== '') merged = `${existing}${/[ \n]$/.test(existing) ? '' : ' '}${text}`
+      // 分隔决策在共享纯函数 appendDraftText（src/client/draft.ts，与录音按钮同源）。
+      merged = appendDraftText(draftRef.current, text)
     }
     actions.setDraft(merged)
     actions.submit()

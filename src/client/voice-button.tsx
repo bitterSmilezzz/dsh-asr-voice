@@ -14,6 +14,8 @@ import * as react from 'react'
 // Type-only: pulls the ui-conversation SlotMap merge (input seats + standard kit).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { cloudConfigured, config, recordBehavior } from './config.ts'
+import { appendDraftText } from './draft.ts'
+import { resolveEngine, shouldFallbackToCloud } from './engine.ts'
 import { heuristicOptimize, llmOptimize } from './optimize.ts'
 import { createVoiceRecorder, isWebSpeechSupported, type VoiceRecorder } from './recorder.ts'
 import { fromTo } from './animate.ts'
@@ -195,16 +197,6 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setPhase('idle')
   }
 
-  /** 解析最终引擎：auto = 浏览器优先（Web Speech 可用时），否则回落到已配置的云端。 */
-  const resolveEngine = (): 'browser' | 'cloud' => {
-    const provider = config.asr.provider
-    if (provider === 'cloud') return 'cloud'
-    if (provider === 'browser') return 'browser'
-    // auto
-    if (!isWebSpeechSupported()) return cloudConfigured() ? 'cloud' : 'browser'
-    return 'browser'
-  }
-
   /** 启动指定引擎的录音（云端自动兜底：auto 模式下浏览器失败 → 云端重试一次）。 */
   const startWithEngine = (engine: 'browser' | 'cloud'): void => {
     let recorder: VoiceRecorder
@@ -225,7 +217,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         }
         // auto 兜底：浏览器不可用（网络/权限被浏览器 Web Speech 拒）且云端已配置 → 重试云端。
         const recoverable = code === 'network' || code === 'not-allowed' || code === 'service-not-allowed' || code === 'no-speech-support'
-        if (engine === 'browser' && config.asr.provider === 'auto' && recoverable && cloudConfigured()) {
+        if (shouldFallbackToCloud(engine, config.asr.provider, cloudConfigured(), recoverable)) {
           setNotice(t('fallbackToCloud'))
           startWithEngine('cloud')
           return
@@ -233,7 +225,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         showError(code)
       }, recordBehavior())
     } catch {
-      if (engine === 'browser' && config.asr.provider === 'auto' && cloudConfigured()) {
+      if (shouldFallbackToCloud(engine, config.asr.provider, cloudConfigured())) {
         setNotice(t('fallbackToCloud'))
         startWithEngine('cloud')
         return
@@ -274,7 +266,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     // 新会话代际：让旧异步回调（优化/迟到结果）用自己的代际差异识别并丢弃。
     generationRef.current += 1
     optimizeControllerRef.current = new AbortController()
-    const engine = resolveEngine()
+    // 引擎决策是纯函数（src/client/engine.ts）：入参配置三态 + 两个可用性标志，出参决定。
+    const engine = resolveEngine(config.asr.provider, isWebSpeechSupported(), cloudConfigured())
     if (engine === 'cloud' && !cloudConfigured()) {
       showError('cloud-not-configured')
       return
@@ -411,9 +404,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       if (config.behavior.textMode === 'append') {
         // draftRef 是草稿的权威镜像（effect 同步 props 异步回写）；props.input?.draft
         // 是本渲染帧快照，录音期间的编辑会读不到，append 会覆盖丢字。
-        const existing = draftRef.current
-        const sep = existing !== '' && !/[ \n]$/.test(existing) ? ' ' : ''
-        text = existing + sep + text
+        // 分隔决策在共享纯函数 appendDraftText（src/client/draft.ts，与语音对话按钮同源）。
+        text = appendDraftText(draftRef.current, text)
       }
       inputActions.setDraft(text)
       if (config.behavior.autoSend) inputActions.submit()
@@ -442,6 +434,15 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     const wrap = wrapRef.current
     if (!wrap) return
     stopWave()
+    // 系统 reduced-motion：GSAP 呼吸环是内联样式驱动，CSS media query 管不到，
+    // 命中时跳过无限循环动画，只画静态第一帧（半透明外圈）。
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      wrap.querySelectorAll<HTMLElement>('.dshav-wave-ring').forEach((ring) => {
+        ring.style.opacity = '0.5'
+        ring.style.transform = 'scale(0.72)'
+      })
+      return
+    }
     wrap.querySelectorAll<HTMLElement>('.dshav-wave-ring').forEach((ring, i) => {
       ring.style.opacity = '0.5'
       const spread = 1.9 + (i % 2) * 0.35

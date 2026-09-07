@@ -64,6 +64,9 @@ function applyHotkey(): () => void {
     return cachedChatSpec
   }
   const onKeyDown = (e: KeyboardEvent): void => {
+    // 按住不放的自动重复：chat 热键的 toggle 会按重复速率在开/关间抖动。
+    // holdToTalk 不受影响——held 只由首次 keydown 置位、keyup 复位，重复事件本就该忽略。
+    if (e.repeat) return
     const chatSpec = chatHotkeySpec()
     if (chatSpec !== null && matchHotkey(e, chatSpec)) {
       e.preventDefault()

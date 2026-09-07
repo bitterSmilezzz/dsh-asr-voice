@@ -39,14 +39,21 @@ function useConfigVersion(): number {
   return v
 }
 
-/** 统一字段容器（垂直布局：label / control / hint，与官方 fields 一致）。 */
-function Field({ title, desc, control }: { title: string; desc?: string | undefined; control: react.ReactNode }): react.ReactElement {
+/** 统一字段容器（垂直布局：label / control / hint，与官方 fields 一致）。
+ * a11y：label 用 htmlFor 关联控件，id 由 useId 生成后经 render-prop 传给调用方
+ * 挂到真实控件上；屏幕阅读器可读出字段名，点击标题聚焦控件。
+ * control(ids) 收到 { controlId, labelId }：普通控件挂 controlId；
+ * 组合控件（radio 组等）用 labelId 做 aria-labelledby 命名分组。 */
+interface FieldIds { controlId: string; labelId: string }
+function Field({ title, desc, control }: { title: string; desc?: string | undefined; control: (ids: FieldIds) => react.ReactNode }): react.ReactElement {
+  const controlId = react.useId()
+  const labelId = react.useId()
   return (
     <div className="dshav-field-item">
       <div className="dshav-field-head">
-        <span className="dshav-field-label">{title}</span>
+        <label className="dshav-field-label" id={labelId} htmlFor={controlId}>{title}</label>
       </div>
-      <div className="dshav-field-control">{control}</div>
+      <div className="dshav-field-control">{control({ controlId, labelId })}</div>
       {desc ? <p className="dshav-field-hint">{desc}</p> : null}
     </div>
   )
@@ -96,9 +103,10 @@ function NumberRow({ title, desc, value, onChange, min, max, step = 1 }: {
     <Field
       title={title}
       desc={desc}
-      control={
+      control={({ controlId }) => (
         <div className="dshav-field">
           <input
+            id={controlId}
             type="number"
             value={editValue}
             min={min}
@@ -116,7 +124,7 @@ function NumberRow({ title, desc, value, onChange, min, max, step = 1 }: {
             }}
           />
         </div>
-      }
+      )}
     />
   )
 }
@@ -134,9 +142,10 @@ function TextRow({ title, desc, value, onChange, type = 'text', placeholder }: {
     <Field
       title={title}
       desc={desc}
-      control={
+      control={({ controlId }) => (
         <div className="dshav-field">
           <input
+            id={controlId}
             type={type}
             value={value}
             placeholder={placeholder ?? ''}
@@ -145,7 +154,7 @@ function TextRow({ title, desc, value, onChange, type = 'text', placeholder }: {
             onChange={(e: react.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
           />
         </div>
-      }
+      )}
     />
   )
 }
@@ -162,13 +171,13 @@ function SelectRow({ title, desc, value, options, onChange }: {
     <Field
       title={title}
       desc={desc}
-      control={
+      control={({ controlId }) => (
         <div className="dshav-field">
-          <select value={value} onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}>
+          <select id={controlId} value={value} onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}>
             {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
-      }
+      )}
     />
   )
 }
@@ -215,7 +224,7 @@ function Chips({ items, label, t }: {
 }
 
 /** 快捷键录制器：点击后捕获下一组组合键；支持清除。 */
-function HotkeyRecorder({ value, onChange, t }: { value: string; onChange: (v: string) => void; t: LocaleT }): react.ReactElement {
+function HotkeyRecorder({ inputId, value, onChange, t }: { inputId: string; value: string; onChange: (v: string) => void; t: LocaleT }): react.ReactElement {
   const [arming, setArming] = react.useState(false)
 
   const handleKeyDown = (e: react.KeyboardEvent<HTMLInputElement>): void => {
@@ -234,6 +243,7 @@ function HotkeyRecorder({ value, onChange, t }: { value: string; onChange: (v: s
   return (
     <div className="dshav-field">
       <input
+        id={inputId}
         type="text"
         readOnly
         placeholder={t('hotkeyPlaceholder')}
@@ -310,20 +320,21 @@ function ModelPicker({ t, provider, model, onProvider, onModel }: {
     <>
       <Field
         title={t('llmProviderLabel')}
-        control={
+        control={({ controlId }) => (
           <div className="dshav-field">
-            <select value={provider} onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onProvider(e.target.value)}>
+            <select id={controlId} value={provider} onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onProvider(e.target.value)}>
               <option value="">{t('llmCurrentDefault')}</option>
               {(providers ?? []).map((p) => <option key={p.provider} value={p.provider}>{p.name}</option>)}
             </select>
           </div>
-        }
+        )}
       />
       <Field
         title={t('llmModelLabel')}
-        control={
+        control={({ controlId }) => (
           <div className="dshav-field">
             <select
+              id={controlId}
               value={model}
               disabled={provider === ''}
               onChange={(e: react.ChangeEvent<HTMLSelectElement>) => onModel(e.target.value)}
@@ -332,7 +343,7 @@ function ModelPicker({ t, provider, model, onProvider, onModel }: {
               {modelOptions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
-        }
+        )}
       />
       {status === 'err' ? <p className="dshav-field-hint">{t('loadFailed')}</p> : null}
       {status === 'ok' && provider !== '' && modelOptions.length === 0 ? <p className="dshav-field-hint">{t('llmModelsEmpty')}</p> : null}
@@ -519,7 +530,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
       <button type="button" className="dshav-header" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="dshav-headtext">
           <span className="dshav-name">{t('cardTitle')}</span>
-          <p className="dshav-desc">{t('cardCopy')}</p>
+          <span className="dshav-desc">{t('cardCopy')}</span>
         </span>
         <svg className={'dshav-chevron' + (open ? ' dshav-open' : '')} width={16} height={16} viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M3.5 5.75 8 10.25l4.5-4.5" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
@@ -567,6 +578,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                     <div className="dshav-field">
                       <input
                         type="password"
+                        aria-label={t('stepKeyTitle')}
                         value={keyInput}
                         placeholder={keyState?.configured === true ? t('keyKeepPlaceholder') : t('keyPastePlaceholder')}
                         spellCheck={false}
@@ -628,13 +640,13 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                       title={t('providerNameLabel')}
                       desc={t('providerNameDesc', { ref })}
                       value={provider.name}
-                      onChange={(v) => edit((c) => patchProvider(c, provider.id, { name: v }))}
+                      onChange={(v) => { edit((c) => patchProvider(c, provider.id, { name: v })); setTested(null) }}
                     />
                     <TextRow
                       title={t('cloudBaseUrlLabel')}
                       desc={t('cloudBaseUrlDesc')}
                       value={provider.baseUrl}
-                      onChange={(v) => edit((c) => patchProvider(c, provider.id, { baseUrl: v }))}
+                      onChange={(v) => { edit((c) => patchProvider(c, provider.id, { baseUrl: v })); setTested(null) }}
                     />
                     {tested === null ? (
                       <TextRow title={t('cloudModelLabel')} desc={t('cloudModelDesc')} value={provider.model} onChange={(v) => edit((c) => patchProvider(c, provider.id, { model: v }))} />
@@ -662,8 +674,8 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                       <Field
                         title={t('providerListLabel')}
                         desc={t('providerListDesc')}
-                        control={
-                          <div className="dshav-provider-list">
+                        control={({ controlId, labelId }) => (
+                          <div className="dshav-provider-list" id={controlId} role="radiogroup" aria-labelledby={labelId}>
                             {draft.asr.cloud.providers.map((p) => (
                               <div className="dshav-provider-row" key={p.id}>
                                 <label className="dshav-toggle">
@@ -687,7 +699,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                               </div>
                             ))}
                           </div>
-                        }
+                        )}
                       />
                     ) : null}
                   </>
@@ -748,7 +760,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                   onChange={(v) => edit((c) => withSection(c, 'behavior', { textMode: v === 'append' ? 'append' : 'replace' }))}
                 />
                 <ToggleRow title={t('copyToClipboardLabel')} desc={t('copyToClipboardDesc')} checked={draft.behavior.copyToClipboard} onChange={() => edit((c) => withSection(c, 'behavior', { copyToClipboard: !c.behavior.copyToClipboard }))} />
-                <Field title={t('hotkeyLabel')} desc={t('hotkeyDesc')} control={<HotkeyRecorder value={draft.behavior.hotkey} onChange={(v) => edit((c) => withSection(c, 'behavior', { hotkey: v }))} t={t} />} />
+                <Field title={t('hotkeyLabel')} desc={t('hotkeyDesc')} control={({ controlId }) => <HotkeyRecorder inputId={controlId} value={draft.behavior.hotkey} onChange={(v) => edit((c) => withSection(c, 'behavior', { hotkey: v }))} t={t} />} />
                 <NumberRow title={t('maxRecordMsLabel')} desc={t('maxRecordMsDesc')} value={draft.behavior.maxRecordMs} min={5_000} max={600_000} step={1_000} onChange={(v) => edit((c) => withSection(c, 'behavior', { maxRecordMs: v }))} />
                 <NumberRow title={t('silenceMsLabel')} desc={t('silenceMsDesc')} value={draft.behavior.silenceMs} min={200} max={60_000} step={100} onChange={(v) => edit((c) => withSection(c, 'behavior', { silenceMs: v }))} />
                 <NumberRow title={t('silenceRmsLabel')} desc={t('silenceRmsDesc')} value={draft.behavior.silenceRms} min={0} max={1} step={0.005} onChange={(v) => edit((c) => withSection(c, 'behavior', { silenceRms: v }))} />
@@ -789,7 +801,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                 {draft.realtime.tts === 'cloud' && (
                   <TextRow title={t('realtimeTtsVoiceLabel')} desc={t('realtimeTtsVoiceDesc')} value={draft.realtime.ttsVoice} onChange={(v) => edit((c) => withSection(c, 'realtime', { ttsVoice: v }))} />
                 )}
-                <Field title={t('realtimeHotkeyLabel')} desc={t('realtimeHotkeyDesc')} control={<HotkeyRecorder value={draft.realtime.hotkey} onChange={(v) => edit((c) => withSection(c, 'realtime', { hotkey: v }))} t={t} />} />
+                <Field title={t('realtimeHotkeyLabel')} desc={t('realtimeHotkeyDesc')} control={({ controlId }) => <HotkeyRecorder inputId={controlId} value={draft.realtime.hotkey} onChange={(v) => edit((c) => withSection(c, 'realtime', { hotkey: v }))} t={t} />} />
                 <ToggleRow title={t('bargeInLabel')} desc={t('bargeInDesc')} checked={draft.realtime.bargeIn && draft.realtime.engine === 'segmented'} onChange={() => edit((c) => withSection(c, 'realtime', { bargeIn: !c.realtime.bargeIn }))} disabled={draft.realtime.engine !== 'segmented'} />
                 <NumberRow title={t('realtimeSettleMsLabel')} desc={t('realtimeSettleMsDesc')} value={draft.realtime.turn.settleMs} min={200} max={10_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, settleMs: v } }))} />
                 <NumberRow title={t('realtimeTailMsLabel')} desc={t('realtimeTailMsDesc')} value={draft.realtime.turn.tailMs} min={0} max={5_000} step={100} onChange={(v) => edit((c) => withSection(c, 'realtime', { turn: { ...c.realtime.turn, tailMs: v } }))} />
