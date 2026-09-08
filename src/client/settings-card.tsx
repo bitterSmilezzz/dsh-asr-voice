@@ -6,6 +6,7 @@
 import * as react from 'react'
 // Type-only: pulls the ui-settings-plugins SlotMap merge (the settings.plugin.item card seat).
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import { Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CLOUD_PRESETS, presetById, REALTIME_PRESETS } from '../presets.ts'
 import {
   addProvider, draftActiveProvider, keyRefOf, newDraft, patchProvider, pickPreset,
@@ -59,14 +60,14 @@ function Field({ title, desc, control }: { title: string; desc?: string | undefi
   )
 }
 
-/** 开关字段：checkbox 与标题同行左对齐（官方 checkbox 行排布），desc 作 hint。 */
+/** 开关字段：官方 Switch 与标题同行（对齐官方设置面板控件），desc 作 hint。 */
 function ToggleRow({ title, desc, checked, onChange, disabled }: { title: string; desc?: string; checked: boolean; onChange: () => void; disabled?: boolean }): react.ReactElement {
   return (
     <div className={disabled ? 'dshav-field-item dshav-field-disabled' : 'dshav-field-item'}>
-      <label className="dshav-toggle">
-        <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
+      <div className="dshav-toggle">
+        <Switch checked={checked} onChange={onChange} label={title} disabled={disabled === true} />
         <span>{title}</span>
-      </label>
+      </div>
       {desc ? <p className="dshav-field-hint">{desc}</p> : null}
     </div>
   )

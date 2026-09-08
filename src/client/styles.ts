@@ -380,7 +380,7 @@ export const CSS = `
 .dshav-field-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
 .dshav-stack { display: flex; flex-direction: column; }
 .dshav-field { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-/* checkbox 行：checkbox 与文本同行左对齐（官方 ModelListEditor 排布） */
+/* 开关行：官方 Switch 与文本同行（对齐官方设置面板控件） */
 .dshav-toggle {
   display: inline-flex;
   align-items: center;
@@ -389,9 +389,7 @@ export const CSS = `
   font-weight: 500;
   line-height: 1.5;
   color: var(--dsw-alias-label-primary);
-  cursor: pointer;
 }
-.dshav-toggle input[type='checkbox'],
 .dshav-toggle input[type='radio'] {
   flex: none;
   width: 16px;
