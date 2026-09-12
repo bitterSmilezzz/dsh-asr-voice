@@ -6,7 +6,7 @@
  * 收回来，`{ echoCancellation: true }` 是唯一能白拿的抵消手段（`recorder.ts:59-62` 那组
  * 「故意不设」是另一条路径的教训——显式 `false` 在部分 macOS 设备上会得到纯静音）。
  */
-import { PCM_SAMPLE_RATE, peakAbs, resampleLinear } from './pcm.ts'
+import { PCM_SAMPLE_RATE, createPcmAudioContext, peakAbs, resampleLinear } from './pcm.ts'
 
 /** 采集失败码（由 UI 映射成文案）。 */
 export type CaptureFailure = 'no-mic' | 'no-audio-context' | 'no-worklet' | 'silent-device'
@@ -71,13 +71,13 @@ let captureCtx: AudioContext | null = null
 
 function getCaptureCtx(): AudioContext | null {
   if (captureCtx !== null) return captureCtx
-  const windowLike = window as unknown as {
-    AudioContext?: typeof AudioContext
-    webkitAudioContext?: typeof AudioContext
+  try {
+    // 请求 16k（见 createPcmAudioContext）：不请求就要自己抽点重采样，48k→16k
+    // 会丢抗混叠低通。
+    captureCtx = createPcmAudioContext('interactive')
+  } catch {
+    return null
   }
-  const AudioCtor = windowLike.AudioContext ?? windowLike.webkitAudioContext
-  if (!AudioCtor) return null
-  captureCtx = new AudioCtor({ latencyHint: 'interactive' })
   return captureCtx
 }
 

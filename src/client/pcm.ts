@@ -7,6 +7,35 @@
 /** 上行统一采样率：ASR 上游通用要求 16 kHz 单声道。 */
 export const PCM_SAMPLE_RATE = 16_000
 
+/** 采集 / 解码用 AudioContext：一律**请求 16 kHz**，让浏览器的高质量重采样器直接把
+ *  设备采样率（桌面 Chrome 多为 48k）转到上行要求的 16k。
+ *
+ *  为什么不请求：音频图按设备采样率跑，就得自己 `resampleLinear` —— 而 48k→16k 的
+ *  ratio 恰是整数 3，线性插值退化成「每 3 个点取 1 个」的裸抽取，**没有抗混叠低通**，
+ *  8 kHz 以上的内容（齿音、环境噪声）会折叠进语音带，直接伤识别率。请求 16k 后
+ *  `decodeAudioData` 与音频图都直接产出 16k，`resampleLinear` 成为空转。
+ *
+ *  浏览器不支持指定采样率（或直接抛错）时回落默认采样率；调用方**永远读回
+ *  `ctx.sampleRate` 再决定要不要自行重采样**，不要假定请求被采纳。
+ *
+ *  这是本模块唯一的 DOM 接触点：函数体内才碰 `window`，模块顶层与其它导出仍是纯
+ *  函数，node --test 直跑源码不受影响。 */
+export function createPcmAudioContext(latencyHint?: 'balanced' | 'interactive' | 'playback'): AudioContext {
+  const windowLike = window as unknown as {
+    AudioContext?: typeof AudioContext
+    webkitAudioContext?: typeof AudioContext
+  }
+  const AudioCtor = windowLike.AudioContext ?? windowLike.webkitAudioContext
+  if (!AudioCtor) throw new Error('audio context unavailable')
+  try {
+    return latencyHint === undefined
+      ? new AudioCtor({ sampleRate: PCM_SAMPLE_RATE })
+      : new AudioCtor({ latencyHint, sampleRate: PCM_SAMPLE_RATE })
+  } catch {
+    return latencyHint === undefined ? new AudioCtor() : new AudioCtor({ latencyHint })
+  }
+}
+
 /** 归一化目标幅度（0.9 ≈ 接近满幅但不触顶）。 */
 const NORMALISE_TARGET = 0.9
 

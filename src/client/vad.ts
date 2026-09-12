@@ -52,8 +52,11 @@ export interface EnergyVad {
   readonly inSpeech: boolean
 }
 
-/** 分析窗长（毫秒）。固定不开放：窗长是判定的时间分辨率而不是偏好，放到设置里 就允许出现 `silenceMs < frameMs` 这类自相矛盾的组合。 */
-const WINDOW_MS = 20
+/** 分析窗长（毫秒）。固定不开放：窗长是判定的时间分辨率而不是偏好，放到设置里 就允许出现 `silenceMs < frameMs` 这类自相矛盾的组合。
+ *  **导出给调用方折算观测窗**：`rmsAuto` 的噪声底估计器按本窗长被投喂（每 20ms 一次，
+ *  与采集帧长 `realtime.vad.frameMs` 无关），估计器用采集帧长折算窗口就会把真实观测窗
+ *  缩到标称值的一半（2s → 1s），底噪估计随之变抖、也更易被开场的语音带偏。 */
+export const VAD_WINDOW_MS = 20
 
 /** 把若干窗拼成一段连续采样。 */
 function concatWindows(windows: Float32Array[]): Float32Array {
@@ -70,11 +73,11 @@ function concatWindows(windows: Float32Array[]): Float32Array {
 
 /** 构造一个能量 VAD。`sampleRate` 必须是投喂帧的采样率（本项目为 PCM_SAMPLE_RATE）。 `floor` 可选：`tuning.rmsAuto` 时 VAD 每窗把 RMS 与语音期判定反馈给它，并用 `floor.threshold`（未学到时为 0）抬高/放低实际判据。 */
 export function createEnergyVad(sampleRate: number, tuning: VadTuning, events: VadEvents, floor?: RmsFloorSource | null): EnergyVad {
-  const windowSamples = Math.max(1, Math.round((sampleRate * WINDOW_MS) / 1000))
-  const prerollWindows = Math.max(0, Math.round(tuning.prerollMs / WINDOW_MS))
-  const silenceWindows = Math.max(1, Math.round(tuning.silenceMs / WINDOW_MS))
-  const minSpeechWindows = Math.max(1, Math.round(tuning.minSpeechMs / WINDOW_MS))
-  const maxSegmentWindows = Math.max(minSpeechWindows + 1, Math.round(tuning.maxSegmentMs / WINDOW_MS))
+  const windowSamples = Math.max(1, Math.round((sampleRate * VAD_WINDOW_MS) / 1000))
+  const prerollWindows = Math.max(0, Math.round(tuning.prerollMs / VAD_WINDOW_MS))
+  const silenceWindows = Math.max(1, Math.round(tuning.silenceMs / VAD_WINDOW_MS))
+  const minSpeechWindows = Math.max(1, Math.round(tuning.minSpeechMs / VAD_WINDOW_MS))
+  const maxSegmentWindows = Math.max(minSpeechWindows + 1, Math.round(tuning.maxSegmentMs / VAD_WINDOW_MS))
 
   const win = new Float32Array(windowSamples)
   let winLen = 0

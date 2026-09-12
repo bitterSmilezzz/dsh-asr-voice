@@ -8,8 +8,8 @@
  * （默认关 = 手动关麦，点停止整段去 ASR，见 behavior.silenceStop）。
  */
 import {
-  PCM_SAMPLE_RATE, downmixToMono, encodeWav16MonoPcm, isSilentPeak, normaliseGain,
-  peakAbs, resampleLinear, rmsFromByteTimeDomain,
+  PCM_SAMPLE_RATE, createPcmAudioContext, downmixToMono, encodeWav16MonoPcm, isSilentPeak,
+  normaliseGain, peakAbs, resampleLinear, rmsFromByteTimeDomain,
 } from './pcm.ts'
 import type { RecordBehavior } from './config.ts'
 
@@ -574,17 +574,14 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
  * 通道也兼容 wav，故统一走 WAV。纯浏览器 Web Audio API，无外部依赖。
  * 返回转换结果 + 归一化前的原始峰值（供静音守卫做 ground-truth 判定）。
  */
-/** 懒加载复用的 AudioContext（避免每次录音新建/关闭，提升转码流畅性）。 */
+/** 懒加载复用的 AudioContext（避免每次录音新建/关闭，提升转码流畅性）。
+ *  **请求 16k**：`decodeAudioData` 按上下文采样率解码，于是解码结果直接就是 16k，
+ *  后面那次 `resampleLinear` 成为空转——省掉的是「每 3 个点取 1 个」的裸抽取
+ *  （48k→16k 无抗混叠低通，会伤识别率，见 createPcmAudioContext）。 */
 let sharedAudioCtx: AudioContext | null = null
 function getAudioContext(): AudioContext {
   if (sharedAudioCtx !== null) return sharedAudioCtx
-  const windowLike = window as unknown as {
-    AudioContext?: typeof AudioContext
-    webkitAudioContext?: typeof AudioContext
-  }
-  const AudioCtor = windowLike.AudioContext ?? windowLike.webkitAudioContext
-  if (!AudioCtor) throw new Error('audio decode unavailable')
-  sharedAudioCtx = new AudioCtor()
+  sharedAudioCtx = createPcmAudioContext()
   return sharedAudioCtx
 }
 

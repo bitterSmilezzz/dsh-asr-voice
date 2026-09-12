@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 const {
   PCM_SAMPLE_RATE, SILENCE_PEAK_FLOOR, isSilentPeak, downmixToMono, resampleLinear,
   peakAbs, normaliseGain, quantiseInt16, encodeWav16MonoPcm, rmsFromByteTimeDomain,
+  createPcmAudioContext,
 } = await import('../src/client/pcm.ts')
 
 test('downmixToMono 等权平均各声道', () => {
@@ -108,5 +109,50 @@ test('整条重采样链在 4x 增益下不越界', () => {
   for (let i = 44; i < bytes.length; i += 2) {
     const v = view.getInt16(i, true)
     assert.ok(v >= -32768 && v <= 32767, `sample out of int16 range: ${v}`)
+  }
+})
+
+test('createPcmAudioContext 请求 16k（免掉无抗混叠的裸抽取重采样）', () => {
+  // 桌面 Chrome 默认 48k：不请求 16k 时 resampleLinear 的 ratio 恰为整数 3，插值
+  // 退化成「每 3 个点取 1 个」，8kHz 以上内容折叠进语音带。这里钉住「请求了 16k」。
+  const calls = []
+  class FakeCtx { constructor(opts) { calls.push(opts) } }
+  const prev = globalThis.window
+  globalThis.window = { AudioContext: FakeCtx }
+  try {
+    createPcmAudioContext('interactive')
+    assert.deepEqual(calls, [{ latencyHint: 'interactive', sampleRate: PCM_SAMPLE_RATE }])
+  } finally {
+    globalThis.window = prev
+  }
+})
+
+test('createPcmAudioContext 在浏览器拒绝指定采样率时回落默认（不抛）', () => {
+  // 部分环境对 sampleRate 抛 NotSupportedError：必须回落成「不指定采样率」的上下文，
+  // 否则整条采集/解码链直接断掉。调用方仍按 ctx.sampleRate 自行重采样。
+  const calls = []
+  class FakeCtx {
+    constructor(opts) {
+      calls.push(opts)
+      if (opts?.sampleRate !== undefined) throw new Error('NotSupportedError')
+    }
+  }
+  const prev = globalThis.window
+  globalThis.window = { AudioContext: FakeCtx }
+  try {
+    createPcmAudioContext('interactive')
+    assert.deepEqual(calls, [{ latencyHint: 'interactive', sampleRate: PCM_SAMPLE_RATE }, { latencyHint: 'interactive' }])
+  } finally {
+    globalThis.window = prev
+  }
+})
+
+test('createPcmAudioContext 无 AudioContext 时抛错（调用方据此走降级分支）', () => {
+  const prev = globalThis.window
+  globalThis.window = {}
+  try {
+    assert.throws(() => createPcmAudioContext(), /audio context unavailable/)
+  } finally {
+    globalThis.window = prev
   }
 })

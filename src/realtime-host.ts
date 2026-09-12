@@ -68,8 +68,8 @@ export class SseChannel {
   }
 
   /** 排入一条事件：空闲直写；背压时 partial 原位合并、final/stopped 排队保序。
-   *  首次直写即命中背压（write 返回 false）的事件也会入队，等 drain 后再送——
-   *  不能只把 backedUp 挂上就让事件丢失。 */
+   *  命中背压的那一条**已经写出**（`write` 返回 false 只是「别再写了」，不是「没写」），
+   *  所以队列只兜住背压期间新到的事件，等 drain 恢复后按序送出。 */
   enqueue(ev: RealtimeProviderEvent): void {
     if (this.closed) return
     if (ev.type === 'partial') {
@@ -109,9 +109,13 @@ export class SseChannel {
     if (!this.backedUp) this.flush()
   }
 
-  /** 按序冲刷排队的事件（final 不丢、partial 保最新）；缓冲满则挂 drain 等恢复。 */
+  /** 按序冲刷排队的事件（final 不丢、partial 保最新）；缓冲满则挂 drain 等恢复。
+   *  **`write()` 返回 false 只表示内核缓冲已超高水位，事件本身已被接受并会送出**——
+   *  因此出队与返回值无关：先出队再据返回值置背压标志。早先「返回 false 就不出队」的
+   *  写法会让同一条事件在 drain 后被再写一遍（partial 重放无害，final 重放会让客户端
+   *  把同一个回合提交两次）。 */
   private flush(): void {
-    if (this.closed) return
+    if (this.closed || this.backedUp) return
     while (this.pending.length > 0) {
       const ev = this.pending[0]
       const payload = `data: ${JSON.stringify(ev)}\n\n`
@@ -122,12 +126,12 @@ export class SseChannel {
         this.disconnect()
         return
       }
+      this.pending.shift()
       if (!ok) {
         this.backedUp = true
         this.armDrain()
         return
       }
-      this.pending.shift()
     }
     this.backedUp = false
   }
@@ -137,6 +141,9 @@ export class SseChannel {
     if (this.drainHandler !== null) return
     this.drainHandler = () => {
       this.drainHandler = null
+      // drain = 内核缓冲已回落到水位之下：先解除背压态，flush 才会真的往下写
+      //（flush 自身对背压态早退，避免在背压中反复重试）。
+      this.backedUp = false
       this.flush()
     }
     this.res.once('drain', this.drainHandler)

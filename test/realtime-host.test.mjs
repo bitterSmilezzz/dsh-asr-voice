@@ -36,11 +36,16 @@ class FakeRes {
   }
   writeHead(status, headers) { this.status = status; this.headers = headers }
   flushHeaders() {}
+  /**
+   * 真实 `ServerResponse.write` 语义：**返回 false 不代表没写**——事件已被接受进内核
+   * 缓冲、最终一定会送到对端，返回值只是「缓冲超水位，请等 drain 再写」。早先这里
+   * 模拟成「背压 = 丢弃」，把实现里「返回 false 就不出队」的缺陷一起放过了（drain
+   * 后同一条事件被重写一遍）。现在按真实语义建模：永远收下 chunk，背压只影响返回值。
+   */
   write(chunk) {
     this.writes += 1
-    if (this.backed) return false
     this.body += chunk
-    return true
+    return !this.backed
   }
   once(event, cb) {
     if (event === 'drain') this.drainCb = cb
@@ -67,6 +72,17 @@ function sseEvents(res) {
     }
   }
   return out
+}
+
+/** 子串在响应体里出现几次（钉「不重复投递」用）。 */
+function countOf(body, needle) {
+  let n = 0
+  let at = body.indexOf(needle)
+  while (at !== -1) {
+    n += 1
+    at = body.indexOf(needle, at + needle.length)
+  }
+  return n
 }
 
 /** 16k int16 音频字节（一段音 / 一段静音）。 */
@@ -237,55 +253,61 @@ test('SSE 挂起前的上行事件缓冲：先 audio 后 events 不丢事件', a
   host.closeSession(sid)
 })
 
-test('SSE 背压：partial 被 coalesce、final 必达；drain 后冲刷', async () => {
-  // 直接测 SseChannel（不依赖真实 socket）：先写满背压再排 final。
+test('SSE 背压：命中背压的那条已送达（不得于 drain 后重写），partial 原位合并', async () => {
+  // 真实 write 语义下 A 空闲直写；B 是「首条命中背压」的——它已经被写出，只是让通道
+  // 进入背压态；C 在背压期间到达，最终被随后的 final 挤掉。
   const fakeRes = new FakeRes()
   const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })
 
   channel.enqueue({ type: 'partial', text: 'A' }) // 缓冲空闲，正常写入
   fakeRes.backed = true // 内核缓冲满
-  channel.enqueue({ type: 'partial', text: 'B' }) // 背压：不进 body
-  channel.enqueue({ type: 'partial', text: 'C' }) // 背压中：coalesce（覆盖 B）
-  channel.enqueue({ type: 'final', text: '模拟转写·第1段' }) // 背压中：coalesce（覆盖 partial）
+  channel.enqueue({ type: 'partial', text: 'B' }) // 首条命中背压：已写出，通道转背压
+  channel.enqueue({ type: 'partial', text: 'C' }) // 背压中：可丢的中间结果
+  channel.enqueue({ type: 'final', text: '模拟转写·第1段' }) // 背压中：挤掉队尾 partial
 
   assert.ok(fakeRes.drainCb !== null, '应挂 drain 监听')
-  assert.equal(fakeRes.body.includes('B'), false)
-  assert.equal(fakeRes.body.includes('C'), false)
+  assert.equal(countOf(fakeRes.body, '"A"'), 1, '空闲期的事件必须写出')
+  assert.equal(countOf(fakeRes.body, '"B"'), 1, '命中背压的事件已写出且只写一次（旧实现在 drain 后重写）')
+  assert.equal(fakeRes.body.includes('"C"'), false, '背压期的 partial 不进 body')
+
   fakeRes.backed = false // 内核缓冲释放
-  fakeRes.drainCb() // drain 后冲刷 coalesced
-  assert.match(fakeRes.body, /模拟转写·第1段/, 'final 必须最终送达')
-  assert.ok(!fakeRes.body.includes('"B"') && !fakeRes.body.includes('"C"'), '中间 partial 被 coalesce')
+  fakeRes.drainCb() // drain 后冲刷
+  assert.equal(countOf(fakeRes.body, '模拟转写·第1段'), 1, 'final 必须最终送达，且不重复')
+  assert.deepEqual(
+    sseEvents(fakeRes).map((e) => e.text ?? e.type),
+    ['A', 'B', '模拟转写·第1段'],
+    '保序、不重复、不丢 final',
+  )
+  assert.ok(!fakeRes.body.includes('"C"'), '中间 partial 被 coalesce')
 
   channel.close()
 })
 
-test('SSE 背压：backed 期间 speech-stopped 也不丢', async () => {
+test('SSE 背压：backed 期间 speech-stopped 不被队尾 partial 挤掉', async () => {
   const fakeRes = new FakeRes()
   const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })
-  channel.enqueue({ type: 'speech-started' }) // 空闲写入
   fakeRes.backed = true
-  channel.enqueue({ type: 'partial', text: 'x' }) // 背压
-  channel.enqueue({ type: 'speech-stopped' }) // coalesce
+  channel.enqueue({ type: 'speech-started' }) // 首条命中背压：已写出，通道转背压
+  channel.enqueue({ type: 'partial', text: 'x' }) // 背压中：可丢
+  channel.enqueue({ type: 'speech-stopped' }) // 不可丢：挤掉队尾 partial
   fakeRes.backed = false
   fakeRes.drainCb()
   const events = sseEvents(fakeRes)
-  assert.ok(events.some((e) => e.type === 'speech-stopped'))
+  assert.deepEqual(events.map((e) => e.type), ['speech-started', 'speech-stopped'])
   channel.close()
 })
 
-test('SSE 背压：连续两句 final 都不丢（旧的单 coalesce 槽会顶掉第一句）', async () => {
+test('SSE 背压：连续两句 final 都不丢、不重复（旧的单 coalesce 槽会顶掉第一句）', async () => {
   const fakeRes = new FakeRes()
   const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })
   fakeRes.backed = true
-  channel.enqueue({ type: 'final', text: '第一句的最终结果' })
+  channel.enqueue({ type: 'final', text: '第一句的最终结果' }) // 首条命中背压：已写出，通道转背压
   channel.enqueue({ type: 'partial', text: '第二句的草稿' }) // 会被随后的 final₂ 合并（冗余预览）
   channel.enqueue({ type: 'final', text: '第二句的最终结果' })
   fakeRes.backed = false
   fakeRes.drainCb()
   const events = sseEvents(fakeRes)
-  assert.deepEqual(events.map((e) => e.type), ['final', 'final'], '两句的 final 都必须送达（backed 期的 partial 被后续 final 合并）')
-  assert.equal(events[0].text, '第一句的最终结果')
-  assert.equal(events[1].text, '第二句的最终结果')
+  assert.deepEqual(events.map((e) => e.text), ['第一句的最终结果', '第二句的最终结果'], '两句的 final 都必须送达且各一次')
   channel.close()
 })
 
@@ -293,7 +315,7 @@ test('SSE 背压：final 之后的 partial 不得覆盖 final（同句 partial �
   const fakeRes = new FakeRes()
   const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })
   fakeRes.backed = true
-  channel.enqueue({ type: 'final', text: '这句说完了' })
+  channel.enqueue({ type: 'final', text: '这句说完了' }) // 首条命中背压：已写出，通道转背压
   channel.enqueue({ type: 'partial', text: '下一句的预览' })
   fakeRes.backed = false
   fakeRes.drainCb()
@@ -343,7 +365,9 @@ test('SSE 背压：pending 满 cap 时溢出只丢 partial/最旧 final，新 fi
   const fakeRes = new FakeRes()
   const channel = new SseChannel(fakeRes, { heartbeatMs: 0 })
   fakeRes.backed = true
-  // 填满 64 条 final（全队都是不可丢的回合边界）。
+  // 首条命中背压的事件**已写出**（只是让通道转背压态），因此它不占队列额度。
+  channel.enqueue({ type: 'final', text: 'final-0' })
+  // 再填满 64 条 final（全队都是不可丢的回合边界）。
   for (let i = 1; i <= 64; i++) channel.enqueue({ type: 'final', text: `final-${i}` })
   // 再来一条 partial：溢出必须优先丢新来的 partial，64 条 final 一条不能少
   //（旧实现 shift() 会丢掉最旧的 final，违反「final 必达」契约）。
@@ -354,9 +378,11 @@ test('SSE 背压：pending 满 cap 时溢出只丢 partial/最旧 final，新 fi
   fakeRes.backed = false
   fakeRes.drainCb()
   const events = sseEvents(fakeRes)
-  assert.equal(events.length, 64, '队列有界：溢出只降级，不无界增长')
-  assert.equal(events[0].text, 'final-2', '全 final 溢出丢最旧（final-1），新 final 保序')
-  assert.equal(events[63].text, 'final-65', '最新 final 必达')
+  // 1 条已直写 + 队列 64 条：队列本身有界，直写的那条不重复。
+  assert.equal(events.length, 65, '队列有界：溢出只降级，不无界增长')
+  assert.equal(events[0].text, 'final-0', '首条命中背压的事件已送出且不重复')
+  assert.equal(events[1].text, 'final-2', '全 final 溢出丢最旧（final-1），新 final 保序')
+  assert.equal(events[64].text, 'final-65', '最新 final 必达')
   assert.ok(!events.some((e) => e.type === 'partial'), '溢出优先丢新来的 partial')
   assert.ok(!events.some((e) => e.text === 'final-1'), '仅当全队都是 final 才允许丢最旧')
   channel.close()

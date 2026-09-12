@@ -30,7 +30,7 @@ export type LocaleKey =
   'realtimeFirstSentenceLabel' | 'realtimeFirstSentenceDesc' | 'realtimeWatchdogLabel' | 'realtimeWatchdogDesc' | 'chatTitle' | 'chatListeningTitle' |
   'chatThinkingTitle' | 'chatSpeakingTitle' | 'chatWebSpeechFallback' | 'chatThinkingHint' | 'chatSpeakingHint' | 'chatInterrupt' |
   'chatEndedLimit' | 'chatNoReply' | 'chatNoTts' | 'chatGap' | 'errSegmentedNeedsCloud' | 'errSegmentedUnsupported' |
-  'errSegmentedUnreachable' | 'dismiss' | 'loadFailed' | 'micTitle' | 'recordingTitle' | 'transcribingTitle' |
+  'errSegmentedUnreachable' | 'errRealtimeProvider' | 'dismiss' | 'loadFailed' | 'micTitle' | 'recordingTitle' | 'transcribingTitle' |
   'optimizingTitle' | 'errNoMic' | 'errNoSound' | 'errNoSpeechSupport' | 'errWebSpeechNetwork' | 'errCloudNotConfigured' |
   'noSpeechDetected' | 'fallbackToCloud' | 'errTranscribe' | 'errOptimize' | 'previewTitle' | 'previewOriginal' |
   'previewOptimized' | 'previewConfirm' | 'previewCancel' | 'groupStats' | 'statsTitle' | 'statsCount' |
@@ -219,6 +219,7 @@ export const zh: LocaleDict = {
   errSegmentedNeedsCloud: '按句转写需要先配好云端 ASR（设置 → 语音转文字 → 云端供应商）',
   errSegmentedUnsupported: '当前浏览器不支持实时音频采集（需支持 AudioWorklet），请改用 Web Speech 引擎',
   errSegmentedUnreachable: '转写服务连续失败，本次对话已结束',
+  errRealtimeProvider: '云端实时通道已断开，本次对话已结束。请检查网络，以及所选服务商的密钥与额度。',
 
   dismiss: '关闭',
   loadFailed: '加载失败',
@@ -421,6 +422,7 @@ export const en: LocaleDict = {
   errSegmentedNeedsCloud: 'Per-sentence mode needs a configured cloud ASR provider (Settings → Voice → Cloud providers)',
   errSegmentedUnsupported: 'This browser cannot capture live audio (AudioWorklet is required) — switch back to the Web Speech engine',
   errSegmentedUnreachable: 'Transcription failed repeatedly, this conversation ended',
+  errRealtimeProvider: 'The cloud realtime channel closed; this conversation ended. Check your network and the provider key/quota.',
 
   dismiss: 'Dismiss',
   loadFailed: 'Load failed',

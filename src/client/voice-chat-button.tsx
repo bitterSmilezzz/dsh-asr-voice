@@ -103,6 +103,8 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
    * 实时语音对话的路：Chrome 走 Google 服务器被网络屏蔽时 network 错误一上来就报，
    * 不许用户每次手动切引擎。 */
   const fallbackEngineRef = react.useRef<'segmented' | null>(null)
+  /** 跨 begin() 传递的提示（降级提示要先于 begin 决定、又不能被 begin 的 notice 覆盖）。 */
+  const fallbackNoticeRef = react.useRef<string | null>(null)
   /** 在途回合闩：非空表示这句话已提交、回复还没念完。 */
   const turnRef = react.useRef<{
     armed: boolean
@@ -211,26 +213,41 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
     setPhase('listening')
   }
 
+  /** 当前实际生效的引擎（含 Web Speech 被网络屏蔽后的降级结果）。 */
+  const activeEngine = (): string => fallbackEngineRef.current ?? tuningRef.current?.engine ?? 'browser'
+
+  /** 失败码 → 用户可读文案。**按引擎分派**：云端引擎下把「云端通道断开」说成
+   *  「浏览器不支持 Web Speech，请改用云端 ASR」，是指引完全反向的误导——用户本来
+   *  就在用云端。连接级失败（握手超时 / 对端关闭 / 上游转写失败 / 事件流断）一律
+   *  归到云端通道文案，不再落进 Web Speech 兜底。 */
+  const failMessage = (code: string): string => {
+    if (code === 'no-mic' || code === 'mic-denied' || code === 'silent-device' || code === 'no-audio-context') {
+      return t('errNoMic')
+    }
+    if (code === 'network') return t('errWebSpeechNetwork')
+    if (code === 'no-worklet' || code === 'capture-failed') return t('errSegmentedUnsupported')
+    if (code === 'provider-closed' || code === 'provider-timeout' || code === 'transcription-failed' || code === 'socket-closed') {
+      return t('errRealtimeProvider')
+    }
+    if (code === 'provider-unreachable' || code === 'events-unavailable') {
+      return activeEngine() === 'cloud' ? t('errRealtimeProvider') : t('errSegmentedUnreachable')
+    }
+    return t('errNoSpeechSupport')
+  }
+
   const failByCode = (code: string): void => {
     // 自动降级：browser 引擎 network 失败且云端 ASR 已配置 → 切 segmented 立即重开
     // （浏览器识别已被网络屏蔽是持久事实，整个会话都不要再碰 Web Speech）。
     if (code === 'network' && (fallbackEngineRef.current === null && tuningRef.current?.engine === 'browser') && cloudConfigured()) {
       fallbackEngineRef.current = 'segmented'
       endSession(undefined, undefined)
-      setNotice(t('chatWebSpeechFallback'))
+      // 提示经 ref 交给 begin()：begin 自己也要写 notice（TTS 不可用），在这里直接
+      // setNotice 会被它随后覆盖，用户永远看不到「已切到按句转写」。
+      fallbackNoticeRef.current = t('chatWebSpeechFallback')
       begin()
       return
     }
-    const msg = code === 'no-mic' || code === 'mic-denied' || code === 'silent-device' || code === 'no-audio-context'
-      ? t('errNoMic')
-      : code === 'network'
-        ? t('errWebSpeechNetwork')
-        : code === 'provider-unreachable' || code === 'events-unavailable'
-          ? t('errSegmentedUnreachable')
-          : code === 'no-worklet' || code === 'capture-failed'
-            ? t('errSegmentedUnsupported')
-            : t('errNoSpeechSupport')
-    endSession(undefined, msg)
+    endSession(undefined, failMessage(code))
   }
 
   /** 开始一次对话。必须在点击回调里调用（Safari 的发声权限只认用户激活上下文）。 */
@@ -251,7 +268,10 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
     const ttsReady = tuning.tts === 'cloud' ? isCloudTtsSupported() : isSpeechSynthesisSupported()
     tuningRef.current = tuning
     setError(null)
-    setNotice(tuning.tts !== 'off' && !ttsReady ? t('chatNoTts') : null)
+    // 降级提示优先于 TTS 提示：它解释了「引擎为什么换了」，更该被看到（见 failByCode）。
+    const pendingNotice = fallbackNoticeRef.current
+    fallbackNoticeRef.current = null
+    setNotice(pendingNotice ?? (tuning.tts !== 'off' && !ttsReady ? t('chatNoTts') : null))
     setLive('')
     levelRef.current = -1
     if (tuning.tts !== 'off' && ttsReady) {
@@ -291,8 +311,13 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
   }
 
   const toggle = (): void => {
-    if (phaseRef.current === 'idle') begin()
-    else if (phaseRef.current === 'listening') endSession()
+    if (phaseRef.current === 'idle') {
+      // 新会话重新按用户配置起：上次会话的 network 降级只该在**那次会话内**粘住
+      // （同一次对话里别再碰 Web Speech），不该跨会话——用户可能换了网络，也可能
+      // 手动把引擎改回了 browser，那就要按新配置走。
+      fallbackEngineRef.current = null
+      begin()
+    } else if (phaseRef.current === 'listening') endSession()
     else interrupt()
   }
 

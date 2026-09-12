@@ -29,10 +29,14 @@ export declare class SseChannel {
         onDisconnect?: () => void;
     });
     /** 排入一条事件：空闲直写；背压时 partial 原位合并、final/stopped 排队保序。
-     *  首次直写即命中背压（write 返回 false）的事件也会入队，等 drain 后再送——
-     *  不能只把 backedUp 挂上就让事件丢失。 */
+     *  命中背压的那一条**已经写出**（`write` 返回 false 只是「别再写了」，不是「没写」），
+     *  所以队列只兜住背压期间新到的事件，等 drain 恢复后按序送出。 */
     enqueue(ev: RealtimeProviderEvent): void;
-    /** 按序冲刷排队的事件（final 不丢、partial 保最新）；缓冲满则挂 drain 等恢复。 */
+    /** 按序冲刷排队的事件（final 不丢、partial 保最新）；缓冲满则挂 drain 等恢复。
+     *  **`write()` 返回 false 只表示内核缓冲已超高水位，事件本身已被接受并会送出**——
+     *  因此出队与返回值无关：先出队再据返回值置背压标志。早先「返回 false 就不出队」的
+     *  写法会让同一条事件在 drain 后被再写一遍（partial 重放无害，final 重放会让客户端
+     *  把同一个回合提交两次）。 */
     private flush;
     /** 挂一次 drain 监听（同一时间只挂一个；close/disconnect 时摘掉）。 */
     private armDrain;

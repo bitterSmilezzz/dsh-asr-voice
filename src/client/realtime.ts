@@ -13,7 +13,7 @@ import { isWebSpeechSupported, startLevelSimulation, transcribeViaHost, type Spe
 import { isRestartEcho } from './turn-guard.ts'
 import { startPcmCapture, type PcmCapture, type PcmCaptureOptions } from './capture.ts'
 import { PCM_SAMPLE_RATE, encodeWav16MonoPcm, isSilentPeak, normaliseGain, peakAbs, rmsOfFloat } from './pcm.ts'
-import { createEnergyVad, type EnergyVad, type VadTuning } from './vad.ts'
+import { createEnergyVad, VAD_WINDOW_MS, type EnergyVad, type VadTuning } from './vad.ts'
 import { createRmsFloorEstimator, DEFAULT_RMS_FLOOR_TUNING, createBargeInGate, DEFAULT_BARGE_IN_TUNING } from './rms-floor.ts'
 import { meaningfulTurn } from './turn-guard.ts'
 import { createCloudRealtime, defaultCloudCapture } from './realtime-cloud.ts'
@@ -333,9 +333,11 @@ export function createSegmentedRealtime(
   let text = ''
   let vad: EnergyVad | null = null
   let capture: PcmCapture | null = null
-  /** rmsAuto 的噪声底估计器：与 VAD 同生命周期，静音期持续学习。 */
+  /** rmsAuto 的噪声底估计器：与 VAD 同生命周期，静音期持续学习。
+   *  窗口按 **VAD 分析窗**（20ms）折算而非采集帧长：observe 是 VAD 每分析窗投喂一次，
+   *  用采集帧长（默认 40ms）折算会把真实观测窗缩到标称值的一半。 */
   const floor = tuning.vad.rmsAuto === true
-    ? createRmsFloorEstimator({ ...DEFAULT_RMS_FLOOR_TUNING, frameMs: tuning.frameMs })
+    ? createRmsFloorEstimator({ ...DEFAULT_RMS_FLOOR_TUNING, frameMs: VAD_WINDOW_MS })
     : null
   /** barge-in 回声门控：播放回复期间武装，只有它触发才打断（D19，默认关）。 */
   const bargeGate = createBargeInGate({ ...DEFAULT_BARGE_IN_TUNING, frameMs: tuning.frameMs })
@@ -471,6 +473,11 @@ export function createSegmentedRealtime(
       active = true
       paused = false
       generation += 1
+      // 每个会话重新估一遍噪声底：估计器与引擎实例同生命周期，而 estimate 一旦被
+      // 开场语音带偏（学习期把语音当底噪 → 阈值抬到语音之上 → 永远不判有声），不重置
+      // 就是整个页面会话都失效。会话边界是唯一「从零开始」的干净时机——pause/resume
+      // 不能重置，否则每次播报回来都要盲听一个观测窗。
+      floor?.reset()
       ensureVad()
       openCapture()
     },

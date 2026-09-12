@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 // realtime.ts 顶层不碰 DOM（识别器构造在工厂里），按 pcm.test.mjs 的做法
 // 直接用 node 的类型剥离跑源码。
@@ -600,4 +601,25 @@ test('barge-in: disarm 后恢复正常切段上行', async () => {
     await until('断言的段正常上行', () => requests.length === 1)
     assert.equal(events.barges, 0)
   })
+})
+
+// —— 源码形状断言（离线测不到的接线）——
+// 噪声底估计器的窗口折算与会话级重置都是「接线」而非算法：引擎单测里 floor 是测试
+// 自己造的，接线错了照样全绿（真实后果是观测窗缩水一半 + 一次带偏终身失效）。
+const REALTIME_SRC = readFileSync(new URL('../src/client/realtime.ts', import.meta.url), 'utf8')
+
+test('噪声底估计器按 VAD 分析窗（20ms）折算窗口，不是采集帧长', () => {
+  // observe 是 VAD 每分析窗投喂一次；用采集帧长（默认 40ms）折算会把 2s 观测窗
+  // 缩成 1s，底噪估计更抖、更易被开场语音带偏。
+  assert.match(
+    REALTIME_SRC,
+    /createRmsFloorEstimator\(\{ \.\.\.DEFAULT_RMS_FLOOR_TUNING, frameMs: VAD_WINDOW_MS \}\)/,
+    '估计器窗口必须按 VAD_WINDOW_MS 折算',
+  )
+  assert.match(REALTIME_SRC, /import \{[^}]*VAD_WINDOW_MS[^}]*\} from '\.\/vad\.ts'/, 'VAD 分析窗常量需从 vad.ts 导入')
+})
+
+test('每个会话开始时重置噪声底（否则一次带偏终身失效）', () => {
+  // 估计器与引擎实例同生命周期；会话边界是唯一干净的「从零开始」时机。
+  assert.match(REALTIME_SRC, /floor\?\.reset\(\)/, 'start() 必须重置噪声底估计')
 })
