@@ -22,7 +22,7 @@ import {
 } from './config.ts'
 import { VoiceSettingsCard } from './settings-card.tsx'
 import { VoiceButton, voiceController } from './voice-button.tsx'
-import { VoiceChatButton, voiceChatController } from './voice-chat-button.tsx'
+import { voiceChatController } from './voice-chat.tsx'
 import { matchHotkey, parseHotkey, type HotkeySpec } from './hotkey.ts'
 
 export { zh, en }
@@ -71,7 +71,10 @@ function applyHotkey(): () => void {
     if (chatSpec !== null && matchHotkey(e, chatSpec)) {
       e.preventDefault()
       e.stopPropagation()
-      voiceChatController.toggle()
+      // 录音链路正占着麦克风（录音/识别/优化）：对话抢不到设备，忽略。
+      // 守卫放在 preventDefault 之后——这个组合键已经被我们认领了，
+      // 无论开不开对话都不该再漏给页面。
+      if (!voiceController.isBusy()) voiceChatController.toggle()
       return
     }
     const spec = hotkeySpec()
@@ -79,6 +82,9 @@ function applyHotkey(): () => void {
     if (!matchHotkey(e, spec)) return
     e.preventDefault()
     e.stopPropagation()
+    // 对话进行中录音键不生效：两条链路共用同一个输入设备，谁在跑谁独占。
+    // （按钮那一路的对称守卫在 voice-button.tsx 的 begin()。）
+    if (voiceChatController.isActive()) return
     if (config.behavior.holdToTalk) {
       // busy（识别/优化中）：按一次 = 打断，不进入 held（避免松键误触发新录音）。
       if (voiceController.isBusy()) {
@@ -127,13 +133,16 @@ export function apply(ctx: ClientContext): void {
 
   const t = ctx.locale.bind(NS)
 
-  // 录音按钮（conversation.input.right 工具行，输入区 right 端）。
+  // 语音输入 + 语音对话：同一个座位只放一个按钮（点 = 转写，长按 = 对话）。
+  // 对话能力仍由 realtime.enabled 控制，但入口不再随之增删——开关一拨，
+  // 按钮内部经 config 订阅立刻跟着变（voice-chat.tsx 的 useRealtimeEnabled），
+  // 所以原来那套「注册/注销第二个 entry」的动态逻辑连同它的副作用一起没了。
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'dsh-asr-voice-button',
     order: 10,
     locale: NS,
-    inject: (sessionId: string) => ({ sessionId, t }),
+    inject: (sessionId: string) => ({ sessionId, t, cancelTurn }),
   }, (props) => jsxRuntime.jsx(VoiceButton, props)))
 
   /** 打断当前回合：InputActions 只有 5 个成员、不含 cancel，取消只能走会话作用域的 conversation 服务。 */
@@ -151,34 +160,8 @@ export function apply(ctx: ClientContext): void {
     }
   })
 
-  // 语音对话按钮：同一座位的第二个 entry，随 realtime.enabled 出现/消失。
-  // inject 的工厂在声明已存在时同步执行，返回幂等 disposer——正好用来做「开关一拨就
-  // 注册/注销」，而不是等到下次冷启动才生效。
-  ctx.effect(() => {
-    let off: (() => void) | undefined
-    const sync = (): void => {
-      const want = config.realtime.enabled
-      if (want && off === undefined) {
-        off = ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
-          name: 'conversation.input.right',
-          id: 'dsh-asr-voice-realtime-button',
-          order: 11,
-          locale: NS,
-          inject: (sessionId: string) => ({ sessionId, t, cancelTurn }),
-        }, (props) => jsxRuntime.jsx(VoiceChatButton, props)))
-      } else if (!want && off !== undefined) {
-        const dispose = off
-        off = undefined
-        dispose()
-      }
-    }
-    sync()
-    const unsub = subscribeConfig(sync)
-    return () => {
-      unsub()
-      off?.()
-    }
-  }, 'asr-voice: realtime button')
+  // 语音对话按钮：已并入上面的麦克风按钮（点 = 转写，长按 = 对话），
+  // 这里不再注册第二个 entry，也不再有随开关增删的注册副作用。
 
   // 快捷键（默认 Ctrl+Shift+Space；可选按住说话）。
   ctx.effect(applyHotkey, 'asr-voice: hotkey')

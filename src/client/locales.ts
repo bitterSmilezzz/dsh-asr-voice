@@ -30,7 +30,7 @@ export type LocaleKey =
   'realtimeFirstSentenceLabel' | 'realtimeFirstSentenceDesc' | 'realtimeWatchdogLabel' | 'realtimeWatchdogDesc' | 'chatTitle' | 'chatListeningTitle' |
   'chatThinkingTitle' | 'chatSpeakingTitle' | 'chatWebSpeechFallback' | 'chatThinkingHint' | 'chatSpeakingHint' | 'chatInterrupt' |
   'chatEndedLimit' | 'chatNoReply' | 'chatNoTts' | 'chatGap' | 'errSegmentedNeedsCloud' | 'errSegmentedUnsupported' |
-  'errSegmentedUnreachable' | 'errRealtimeProvider' | 'dismiss' | 'loadFailed' | 'micTitle' | 'recordingTitle' | 'transcribingTitle' |
+  'errSegmentedUnreachable' | 'errRealtimeProvider' | 'dismiss' | 'loadFailed' | 'micTitle' | 'micTitleHoldChat' | 'recordingTitle' | 'transcribingTitle' |
   'optimizingTitle' | 'errNoMic' | 'errRecorderStart' | 'errNoSound' | 'errNoSpeechSupport' | 'errWebSpeechNetwork' | 'errCloudNotConfigured' |
   'noSpeechDetected' | 'fallbackToCloud' | 'errTranscribe' | 'errOptimize' | 'previewTitle' | 'previewOriginal' |
   'previewOptimized' | 'previewConfirm' | 'previewCancel' | 'groupStats' | 'statsTitle' | 'statsCount' |
@@ -146,7 +146,7 @@ export const zh: LocaleDict = {
   copyToClipboardLabel: '自动复制到剪贴板',
   copyToClipboardDesc: '识别优化后自动把结果复制到系统剪贴板，方便粘贴到其它地方。',
   hotkeyLabel: '快捷键',
-  hotkeyDesc: '点击后按新组合键（如 Ctrl+Shift+Space）；留空关闭。',
+  hotkeyDesc: '点击后按新组合键（如 Ctrl+Shift+Space）；留空关闭。语音对话进行中此键不生效。',
   hotkeyPlaceholder: '点击录制快捷键',
   hotkeyClear: '清除',
   maxRecordMsLabel: '单次录音上限',
@@ -157,8 +157,8 @@ export const zh: LocaleDict = {
   silenceRmsDesc: '0~1 的响度比例，低于它算安静。环境嘈杂就调高，说话很轻就调低。',
 
   groupRealtime: '实时语音对话',
-  realtimeEnableLabel: '启用「语音对话」按钮',
-  realtimeEnableDesc: '在麦克风按钮旁再加一个：边说边上屏，停顿即发起回合，并把回复朗读出来。默认开启。',
+  realtimeEnableLabel: '启用语音对话',
+  realtimeEnableDesc: '开启后长按麦克风按钮即可进入：边说边上屏，停顿即发起回合，并把回复朗读出来。默认开启。',
   realtimeTtsLabel: '回复播报',
   realtimeTtsDesc: '用浏览器内置语音把 agent 的回复读出来；选「不播报」则只上屏文字。',
   realtimeTtsBrowser: '浏览器语音（默认）',
@@ -169,7 +169,7 @@ export const zh: LocaleDict = {
   realtimeHotkeyLabel: '对话快捷键',
   bargeInLabel: '语音插话（全双工，默认关）',
   bargeInDesc: '播报回复期间继续收音：你开口说话（持续超过回声门）就直接打断朗读、取消当前回合。默认关——浏览器 AEC 在虚拟设备上实测不生效（0.42 dB），真机回环复测通过前先保持半双工最稳；仅按句切段引擎（segmented）支持。',
-  realtimeHotkeyDesc: '点击后按新组合键，用于开始/结束对话或打断播报；留空表示只用按钮。与上面的录音快捷键互不影响。',
+  realtimeHotkeyDesc: '点击后按新组合键，用于开始/结束对话或打断播报；留空表示只能用按钮长按。与上面的录音快捷键互不影响。',
   realtimeSettleMsLabel: '断句等待',
   realtimeSettleMsDesc: '单位毫秒。识别文字停止变化这么久，就认为这句说完并上屏。',
   realtimeTailMsLabel: '收尾延时',
@@ -224,6 +224,7 @@ export const zh: LocaleDict = {
   dismiss: '关闭',
   loadFailed: '加载失败',
   micTitle: '语音输入',
+  micTitleHoldChat: '语音输入（长按开始语音对话）',
   recordingTitle: '录音中…点击结束',
   transcribingTitle: '识别中…点击取消',
   optimizingTitle: '优化中…点击取消',
@@ -350,7 +351,7 @@ export const en: LocaleDict = {
   copyToClipboardLabel: 'Auto-copy to clipboard',
   copyToClipboardDesc: 'Copy the recognized/optimized result to the system clipboard automatically.',
   hotkeyLabel: 'Hotkey',
-  hotkeyDesc: 'Click, then press a new combo (e.g. Ctrl+Shift+Space). Clear to disable.',
+  hotkeyDesc: 'Click, then press a new combo (e.g. Ctrl+Shift+Space). Clear to disable. Inert while a voice chat is running.',
   hotkeyPlaceholder: 'Click to record hotkey',
   hotkeyClear: 'Clear',
   maxRecordMsLabel: 'Max recording length',
@@ -361,8 +362,8 @@ export const en: LocaleDict = {
   silenceRmsDesc: 'Loudness ratio from 0 to 1; anything below counts as quiet. Raise it in noisy rooms, lower it if you speak softly.',
 
   groupRealtime: 'Realtime voice chat',
-  realtimeEnableLabel: 'Show the voice chat button',
-  realtimeEnableDesc: 'Adds a second button next to the mic: live captions while you speak, a turn starts on your pause, and the reply is read back. On by default.',
+  realtimeEnableLabel: 'Enable voice chat',
+  realtimeEnableDesc: 'When on, hold the mic button to start: live captions while you speak, a turn starts on your pause, and the reply is read back. On by default.',
   realtimeTtsLabel: 'Speak replies',
   realtimeTtsDesc: 'Reads the agent reply aloud with the browser built-in voice. Choose "off" for captions only.',
   realtimeTtsBrowser: 'Browser speech (default)',
@@ -373,7 +374,7 @@ export const en: LocaleDict = {
   realtimeHotkeyLabel: 'Chat hotkey',
   bargeInLabel: 'Barge-in (full duplex, off by default)',
   bargeInDesc: 'Keep listening while the reply is spoken: your voice (sustained past the echo gate) cuts the TTS and cancels the turn. Off by default — Chromium AEC measured 0.42 dB on virtual devices, so half-duplex stays the default until a real acoustic-loop retest; segmented engine only.',
-  realtimeHotkeyDesc: 'Click, then press a new combo to start, stop or interrupt the chat. Leave empty to use the button only. Independent from the recording hotkey above.',
+  realtimeHotkeyDesc: 'Click, then press a new combo to start, stop or interrupt the chat. Clear to rely on the mic button long-press only. Independent from the recording hotkey above.',
   realtimeSettleMsLabel: 'Turn settle time',
   realtimeSettleMsDesc: 'Milliseconds. Once the transcript stops changing for this long, the turn is considered finished and put on screen.',
   realtimeTailMsLabel: 'Turn tail delay',
@@ -428,6 +429,7 @@ export const en: LocaleDict = {
   dismiss: 'Dismiss',
   loadFailed: 'Load failed',
   micTitle: 'Voice input',
+  micTitleHoldChat: 'Voice input (hold to start voice chat)',
   recordingTitle: 'Recording… click to stop',
   transcribingTitle: 'Transcribing… click to cancel',
   optimizingTitle: 'Optimizing… click to cancel',

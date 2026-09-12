@@ -202,7 +202,7 @@ test('null / 形状漂移不得顶掉本地默认（realtimeTuning 必须是全�
   const tuning = realtimeTuning()
   assert.equal(tuning.settleMs, DEFAULTS.realtime.turn.settleMs)
   assert.equal(tuning.firstSentenceMinChars, DEFAULTS.realtime.speech.firstSentenceMinChars)
-  assert.equal(tuning.hotkey, '', '快捷键位上的 null 会被 parseHotkey 当成字符串炸掉')
+  assert.equal(tuning.hotkey, DEFAULTS.realtime.hotkey, '快捷键位上的 null 会被 parseHotkey 当成字符串炸掉，必须回退到本地默认（默认值随版本变，别写死）')
   assert.equal(tuning.enabled, true, '开关位上的 null 回退默认（默认开）')
   assert.equal(tuning.engine, 'browser', '引擎位上的 null 会把会话装配成 undefined 引擎')
   assert.equal(tuning.segmented.vad.silenceMs, DEFAULTS.realtime.vad.silenceMs, '整段 vad 顶成 null 时解构 vad.frameMs 直接炸')

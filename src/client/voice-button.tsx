@@ -1,12 +1,18 @@
-/** dsh-asr-voice — client 录音按钮（conversation.input.right 工具行）。
- * 流程：点击/快捷键 → 录音（浏览器 Web Speech 实时 / 云端 MediaRecorder）
- * → 停止 → 转写文本 → 提示词优化（heuristic 即时 / llm 预览卡）
- * → 填入草稿（inputActions.setDraft），可选自动发送（inputActions.submit）。
+/** dsh-asr-voice — client 语音按钮（conversation.input.right 工具行）。
+ * **一个按钮，两个动作**：点 = 录音转写，长按 = 语音对话。
+ * 曾经是并排两个按钮（麦克风 + 气泡），交互面冗余、还占输入栏宽度；合并后
+ * 用「点/长按」这对手势区分，两条链路各自仍是完整闭环：
+ * - 点：录音（浏览器 Web Speech 实时 / 云端 MediaRecorder）→ 停止 → 转写文本
+ *   → 提示词优化（heuristic 即时 / llm 预览卡）→ 填入草稿（inputActions.setDraft），
+ *   可选自动发送（inputActions.submit）。
+ * - 长按：进入实时语音对话（voice-chat.tsx），再点结束或打断。
+ * 两条链路共用同一个输入设备，所以互斥守卫成对出现：录音侧在 begin() 与长按许可里
+ * 读 chatActiveRef，对话侧经 canStart 读麦克风状态。
  * 动效（microanimations 原则：反馈/定向/愉悦，克制）：
  * - 录音：多层呼吸光环（back.out 缓动、错开延迟、非机械）+ 实时频谱条
  * （cloud 真实 RMS / browser 模拟能量，CSS 变量驱动）
  * - 状态提示条：滑入 + 呼吸点（recording）/ 转圈（transcribing/optimizing）
- * - 按钮：hover 微缩放、active 按压缩放
+ * - 按钮：hover 微缩放、active 按压缩放；长按可用时右上角一颗静态小点
  * 独立契约：本组件只依赖官方 slot 标准 kit（inputActions / session / input），
  * 不依赖任何第三方插件；样式 data 标签与命名空间唯一。
  */
@@ -19,6 +25,10 @@ import { resolveEngine, shouldFallbackToCloud } from './engine.ts'
 import { heuristicOptimize, llmOptimize } from './optimize.ts'
 import { createVoiceRecorder, isWebSpeechSupported, type VoiceRecorder } from './recorder.ts'
 import { fromTo } from './animate.ts'
+import { ChatIcon, MicIcon, RecDot, SpectrumBars, Spinner } from './icons.tsx'
+import { DEFAULT_LONG_PRESS_MS, createLongPressGate } from './long-press.ts'
+import { routeButtonPress, type MicPhase } from './button-route.ts'
+import { useVoiceChat, type ReplyBlock } from './voice-chat.tsx'
 import { systemDict } from './locales.ts'
 import type { LocaleT } from './locales.ts'
 
@@ -28,21 +38,28 @@ interface InputActionsLike {
   submit(): void
 }
 
-/** 组件收到的 owner share + standard kit 最小面（结构类型，参照官方契约）。 */
+/** 组件收到的 owner share + standard kit 最小面（结构类型，参照官方契约）。
+ * 一个按钮同时驱动两条链路：录音转写（本文件）与实时语音对话（voice-chat.tsx），
+ * 所以 owner share 要同时满足两边——`phase`/`blank` 归录音用，
+ * `running`/`partial` 归对话用（跟读流式回复）。 */
 export interface VoiceButtonProps {
   sessionId?: string
   input?: { draft?: string; phase?: string }
-  session?: { blank?: boolean; composerPhase?: string }
+  session?: {
+    blank?: boolean
+    composerPhase?: string
+    running?: boolean
+    partial?: { blocks?: readonly ReplyBlock[] } | null
+  }
   inputActions?: InputActionsLike
+  /** 取消当前回合：由 host 半区经 slot inject 注入（组件拿不到 ctx）。 */
+  cancelTurn?: (sessionId: string) => void
   /** 本地化翻译函数（由 slot inject 注入）。 */
   t: LocaleT
 }
 
-/** 组件内部状态机。 */
-type VoiceState = 'idle' | 'recording' | 'transcribing' | 'optimizing'
-
-/** 频谱条柱数。 */
-const SPECTRUM_BARS = 12
+/** 组件内部状态机（与 button-route.ts 的 MicPhase 同源，单点定义防漂移）。 */
+type VoiceState = MicPhase
 
 /** 全局录音控制器：只驱动「最后挂载」的实例（当前可见会话）。 */
 export const voiceController = {
@@ -56,36 +73,6 @@ export const voiceController = {
   },
 }
 let current: { toggle(): void; isRecording(): boolean; isBusy(): boolean } | undefined
-
-/** 麦克风图标。 */
-function MicIcon(): react.ReactElement {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="9" y="2.5" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0" />
-      <path d="M12 18v3.5" />
-    </svg>
-  )
-}
-
-/** 录音状态图标（实心圆点，带呼吸）。 */
-export function RecDot(): react.ReactElement {
-  return <span className="dshav-rec-dot" />
-}
-
-/** 转圈（transcribing / optimizing）。 */
-export function Spinner(): react.ReactElement {
-  return <span className="dshav-spinner" aria-hidden="true" />
-}
-
-/** 频谱条（12 根柱，CSS 变量 --bar 错落）：memo 化——interim 文本每次变化 重渲染按钮（麦克风按钮与对话按钮共用）时柱子的虚拟 DOM 不再重建（柱形是 静态的，仅高度由 CSS 变量 --level 在帧循环驱动）。 */
-export const SpectrumBars = react.memo((): react.ReactElement => (
-  <react.Fragment>
-    {Array.from({ length: SPECTRUM_BARS }, (_, i) => (
-      <span key={i} className="dshav-bar" style={{ '--bar': String(0.35 + (i / (SPECTRUM_BARS - 1)) * 0.65) } as react.CSSProperties} />
-    ))}
-  </react.Fragment>
-))
 
 /** 录音按钮 + 状态提示条 + 预览卡。 @param props - slot 注入的 owner share + 标准 kit + 翻译函数。 */
 export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
@@ -113,6 +100,24 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const optimizeControllerRef = react.useRef<AbortController | null>(null)
   const stateRef = react.useRef<VoiceState>('idle')
   stateRef.current = state
+  // 对话是否正在进行。两条链路共用同一个输入设备，谁先占了另一个就不能再抢：
+  // 录音侧在 begin() 与长按许可里都读它（对话侧的对称守卫见 voice-chat.tsx 的 canStart）。
+  const chatActiveRef = react.useRef(false)
+  // 长按要用的两样东西在下面 useVoiceChat 之后才有值，先留 ref 转发：
+  // 长按回调活在事件里，不能用挂载那一帧的闭包。
+  const chatEnabledRef = react.useRef(false)
+  const chatToggleRef = react.useRef<() => void>(() => {})
+  // 长按手势：点 = 转写，长按 = 对话。判定是纯逻辑（long-press.ts），这里只管接线。
+  const longPressRef = react.useRef<ReturnType<typeof createLongPressGate> | null>(null)
+  if (longPressRef.current === null) {
+    longPressRef.current = createLongPressGate({
+      thresholdMs: DEFAULT_LONG_PRESS_MS,
+      // 麦克风正忙（录音/识别/优化）时不认长按：此时按住只该是「点」的拖长，
+      // 用户想的是停止录音，不该顺手把对话也开起来。
+      isLongPressAllowed: () => chatEnabledRef.current && stateRef.current === 'idle',
+      onLongPress: () => { chatToggleRef.current() },
+    })
+  }
   // 打断标志：cancel() 置位后，迟到的 onDone/onFail/优化结果一律丢弃。
   const cancelledRef = react.useRef(false)
   // 会话代际：begin() 递增，异步回调捕获自己的代际；cancel→立即 begin 时
@@ -267,6 +272,9 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   }
 
   const begin = async (): Promise<void> => {
+    // 对话正占着麦克风：录音键（尤其快捷键那条路）不许抢设备。
+    // 按钮点击本来就会被路由到对话分支，这里是给快捷键兜底。
+    if (chatActiveRef.current) return
     setError(null)
     setNotice(null)
     setInterim('')
@@ -489,12 +497,62 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     optimizeControllerRef.current?.abort()
   }, [])
 
+  // ── 语音对话（同一按钮的另一半能力） ────────────────────────────────
+  // 对话的状态机、引擎、播报都在 voice-chat.tsx；这里只取它需要的那几样：
+  // 图标/标题/点击动作，以及它自己的状态提示条（放进同一个 wrap 才定位得准）。
+  const chat = useVoiceChat({
+    sessionId: props.sessionId,
+    session: props.session,
+    input: props.input,
+    inputActions,
+    cancelTurn: props.cancelTurn,
+    // 录音链路占着麦克风时不给开对话：两边抓的是同一个输入设备。
+    canStart: () => stateRef.current === 'idle',
+    t,
+  })
+  chatActiveRef.current = chat.active
+  chatEnabledRef.current = chat.enabled
+  chatToggleRef.current = chat.toggle
+
+  /** 点按钮：对话中归对话，否则归录音。仲裁本身是纯函数（button-route.ts）。 */
+  const onButtonClick = (): void => {
+    const action = routeButtonPress({
+      // 长按刚触发过：浏览器照样会补一个 click，读一次就复位。
+      longPress: longPressRef.current?.shouldSuppressClick() === true,
+      chatActive: chat.active,
+      micPhase: state,
+    })
+    if (action === 'none') return
+    if (action === 'chat') { chat.toggle(); return }
+    if (action === 'begin') { void begin(); return }
+    if (action === 'finish') { void finish(); return }
+    cancel()
+  }
+  // 长按用指针捕获：手指/鼠标移出按钮后 pointerup 仍回到按钮，不会漏掉 release。
+  const onPointerDown = (e: react.PointerEvent<HTMLButtonElement>): void => {
+    // 多指同时按下时只认主指针（第二个指针不该重启计时）。
+    if (!e.isPrimary) return
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* 指针已失效：退化成普通点击 */ }
+    longPressRef.current?.press()
+  }
+  const onPointerUp = (): void => { longPressRef.current?.release() }
+  // pointercancel（浏览器接管手势）与 lostpointercapture（捕获意外释放）都要收摊，
+  // 否则 pressed 卡在 true，下一次 press 会被自己忽略掉。
+  const onPointerAbort = (): void => { longPressRef.current?.cancel() }
+
   const busy = state !== 'idle'
   // 悬停提示按系统语言（与 DSH 界面语言解耦），其余文案仍随界面语言。
   const sys = systemDict()
-  const title = busy
-    ? state === 'recording' ? sys.recordingTitle : state === 'transcribing' ? sys.transcribingTitle : sys.optimizingTitle
-    : sys.micTitle
+  // 对话进行中时按钮的语义整个归对话；空闲时提示「长按可对话」，否则用户没处知道。
+  const title = chat.active
+    ? chat.title
+    : busy
+      ? state === 'recording' ? sys.recordingTitle : state === 'transcribing' ? sys.transcribingTitle : sys.optimizingTitle
+      : chat.enabled ? sys.micTitleHoldChat : sys.micTitle
+  // 两条链路共用一条提示位（同一个 wrap，绝对定位会重叠）。优先级：
+  // 对话进行中的字幕 > 录音的错误/提示 > 录音进行中的状态 > 对话留下的提示。
+  // 录音在途的状态排在对话「留下的」提示之前——前者是正在发生的事。
+  const chatStatus = chat.active || (!busy && error === null && notice === null) ? chat.status : null
 
   return (
     <react.Fragment>
@@ -502,13 +560,21 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         <button
           type="button"
           className="dshav-mic-button"
-          data-state={state}
+          data-state={chat.active ? chat.phase : state}
+          data-mode={chat.active ? 'chat' : 'input'}
+          data-chat={chat.enabled ? 'ready' : 'none'}
           aria-label={title}
-          aria-pressed={state === 'recording'}
+          aria-pressed={chat.active || state === 'recording'}
           disabled={disabled}
-          onClick={() => { if (state === 'idle') { void begin() } else if (state === 'recording') { void finish() } else { cancel() } }}
+          onClick={onButtonClick}
+          onPointerDown={onPointerDown}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerAbort}
+          onLostPointerCapture={onPointerAbort}
         >
-          {state === 'recording' ? <RecDot /> : <MicIcon />}
+          {chat.active
+            ? (chat.phase === 'listening' ? <RecDot /> : <ChatIcon />)
+            : (state === 'recording' ? <RecDot /> : <MicIcon />)}
           {/* 悬停气泡：不依赖浏览器原生 title（自动化浏览器会禁用），文案随系统语言 */}
           <span className="dshav-tooltip" role="tooltip">{title}</span>
           <span className="dshav-wave" aria-hidden="true">
@@ -517,35 +583,39 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             <span className="dshav-wave-ring" data-ring="3" />
           </span>
         </button>
-        {error !== null && (
-          <span className="dshav-hotkey-hint" data-kind="err" role="status">
-            <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
-            <span className="dshav-hint-text">{error}</span>
-            <button type="button" className="dshav-hint-dismiss" aria-label={sys.dismiss} onClick={dismissHint}>×</button>
-          </span>
-        )}
-        {notice !== null && (
-          <span className="dshav-hotkey-hint" data-kind="notice" role="status">
-            <span className="dshav-dot" />
-            <span className="dshav-hint-text">{notice}</span>
-            <button type="button" className="dshav-hint-dismiss" aria-label={sys.dismiss} onClick={dismissHint}>×</button>
-          </span>
-        )}
-        {busy && (
-          <span className="dshav-hotkey-hint" data-state={state} ref={hintRef} role="status">
-            {state === 'recording' ? <span className="dshav-dot" /> : <Spinner />}
-            {state === 'recording' && interim !== '' ? <span className="dshav-hint-text">{interim}</span> : null}
-            {state === 'optimizing' && optimizingDraft ? <span className="dshav-hint-text">{t('optimizingHint')}</span> : null}
-            {state === 'transcribing' ? <span className="dshav-hint-text">{t('transcribingHint')}</span> : null}
-            {state === 'recording' && (
-              <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
-                <SpectrumBars />
+        {chatStatus !== null ? chatStatus : (
+          <react.Fragment>
+            {error !== null && (
+              <span className="dshav-hotkey-hint" data-kind="err" role="status">
+                <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
+                <span className="dshav-hint-text">{error}</span>
+                <button type="button" className="dshav-hint-dismiss" aria-label={sys.dismiss} onClick={dismissHint}>×</button>
               </span>
             )}
-            {state !== 'recording' && (
-              <button type="button" className="dshav-hint-dismiss" aria-label={t('cancelBusy')} title={t('cancelBusy')} onClick={cancel}>×</button>
+            {notice !== null && (
+              <span className="dshav-hotkey-hint" data-kind="notice" role="status">
+                <span className="dshav-dot" />
+                <span className="dshav-hint-text">{notice}</span>
+                <button type="button" className="dshav-hint-dismiss" aria-label={sys.dismiss} onClick={dismissHint}>×</button>
+              </span>
             )}
-          </span>
+            {busy && (
+              <span className="dshav-hotkey-hint" data-state={state} ref={hintRef} role="status">
+                {state === 'recording' ? <span className="dshav-dot" /> : <Spinner />}
+                {state === 'recording' && interim !== '' ? <span className="dshav-hint-text">{interim}</span> : null}
+                {state === 'optimizing' && optimizingDraft ? <span className="dshav-hint-text">{t('optimizingHint')}</span> : null}
+                {state === 'transcribing' ? <span className="dshav-hint-text">{t('transcribingHint')}</span> : null}
+                {state === 'recording' && (
+                  <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
+                    <SpectrumBars />
+                  </span>
+                )}
+                {state !== 'recording' && (
+                  <button type="button" className="dshav-hint-dismiss" aria-label={t('cancelBusy')} title={t('cancelBusy')} onClick={cancel}>×</button>
+                )}
+              </span>
+            )}
+          </react.Fragment>
         )}
       </span>
       {preview !== null && (

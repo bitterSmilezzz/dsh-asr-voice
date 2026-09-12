@@ -70,6 +70,11 @@ export const CSS = `
   color: var(--dshav-text-2);
   cursor: pointer;
   padding: 0;
+  /* 一个按钮同时承担「点」与「长按」：触屏上必须关掉双击缩放与长按选中，
+     否则按住 450ms 会被浏览器判成长按选词/缩放，手势根本传不到我们手里。 */
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
   transition: color .18s ease, background .18s ease, transform .14s var(--dshav-ease-bounce, cubic-bezier(.34,1.56,.64,1));
 }
 .dshav-mic-button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,.05)); color: var(--dshav-text);}
@@ -82,11 +87,28 @@ export const CSS = `
 .dshav-mic-button[data-state='optimizing'] { color: var(--dshav-accent);}
 .dshav-mic-button:disabled { opacity: .45; cursor: default;}
 
-/* ── 语音对话按钮（复用上面的按钮壳，只有状态色不同） ─────────────── */
-.dshav-chat-button[data-state='listening'] { color: var(--dshav-danger); background: color-mix(in srgb, var(--dshav-danger) 12%, transparent);}
-.dshav-chat-button[data-state='listening'] .dshav-rec-dot { animation: dshav-blink 1.1s ease-in-out infinite;}
-.dshav-chat-button[data-state='thinking'] { color: var(--dshav-accent);}
-.dshav-chat-button[data-state='speaking'] { color: var(--dshav-accent); background: var(--dshav-accent-soft);}
+/* ── 同一个按钮的对话态（复用上面的按钮壳，只有状态色不同） ─────────── */
+.dshav-mic-button[data-mode='chat'][data-state='listening'] { color: var(--dshav-danger); background: color-mix(in srgb, var(--dshav-danger) 12%, transparent);}
+.dshav-mic-button[data-mode='chat'][data-state='listening'] .dshav-rec-dot { animation: dshav-blink 1.1s ease-in-out infinite;}
+.dshav-mic-button[data-mode='chat'][data-state='thinking'] { color: var(--dshav-accent);}
+.dshav-mic-button[data-mode='chat'][data-state='speaking'] { color: var(--dshav-accent); background: var(--dshav-accent-soft);}
+/* 长按可用提示：右上角一颗静态小点。两个动作共用一个按钮，不给点线索的话
+   「长按能开对话」没有任何可发现性（tooltip 只在悬停时才出现）。 */
+.dshav-mic-button[data-chat='ready']::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--dshav-accent);
+  opacity: .5;
+  transition: opacity .18s ease;
+}
+.dshav-mic-button[data-chat='ready']:hover::after { opacity: 1; }
+/* 已经在对话里：这颗点没有信息量了（按钮本身已经换了图标与状态色）。 */
+.dshav-mic-button[data-mode='chat']::after { opacity: 0; }
 /* 字幕行：这里上屏的文字就是主角，给它比状态提示更宽的可视区（截断在 JS 做）。 */
 .dshav-hotkey-hint[data-kind='caption'] { max-width: min(520px, calc(100vw - 120px));}
 .dshav-hotkey-hint[data-kind='caption'][data-state='speaking'] .dshav-hint-text { color: var(--dshav-accent);}

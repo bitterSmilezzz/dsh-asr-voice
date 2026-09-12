@@ -116,8 +116,8 @@ export const AsrVoiceSettingsSchema: any = z.object({
     tts: z.string().default('browser'),
     /** 云端 TTS 音色（仅 tts=cloud 生效；qwen3-tts-flash-realtime 系统音色名）。 */
     ttsVoice: z.string().default('Cherry'),
-    /** 进出实时模式的快捷键（默认关，避免与官方快捷键相撞）。 */
-    hotkey: z.string().default(''),
+    /** 进出实时模式的快捷键（与录音键 Ctrl+Shift+Space 错开，避免撞车）。 */
+    hotkey: z.string().default('Ctrl+Shift+Alt+Space'),
     /** 语音插话（默认关）：播报期间恢复收音，人声持续超出回声门才打断。 */
     bargeIn: z.boolean().default(false),
     /** 回合边界判定（本地兜底：实时引擎不给回合终点时由文字稳定性决定）。 */

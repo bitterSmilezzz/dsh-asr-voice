@@ -1,4 +1,4 @@
-/** dsh-asr-voice — 语音对话按钮（conversation.input.right，与麦克风并列）。
+/** dsh-asr-voice — 语音对话链路（不再是独立按钮，而是并入麦克风按钮的一段能力）。
  * 闭环：开始 → 边说边上字幕 → 停顿即把这句 setDraft+submit 发起 agent 回合
  * → 读 session.partial 的流式回复，分句交给 SpeakSink 朗读
  * → 念完自动把麦克风还回来，进入下一句。
@@ -8,17 +8,21 @@
  * 2. **一次一个在途回合**：turnRef 非空就是闩，任何路径都不允许第二个提交插进去。
  * 3. **麦克风不无人值守**：realtime.maxSessionMs 到点自动结束并交还设备。
  * 实时路径不做提示词优化：对话要的是即时，不是清洗过的转写。
+ *
+ * 形态说明：本模块导出的是 **hook + 状态条**，不是按钮。界面上只有一个按钮
+ * （voice-button.tsx），「点击转写 / 长按对话」由那个按钮统一裁决；这里只负责
+ * 对话自己的状态机与它那一条状态提示。全局快捷键仍经 voiceChatController 驱动。
  */
 import * as react from 'react'
 // Type-only: pulls the ui-conversation SlotMap merge (input seats + standard kit).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { cloudConfigured, config, realtimeTuning, type RealtimeTuning } from './config.ts'
+import { cloudConfigured, config, realtimeTuning, subscribeConfig, type RealtimeTuning } from './config.ts'
 import { appendDraftText } from './draft.ts'
 import { createRealtime, type RealtimeSession } from './realtime.ts'
 import { isPcmCaptureSupported } from './capture.ts'
 import { createSentencePump, createSpeechSynthesisSink, createCloudTtsSink, isSpeechSynthesisSupported, isCloudTtsSupported, type SpeakSink } from './speech-out.ts'
 import { isWebSpeechSupported } from './recorder.ts'
-import { RecDot, SpectrumBars, Spinner } from './voice-button.tsx'
+import { SpectrumBars, Spinner } from './icons.tsx'
 import { systemDict } from './locales.ts'
 import type { LocaleT } from './locales.ts'
 
@@ -29,19 +33,23 @@ interface InputActionsLike {
 }
 
 /** assistant 内容块的最小面（只认 text，reasoning/tool-call 不念）。 */
-interface ReplyBlock {
+export interface ReplyBlock {
   kind?: string
   text?: string
 }
 
-/** owner share（InputZone：会话快照 + 输入态）+ 标准 kit 最小面 + 注入项。 */
-export interface VoiceChatButtonProps {
-  sessionId?: string
-  session?: { running?: boolean; partial?: { blocks?: readonly ReplyBlock[] } | null }
-  input?: { draft?: string }
-  inputActions?: InputActionsLike
+/** 对话链路需要的 owner share + 标准 kit 最小面 + 注入项。
+ * 可选属性显式带上 `| undefined`：调用方（slot 注入）本来就可能传 undefined，
+ * 而本仓开了 exactOptionalPropertyTypes，不写就只能靠条件展开绕，噪音更大。 */
+export interface VoiceChatProps {
+  sessionId?: string | undefined
+  session?: { running?: boolean; partial?: { blocks?: readonly ReplyBlock[] } | null } | undefined
+  input?: { draft?: string } | undefined
+  inputActions?: InputActionsLike | undefined
   /** 取消当前回合：由 host 半区经 slot inject 注入（组件拿不到 ctx）。 */
-  cancelTurn?: (sessionId: string) => void
+  cancelTurn?: ((sessionId: string) => void) | undefined
+  /** 开始对话前的额外许可：录音链路正占着麦克风时返回 false。 */
+  canStart?: (() => boolean) | undefined
   t: LocaleT
 }
 
@@ -62,14 +70,12 @@ export const voiceChatController = {
 }
 let currentChat: { toggle(): void; isActive(): boolean } | undefined
 
-/** 对话图标（声波气泡：与麦克风的实心咪头区分开）。 */
-function ChatIcon(): react.ReactElement {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H12l-4.5 3.5v-3.5H6.5A2.5 2.5 0 0 1 4 13.5z" />
-      <path d="M9 10v-1.5M12 11V7.5M15 10v-1.5" />
-    </svg>
-  )
+/** realtime.enabled 的响应式读取：设置里一拨开关，按钮的长按能力立刻跟着变。 */
+const subscribeEnabled = (fn: () => void): (() => void) => subscribeConfig(fn)
+const readEnabled = (): boolean => config.realtime.enabled
+
+export function useRealtimeEnabled(): boolean {
+  return react.useSyncExternalStore(subscribeEnabled, readEnabled)
 }
 
 /** 只保留尾部字符，供单行字幕显示长回复。 */
@@ -84,14 +90,32 @@ function replyTextOf(blocks: readonly ReplyBlock[] | undefined): string {
   return blocks.reduce((acc, b) => (b.kind === 'text' ? acc + (b.text ?? '') : acc), '')
 }
 
-/** 「语音对话」按钮。 @param props - slot 注入的 owner share + 标准 kit + 翻译函数。 */
-export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement {
+/** 对话按钮需要的那几样东西。status 由本模块渲染——状态条的定位依赖按钮的
+ *  `.dshav-mic-wrap`，但内容是对话自己的语义，拆两处会立刻走味。 */
+export interface VoiceChatHandle {
+  /** 当前阶段。 */
+  phase: ChatPhase
+  /** 是否在对话中（phase !== 'idle'）。 */
+  active: boolean
+  /** 对话能力是否可用（realtime.enabled）。关闭时长按退化成点击。 */
+  enabled: boolean
+  /** 按钮的悬停/无障碍标题。 */
+  title: string
+  /** 点按钮该做的事：进/出对话或打断。 */
+  toggle: () => void
+  /** 对话的状态提示条（错误 / 提示 / 字幕）。放进按钮的同一个 wrap 里。 */
+  status: react.ReactNode
+}
+
+/** 对话链路。 @param props - slot 注入的 owner share + 标准 kit + 翻译函数。 */
+export function useVoiceChat(props: VoiceChatProps): VoiceChatHandle {
   const { inputActions, t } = props
-  const disabled = !inputActions
   const [phase, setPhaseState] = react.useState<ChatPhase>('idle')
   const [live, setLive] = react.useState('')
   const [error, setError] = react.useState<string | null>(null)
   const [notice, setNotice] = react.useState<string | null>(null)
+  /** 对话能力总开关（realtime.enabled）。设置里一拨，按钮的长按能力立刻跟着变。 */
+  const enabled = useRealtimeEnabled()
 
   const phaseRef = react.useRef<ChatPhase>('idle')
   const setPhase = (next: ChatPhase): void => { phaseRef.current = next; setPhaseState(next) }
@@ -118,11 +142,13 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
   const mountedRef = react.useRef(true)
   // 回调活在被创建的那一帧里：props/最新闭包一律经 ref 转发，免得拿到旧 inputActions。
   const actionsRef = react.useRef<InputActionsLike | undefined>(inputActions)
-  const cancelRef = react.useRef<VoiceChatButtonProps['cancelTurn']>(props.cancelTurn)
+  const cancelRef = react.useRef<VoiceChatProps['cancelTurn']>(props.cancelTurn)
+  const canStartRef = react.useRef<VoiceChatProps['canStart']>(props.canStart)
   const runningRef = react.useRef(props.session?.running ?? false)
   const draftRef = react.useRef(props.input?.draft ?? '')
   actionsRef.current = inputActions
   cancelRef.current = props.cancelTurn
+  canStartRef.current = props.canStart
   runningRef.current = props.session?.running ?? false
   const replyText = react.useMemo(() => replyTextOf(props.session?.partial?.blocks), [props.session?.partial?.blocks])
   const running = props.session?.running ?? false
@@ -147,6 +173,13 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
     setError(err ?? null)
     setNotice(note ?? null)
   }
+
+  // 开关被拨到关：正在进行的对话立刻收摊。以前靠「注销第二个按钮」顺带卸载组件
+  // 完成这件事（卸载 effect 里 stop 引擎），入口合并成常驻按钮后那个副作用没有了，
+  // 必须显式补上——否则对话会带着开着的麦克风一直跑下去。
+  const teardownRef = react.useRef<() => void>(() => {})
+  teardownRef.current = (): void => { if (phaseRef.current !== 'idle') endSession() }
+  react.useEffect(() => { if (!enabled) teardownRef.current() }, [enabled])
 
   /** 交还麦克风，开始听下一句（幂等：只有 thinking/speaking 才需要还）。 */
   const resumeListening = (): void => {
@@ -312,6 +345,8 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
 
   const toggle = (): void => {
     if (phaseRef.current === 'idle') {
+      // 麦克风被录音链路占用时不开对话：两边都抓同一个输入设备，必然互相打架。
+      if (canStartRef.current !== undefined && !canStartRef.current()) return
       // 新会话重新按用户配置起：上次会话的 network 降级只该在**那次会话内**粘住
       // （同一次对话里别再碰 Web Speech），不该跨会话——用户可能换了网络，也可能
       // 手动把引擎改回了 browser，那就要按新配置走。
@@ -382,49 +417,50 @@ export function VoiceChatButton(props: VoiceChatButtonProps): react.ReactElement
     : phase === 'listening' ? t('chatListeningTitle')
       : phase === 'thinking' ? t('chatThinkingHint')
         : t('chatSpeakingHint')
-  return (
-    <span className="dshav-mic-wrap" data-variant="chat">
-      <button
-        type="button"
-        className="dshav-mic-button dshav-chat-button"
-        data-state={phase}
-        aria-label={title}
-        aria-pressed={busy}
-        disabled={disabled}
-        onClick={toggle}
-      >
-        {phase === 'listening' ? <RecDot /> : <ChatIcon />}
-      </button>
-      {/* 悬停气泡：不依赖浏览器原生 title（自动化浏览器会禁用），文案随系统语言 */}
-      <span className="dshav-tooltip" role="tooltip">{title}</span>
-      {error !== null && (
+  // 状态条按「错误 > 提示 > 字幕」的优先级只显示一条（与录音链路同款取舍）。
+  // 不 memo：里面挂着 spectrumRef 与 interrupt 的最新闭包，缓存反而要小心陈旧。
+  const status = ((): react.ReactNode => {
+    if (error !== null) {
+      return (
         <span className="dshav-hotkey-hint" data-kind="err" role="status">
           <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
           <span className="dshav-hint-text">{error}</span>
           <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={() => { setError(null) }}>×</button>
         </span>
-      )}
-      {notice !== null && (
+      )
+    }
+    if (notice !== null) {
+      return (
         <span className="dshav-hotkey-hint" data-kind="notice" role="status">
           <span className="dshav-dot" />
           <span className="dshav-hint-text">{notice}</span>
           <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={() => { setNotice(null) }}>×</button>
         </span>
-      )}
-      {busy && (
-        <span className="dshav-hotkey-hint" data-kind="caption" data-state={phase} role="status" aria-live="polite">
-          {phase === 'listening' ? <span className="dshav-dot" /> : <Spinner />}
-          <span className="dshav-hint-text">{hintText}</span>
-          {phase === 'listening' && (
-            <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
-              <SpectrumBars />
-            </span>
-          )}
-          {phase !== 'listening' && (
-            <button type="button" className="dshav-hint-dismiss" aria-label={t('chatInterrupt')} title={t('chatInterrupt')} onClick={interrupt}>×</button>
-          )}
-        </span>
-      )}
-    </span>
-  )
+      )
+    }
+    if (!busy) return null
+    return (
+      <span className="dshav-hotkey-hint" data-kind="caption" data-state={phase} role="status" aria-live="polite">
+        {phase === 'listening' ? <span className="dshav-dot" /> : <Spinner />}
+        <span className="dshav-hint-text">{hintText}</span>
+        {phase === 'listening' && (
+          <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
+            <SpectrumBars />
+          </span>
+        )}
+        {phase !== 'listening' && (
+          <button type="button" className="dshav-hint-dismiss" aria-label={t('chatInterrupt')} title={t('chatInterrupt')} onClick={interrupt}>×</button>
+        )}
+      </span>
+    )
+  })()
+
+  return {
+    phase,
+    active: busy,
+    enabled,
+    title,
+    toggle,
+    status,
+  }
 }

@@ -6,6 +6,62 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
+## [0.3.0] - 2026-09-12
+
+### 变更（破坏性）
+
+- **两个按钮合并成一个：点 = 语音输入，长按 = 语音对话。** 此前输入栏右侧并排两个按钮
+  （麦克风 + 气泡），交互面冗余、还占输入栏宽度；现在同一个按钮按手势分派：短按走原来的
+  录音转写链路，按住约 450ms 直接进入实时语音对话，对话中再点即结束或打断。
+  按钮右上角多了一颗静态小点，表示「长按可对话」可用（对话总开关关闭时不画）。
+- **语音对话有了默认快捷键 `Ctrl+Shift+Alt+Space`**（macOS 上等效 Cmd+Shift+Alt+Space）。
+  此前默认是空串——对话只能用鼠标点。它与录音键 `Ctrl+Shift+Space` 错开，不会撞车；
+  留空仍可关闭，此时按钮长按是唯一入口。
+- **两条链路互斥守卫成对补齐**：录音/识别/优化进行中时长按不认（按住只当「点」的拖长，
+  用户想的是停止录音）；对话进行中录音键（按钮点击与快捷键两条路）一律不生效。
+  两者抓的是同一个输入设备，谁在跑谁独占。
+- **对话总开关关闭时，正在进行的对话会立刻收摊**。此前靠「注销第二个按钮」顺带卸载组件
+  完成这件事，入口合并成常驻按钮后那个副作用消失了，改为显式监听 `realtime.enabled`
+  并结束会话——否则关掉开关后麦克风会一直开着。
+- 设置项文案同步：「启用『语音对话』按钮」→「启用语音对话」（不再有第二个按钮），
+  对话快捷键与录音快捷键的说明补上长按入口与互斥行为。
+
+### 内部
+
+- 新增 `src/client/long-press.ts`：点/长按判定是纯逻辑（时间源与定时器可注入），
+  且**短按刻意走原生 `click`**——键盘 Enter/Space 因此天然可用，也不会出现
+  「pointerup 触发一次 + click 再触发一次」的双发。长按后的那个 click 必须吞掉，
+  否则一次长按会既开对话又开转写。
+- 新增 `src/client/button-route.ts`：手势 → 动作的仲裁抽成纯函数
+  （`none` / `chat` / `begin` / `finish` / `cancel`），把「一个按钮两个动作」的真值表
+  从 JSX 里拿出来单测。
+- 新增 `src/client/icons.tsx`：`MicIcon` / `ChatIcon` / `RecDot` / `Spinner` /
+  `SpectrumBars` 集中到中立模块。合并后麦克风按钮要复用对话逻辑、对话状态条又要用图标，
+  图标留在任一侧都会成环。
+- `src/client/voice-chat-button.tsx` → `src/client/voice-chat.tsx`：由「自带按钮的组件」
+  改为 **hook（`useVoiceChat`）+ 它自己的状态条**。对话状态条必须渲染在按钮的
+  `.dshav-mic-wrap` 内（`.dshav-hotkey-hint` 是相对它 `right: 34px` 绝对定位的），
+  所以两条链路现在共用一条提示位，优先级：对话字幕 > 录音错误/提示 > 录音状态 >
+  对话留下的提示。
+- `conversation.input.right` 从两个 entry 收敛为一个（`dsh-asr-voice-button`），
+  随开关增删第二个 entry 的动态注册逻辑及其副作用一并删除。
+- 按钮补 `touch-action: manipulation` 与 `user-select: none`：触屏上不关掉双击缩放与
+  长按选中，按住 450ms 会被浏览器判成长按选词，手势根本传不到我们手里。
+- `test/config-freeze.test.mjs` 里「快捷键位上的 null 回退默认」断言改为比对
+  `DEFAULTS.realtime.hotkey` 而非写死 `''`（默认值本就该随版本变）。
+
+### 验证
+
+- 双半区 typecheck（host + client）零错误，构建通过。
+- 测试 **248/248** 通过（新增 14 例：长按判定 10 例、按钮手势仲裁 4 例）；
+  Node 22.22.2 与 Node 26.7.0 双版本均全绿。
+
+### 已知限制（本轮未改）
+
+- 长按阈值 450ms 是常量，未进设置面板（改动它属于「手感」调参，先按默认观察）。
+- 合并后按钮的悬停提示是唯一的长按发现途径（加上那颗小点）；首次使用者仍可能
+  需要读一次设置页说明。
+
 ## [0.2.15] - 2026-09-12
 
 ### 修复
@@ -164,7 +220,8 @@
 - `providerView` 归一化，避免不同 provider 返回值形状差异导致的展示错乱。
 - 补上 `http` / `presets` 相关测试用例。
 
-[未发布]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.15...HEAD
+[未发布]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.15...v0.3.0
 [0.2.15]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.12...v0.2.13
