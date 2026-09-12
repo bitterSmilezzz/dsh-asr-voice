@@ -31,7 +31,7 @@ export type LocaleKey =
   'chatThinkingTitle' | 'chatSpeakingTitle' | 'chatWebSpeechFallback' | 'chatThinkingHint' | 'chatSpeakingHint' | 'chatInterrupt' |
   'chatEndedLimit' | 'chatNoReply' | 'chatNoTts' | 'chatGap' | 'errSegmentedNeedsCloud' | 'errSegmentedUnsupported' |
   'errSegmentedUnreachable' | 'errRealtimeProvider' | 'dismiss' | 'loadFailed' | 'micTitle' | 'recordingTitle' | 'transcribingTitle' |
-  'optimizingTitle' | 'errNoMic' | 'errNoSound' | 'errNoSpeechSupport' | 'errWebSpeechNetwork' | 'errCloudNotConfigured' |
+  'optimizingTitle' | 'errNoMic' | 'errRecorderStart' | 'errNoSound' | 'errNoSpeechSupport' | 'errWebSpeechNetwork' | 'errCloudNotConfigured' |
   'noSpeechDetected' | 'fallbackToCloud' | 'errTranscribe' | 'errOptimize' | 'previewTitle' | 'previewOriginal' |
   'previewOptimized' | 'previewConfirm' | 'previewCancel' | 'groupStats' | 'statsTitle' | 'statsCount' |
   'statsChars' | 'statsLastAt' | 'statsEmpty'
@@ -228,6 +228,7 @@ export const zh: LocaleDict = {
   transcribingTitle: '识别中…点击取消',
   optimizingTitle: '优化中…点击取消',
   errNoMic: '未检测到麦克风',
+  errRecorderStart: '录音启动失败：麦克风可能被其他程序占用或已被系统回收，请关闭占用麦克风的应用后重试。',
   errNoSound: '未检测到声音：录音为静音，未发送识别。请检查麦克风权限、系统输入音量，并在浏览器地址栏站点设置/授权弹窗中把输入设备选为「内置麦克风」（虚拟音频设备常被误选导致静音）',
   errNoSpeechSupport: '当前浏览器不支持 Web Speech，请改用云端 ASR（Chrome/Edge 均支持）。',
   errWebSpeechNetwork: '浏览器语音识别网络不可用（服务可能被网络屏蔽），已请改用云端 ASR。',
@@ -431,6 +432,7 @@ export const en: LocaleDict = {
   transcribingTitle: 'Transcribing… click to cancel',
   optimizingTitle: 'Optimizing… click to cancel',
   errNoMic: 'No microphone detected',
+  errRecorderStart: 'Recording failed to start: the microphone may be in use by another app or was reclaimed by the system. Close the app using it and try again.',
   errNoSound: 'No sound detected: the recording was silent and was not sent. Check the mic permission, system input volume, and pick the built-in microphone as the input device in the browser site settings / permission prompt (virtual audio devices are often selected by mistake and record silence)',
   errNoSpeechSupport: 'Web Speech is not supported by this browser; switch to cloud ASR (Chrome/Edge support it).',
   errWebSpeechNetwork: 'Browser speech recognition network is unavailable (the service may be blocked); switch to cloud ASR.',

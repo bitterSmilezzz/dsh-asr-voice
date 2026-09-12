@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import { readRawBody, readJsonBody, sendJson, guardRoute } from '../lib/http.js'
+import { readRawBody, readJsonBody, sendJson, guardRoute, HttpBodyError, statusOfBodyError } from '../lib/http.js'
 
 /** 起一个真实 http server，跑完即关（readRawBody 的 socket 行为只能在真实连接上验证）。 */
 async function withServer(handler, run) {
@@ -109,6 +109,80 @@ test('readJsonBody: 空 body 返回 {}，非法 JSON 抛错', async () => {
     const good = await post('{"a":1}')
     assert.deepEqual(good.parsed, { a: 1 })
   })
+})
+
+// ── body 错误的状态码语义（413/408/400）───────────────────────────────────────
+// 这些状态码此前被路由一律映射成 502，把「客户端发了 30MB」记成「上游故障」。
+// 钉住三件事：错误类型自带 status、instanceof 能穿过 req.destroy/for-await、映射函数不误伤普通错误。
+
+test('HttpBodyError: readRawBody 超限抛 413（且 socket 未被毁，响应真能送达）', async () => {
+  let caught = null
+  await withServer(async (req, res) => {
+    try {
+      await readRawBody(req, 10)
+      res.end('no-error')
+    } catch (error) {
+      caught = error
+      res.statusCode = statusOfBodyError(error, 502)
+      res.end('too-large')
+    }
+  }, async (port) => {
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, method: 'POST', headers: { 'content-length': '20' } }, (res) => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode))
+      })
+      req.on('error', reject)
+      req.write('0123456789ABCDEF')
+      req.end()
+    })
+    // 关键：413 必须真的到达客户端（超限路径不 destroy socket，只是停止读取）。
+    assert.equal(status, 413)
+    assert.ok(caught instanceof HttpBodyError, `应为 HttpBodyError，实际 ${caught?.constructor?.name}`)
+    assert.equal(caught.status, 413)
+  })
+})
+
+test('HttpBodyError: 读取停滞超时抛 408（instanceof 穿过 req.destroy）', async () => {
+  let caught = null
+  await withServer(async (req, res) => {
+    try {
+      await readRawBody(req, 1024 * 1024, 100)
+    } catch (error) {
+      caught = error
+      res.end('timed-out')
+    }
+  }, async (port) => {
+    await new Promise((resolve) => {
+      const req = http.request({ host: '127.0.0.1', port, method: 'POST', headers: { 'content-length': '100000' } })
+      req.on('error', resolve)
+      req.on('close', resolve)
+      req.write('partial') // 声明 100000 只发 7 → 停滞
+    })
+    // destroy 会连 socket 一起收掉（408 到不了客户端），但错误对象本身必须带对状态码。
+    assert.ok(caught instanceof HttpBodyError, `应为 HttpBodyError，实际 ${caught?.constructor?.name}`)
+    assert.equal(caught.status, 408)
+  })
+})
+
+test('HttpBodyError: readJsonBody 非法 JSON 抛 400，超限抛 413', async () => {
+  const bad = await readJsonBody({ [Symbol.asyncIterator]: async function* () { yield Buffer.from('{not json') } })
+    .then(() => null, (e) => e)
+  assert.ok(bad instanceof HttpBodyError)
+  assert.equal(bad.status, 400)
+
+  const big = await readJsonBody(
+    { [Symbol.asyncIterator]: async function* () { yield Buffer.alloc(2048) } },
+    16,
+  ).then(() => null, (e) => e)
+  assert.ok(big instanceof HttpBodyError)
+  assert.equal(big.status, 413)
+})
+
+test('statusOfBodyError: 普通错误回退 fallback（不被误判成请求侧问题）', () => {
+  assert.equal(statusOfBodyError(new Error('upstream 500'), 502), 502)
+  assert.equal(statusOfBodyError('not an error', 400), 400)
+  assert.equal(statusOfBodyError(new HttpBodyError(413, 'x'), 502), 413)
 })
 
 test('guardRoute: 信任围栏 + method 白名单', () => {

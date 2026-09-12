@@ -52,6 +52,8 @@ export interface RealtimeHostOptions {
     idleMs?: number;
     /** SSE 心跳间隔（毫秒，默认 15s）。 */
     heartbeatMs?: number;
+    /** 上游终态报错后的收尾宽限期（毫秒，默认 5s）。测试注入小值以确定性覆盖拆除路径。 */
+    errorLingerMs?: number;
     /** 现在的时间（毫秒，测试注入）。 */
     now?: () => number;
 }
@@ -65,11 +67,18 @@ export declare class RealtimeHost {
     createSession(): Promise<{
         sid: string;
     }>;
-    /** 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂， 真正空闲满 idleMs 才拆会话防泄漏。 */
+    /** 上游终态报错后的收尾：标记会话已终结 + 把空闲窗口收紧到 ERROR_LINGER_MS。
+     *  修的是「僵尸会话」：此前 provider 报错后 host 不拆会话，客户端仍在按 40ms 一帧
+     *  上行 PCM，每帧 `feedAudio` → `refreshIdle` 都把 lastActive 顶到现在——死连接的
+     *  会话因此永远等不到空闲过期，SSE 一直挂着、麦克风一直开。 */
+    private armErrorTeardown;
+    /** 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂， 真正空闲满 windowMs 才拆会话防泄漏（默认 idleMs；上游终态报错后用更短的收尾宽限）。 */
     private armIdle;
-    /** 刷新空闲计时（每次上行/下行活动调用）。 */
+    /** 刷新空闲计时（每次上行/下行活动调用）。已终结的会话不续命——否则死连接被
+     *  客户端的持续上行"续命"，永远到不了过期点。 */
     private refreshIdle;
-    /** 上行 PCM（16k int16 LE）到指定会话。会话不存在返回 false。 */
+    /** 上行 PCM（16k int16 LE）到指定会话。会话不存在**或上游已终态报错**返回 false
+     *  （路由据此回 404，客户端停止上行）。 */
     feedAudio(sid: string, pcm: Uint8Array): boolean;
     /** 挂起 SSE 下行（单消费者）。会话不存在 / 已有下行返回 false。 */
     attachSse(sid: string, res: ServerResponse): boolean;

@@ -181,17 +181,28 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       setPhase('idle')
       return
     }
-    const msg = code === 'mic-denied' || code === 'no-mic'
-      ? t('errNoMic')
-      : code === 'no-speech-support'
-        ? t('errNoSpeechSupport')
-        : code === 'network'
-          ? t('errWebSpeechNetwork')
-          : code === 'cloud-not-configured'
-            ? t('errCloudNotConfigured')
-            : code === 'optimize'
-              ? `${t('errOptimize')}${detail ? `: ${detail}` : ''}`
-              : `${t('errTranscribe')}${detail ? `: ${detail}` : ''}`
+    // 错误码 → 文案用 switch 而非嵌套三元：这条链已到 8 个分支，深层三元改一处极易
+    // 错位到相邻分支（本仓刚修过「云端引擎却提示不支持 Web Speech」那类反向误导）。
+    const msg = ((): string => {
+      switch (code) {
+        case 'mic-denied':
+        case 'no-mic':
+          return t('errNoMic')
+        case 'recorder-start-failed':
+        case 'recorder-unsupported':
+          return t('errRecorderStart')
+        case 'no-speech-support':
+          return t('errNoSpeechSupport')
+        case 'network':
+          return t('errWebSpeechNetwork')
+        case 'cloud-not-configured':
+          return t('errCloudNotConfigured')
+        case 'optimize':
+          return `${t('errOptimize')}${detail ? `: ${detail}` : ''}`
+        default:
+          return `${t('errTranscribe')}${detail ? `: ${detail}` : ''}`
+      }
+    })()
     setError(msg)
     setNotice(null)
     setPhase('idle')

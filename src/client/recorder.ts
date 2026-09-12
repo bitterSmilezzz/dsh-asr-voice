@@ -524,7 +524,20 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
         stopPromise?.catch(() => {})
       }
     })
-    mediaRecorder.start(250)
+    try {
+      mediaRecorder.start(250)
+    } catch (error) {
+      // start() 抛错（设备被其他程序抢占、内核拒绝、MediaRecorder 已 inactive 等）：
+      // 不包的话 active 仍为 true、轨道不释放、无 onError —— 表现为**麦克风常亮**，
+      // 且界面卡在「录音中」等一个永不到来的 onstop。
+      // 按「录音根本没起来」收尾：释放流 + 复位标志 + 送达错误码。
+      // stop() 无需额外处理：它见 active=false 即入口早退返回空结果，不会挂起
+      //（active 置位到 start() 之间全同步，没有别的代码能插进来先拿到 stopPromise）。
+      active = false
+      stopStream()
+      onError('recorder-start-failed')
+      return
+    }
     recorder.onState?.('recording')
     // 电平表始终启用（频谱反馈 + 可选静音自动停止）。
     startLevelMeter()

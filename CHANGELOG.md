@@ -6,6 +6,59 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
+## [0.2.15] - 2026-09-12
+
+### 修复
+
+- **上游报错后会话变「僵尸」，麦克风与 SSE 一直挂着**：provider 报错后 host 不拆会话，
+  而客户端仍按 40ms 一帧上行 PCM，每帧都刷新该会话的空闲计时——死连接因此永远等不到
+  空闲过期，SSE 长挂、麦克风长开，只能刷新页面。现在上游**终态**报错即停止接受上行、
+  停止刷新空闲计时，并进入 5s 收尾宽限（先把错误帧送到客户端再拆会话）。
+  配套引入事件级 `fatal` 标记：`provider-timeout` / `provider-unreachable` /
+  `provider-closed`（本地即可判定的连接死亡）为终态；而单条音频转写失败
+  （`transcription-failed`，官方文档明确它「与其他 error 事件分开处理」）与通用 `error`
+  （含 `invalid_request_error` 这类参数错）**不拆会话**——否则用户说错一句就掐掉整场对话。
+- **HTTP 状态码语义丢失**：body 读取阶段的错误此前只带 message，路由一律回 502（转写 /
+  优化）或 400（实时上行），把「客户端发了 30MB 音频」记成「上游故障」，排查被引向
+  服务商。现在 `readRawBody` / `readJsonBody` 抛出携带状态码的 `HttpBodyError`
+  （超限 413 / 读取超时 408 / 非法 JSON 400），路由按它映射，其余错误仍回 502。
+- **凭据解析故障被吞成「没配 key」**：DSH credentials 的 `resolve()` 契约是「未配置 →
+  `undefined`」，**抛错只代表服务真故障**（后端不可用 / 权限拒绝）。原先的空 catch 把
+  两者混为一谈，用户看到 "no API key" 提示、去设置页反复确认凭据明明存在，真实故障彻底
+  丢失。现在只有「环境变量也没兜到 key」时才把故障抛出并带上原因（路由回 502）。
+- **`MediaRecorder.start()` 抛错后麦克风常亮**：该调用未包 try，抛错（设备被其他程序
+  抢占等）时 `active` 仍为 true、麦克风轨道不释放、也没有任何错误回调，界面卡在
+  「录音中」等一个永不到来的 `onstop`。现在捕获后释放轨道、复位状态并送达
+  `recorder-start-failed` 错误码（新增对应中英文案，不再落进「浏览器不支持 Web Speech」
+  这类反向提示）。
+
+### 变更
+
+- **`voice-button` 的错误码 → 文案映射由嵌套三元改为 `switch`**：该链已到 8 个分支，
+  深层三元改一处极易错位到相邻分支。同时 `recorder-unsupported` 归入「录音启动失败」
+  文案（此前显示为笼统的「转写失败: recorder-unsupported」）。
+- `RealtimeHost` 新增 `errorLingerMs` 构造项（默认 5s），与既有 `idleMs` / `heartbeatMs`
+  一样可注入，便于确定性覆盖收尾路径。
+
+### 验证
+
+- 双半区 typecheck（host + client）零错误，构建通过。
+- 测试 **234/234** 通过（新增 19 例：HttpBodyError 状态码与映射 4 例、僵尸会话收尾 4 例、
+  实时上行 413/404 各 1 例、凭据解析 6 例、录音启动失败 2 例、`transcription.failed`
+  非终态 1 例）；Node 22.22.2 与 Node 26.7.0 双版本均全绿。
+- 三个既有断言（事件形状 `deepEqual`）按新增的 `fatal` 字段更新——它们此前钉住了
+  `{ type: 'error', code }` 的精确形状，正是这层耦合让「哪些错误是终态」的语义一直没被
+  表达出来。
+
+### 已知限制（本轮未修）
+
+- `rmsAuto` 纯语音开场可能当次不出字（同 0.2.14：只有 RMS 一个判据时数学上不可辨识）。
+- 信任围栏 `isTrusted` 判定同源时忽略端口（同 0.2.14：跨三仓共用的夹具契约，需同步改）。
+- `realtime-host` 的会话空闲上限（10 分钟）与 SSE 心跳（15s）仍未进设置面板，也没有
+  会话数上限——单机单人使用下风险有限。
+- 采集热路径每帧仍有 `slice` 与重复 RMS 计算（`onFrame` 与 VAD 各算一次），量级微秒级、
+  未构成实测瓶颈。
+
 ## [0.2.14] - 2026-09-12
 
 ### 修复
@@ -111,7 +164,8 @@
 - `providerView` 归一化，避免不同 provider 返回值形状差异导致的展示错乱。
 - 补上 `http` / `presets` 相关测试用例。
 
-[未发布]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.14...HEAD
+[未发布]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.15...HEAD
+[0.2.15]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.10...v0.2.12

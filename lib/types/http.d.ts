@@ -1,5 +1,17 @@
 /** dsh-asr-voice — host 半区：HTTP 小工具（读 body / 写 JSON / 信任围栏）。 纯 Node 标准库 + 全局 fetch（Node 18+），无平台专属依赖 → macOS / Windows 双平台。 */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+/** body 读取阶段的错误：自带语义化 HTTP 状态码（400 非法 JSON / 408 读取超时 / 413 超限），
+ *  由路由 catch 直接映射。早先这些错误只带 message、路由一律回 502，把「客户端发了 30MB
+ *  音频」记成「上游故障」——排查时被引向服务商，实际是本地就能判定并立刻纠正的输入问题。
+ *  实测：`req.destroy(err)` 抛出的就是这个对象本身（instanceof 存活），超限在 for-await
+ *  里直接 throw 也不会毁掉 socket，413 能真正写到客户端。 */
+export declare class HttpBodyError extends Error {
+    readonly status: 400 | 408 | 413;
+    constructor(status: 400 | 408 | 413, message: string);
+}
+/** 从 catch 到的错误取应回的状态码：{@link HttpBodyError} 用自带 status，其余回退 fallback
+ *  （路由传 502 = 真正的上游/服务端故障）。 */
+export declare function statusOfBodyError(error: unknown, fallback: number): number;
 /** 读取请求原始 body（Buffer），超限报错；读取停滞超过 timeoutMs 则销毁连接。 */
 export declare function readRawBody(req: IncomingMessage, maxBytes: number, timeoutMs?: number): Promise<Buffer>;
 /** 读取请求 body 并解析为 JSON（超限报错）。 */

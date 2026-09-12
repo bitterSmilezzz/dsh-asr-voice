@@ -274,7 +274,7 @@ test('I5: 服务端事件映射到 RealtimeProviderEvent（speech/text/completed
     // text + stash 拼接 = 完整预览
     assert.deepEqual(events[1], { type: 'partial', text: '今天天气不错' })
     assert.deepEqual(events[2], { type: 'final', text: '今天天气不错，阳光明媚。' })
-    assert.deepEqual(events[3], { type: 'error', code: 'invalid_value' })
+    assert.deepEqual(events[3], { type: 'error', code: 'invalid_value', fatal: false })
     conn.close()
   } finally {
     await svc.close()
@@ -348,7 +348,7 @@ test('I5: 握手未完成超时 → provider-timeout 判死（connectTimer 是�
     const conn = await provider.connect()
     const events = collectEvents(conn)
     await waitFor(() => events.some((e) => e.type === 'error'), 3000)
-    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-timeout' }])
+    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-timeout', fatal: true }])
     // 判死后连接已 closed：多等一拍确认没有重复报错或迟到事件。
     await new Promise((resolve) => setTimeout(resolve, 100))
     assert.equal(events.length, 1, '超时判死应恰报一次')
@@ -373,7 +373,7 @@ test('I5: 对端 socket 被销毁（异常断连）→ provider-unreachable，�
 
     svc.dropConnections()
     await waitFor(() => events.some((e) => e.type === 'error'), 3000)
-    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-unreachable' }])
+    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-unreachable', fatal: true }])
     // 报错后连接已 closed：后续事件不再被接受。
     svc.sendServerEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: '迟到' })
     await new Promise((resolve) => setTimeout(resolve, 100))
@@ -404,8 +404,33 @@ test('I5: 对端发 close 帧（非优雅、无 session.finished）→ provider-
 
     svc.sendCloseFrame(1001)
     await waitFor(() => events.some((e) => e.type === 'error'), 3000)
-    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-closed' }])
+    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'provider-closed', fatal: true }])
     assert.equal(events.length, 1, '断连判死应恰报一次（不重复报）')
+    conn.close()
+  } finally {
+    await svc.close()
+  }
+})
+
+test('I5: 单条音频转写失败（transcription.failed）→ 非终态（fatal=false），不拆会话', async () => {
+  // 官方文档原文：该事件「与其他 error 事件分开处理，便于客户端识别相关的具体项目」——
+  // 即单项失败，连接与后续回合照常。host 若把它当终态就会因一次识别失败掐掉整场对话。
+  const svc = startQwenWsServer()
+  const port = await svc.listen()
+  try {
+    const provider = createDashscopeRealtimeProvider({ apiKey: 'sk-test-123', wssUrl: `ws://127.0.0.1:${port}/api-ws/v1/realtime` })
+    const conn = await provider.connect()
+    const events = collectEvents(conn)
+    await waitFor(() => svc.getClientEvents().some((e) => e.type === 'session.update'), 3000)
+
+    svc.sendServerEvent({ type: 'conversation.item.input_audio_transcription.failed', item_id: 'item_1', error: { code: 'bad_audio', message: 'x' } })
+    await waitFor(() => events.some((e) => e.type === 'error'), 3000)
+    assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'transcription-failed', fatal: false }])
+
+    // 连接仍活：后续回合的 final 照常送达（fatal=false 的实际含义）。
+    svc.sendServerEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: '下一句照常' })
+    await waitFor(() => events.some((e) => e.type === 'final'), 3000)
+    assert.ok(events.some((e) => e.type === 'final' && e.text === '下一句照常'), '单项失败后连接必须仍可用')
     conn.close()
   } finally {
     await svc.close()

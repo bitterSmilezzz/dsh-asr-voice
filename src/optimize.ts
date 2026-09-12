@@ -9,7 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
-import { guardRoute, readJsonBody, sendJson } from './http.ts';
+import { guardRoute, readJsonBody, sendJson, statusOfBodyError } from './http.ts';
 import { LIST_MODELS_TIMEOUT_MS } from './asr-models.ts';
 
 /** 最小当前模型选择面（由 DSH 的 agentDefaultModel 服务提供，peer 不 import）。 */
@@ -179,7 +179,8 @@ export function registerOptimizeRoute(
         return sendJson(res, 200, { ok: true, text: optimized });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        return sendJson(res, 502, { ok: false, reason });
+        // 非法 JSON / 超限 / 超时都是请求侧问题（400/413/408），只有 LLM 通道故障才是 502。
+        return sendJson(res, statusOfBodyError(error, 502), { ok: false, reason });
       }
     },
   });

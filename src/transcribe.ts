@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { CHAT_COMPLETIONS_PATH, MAX_AUDIO_BYTES, TRANSCRIBE_PATH, resolveAsrMode } from './presets.ts';
 import { keyRefFor } from './key-ref.ts';
 import type { KeyRefSource } from './key-ref.ts';
-import { guardRoute, readRawBody, sendJson } from './http.ts';
+import { guardRoute, readRawBody, sendJson, statusOfBodyError } from './http.ts';
 
 /** 上游 ASR 请求超时（ms）：上游不可达/卡死时不无限挂起请求。 */
 const UPSTREAM_TIMEOUT_MS = 60_000
@@ -195,21 +195,35 @@ async function upstreamTranscribe(cfg: CloudAsrConfig, audio: Buffer, mime: stri
   return upstreamTranscribeMultipart(cfg, audio, mime, language, apiKey);
 }
 
-/** 解析最终 API key：settings 里的遗留值优先（一次性迁移完成前的兼容路径），否则按 派生引用名向 DSH credentials 服务解析，最后退回同名环境变量。预置供应商的引用名与 官方 LLM provider 同名，因此配过对应 LLM 的用户在这里天然命中同一把 key。 */
+/** 解析最终 API key：settings 里的遗留值优先（一次性迁移完成前的兼容路径），否则按 派生引用名向 DSH credentials 服务解析，最后退回同名环境变量。预置供应商的引用名与 官方 LLM provider 同名，因此配过对应 LLM 的用户在这里天然命中同一把 key。
+ *  凭据服务 `resolve` 的契约是「未配置 → undefined」，**抛错 = 服务真故障**（后端不可用 /
+ *  权限拒绝），两者含义完全不同：早先空 catch 把故障吞成「返回空串」，用户看到的是
+ *  "no API key" 提示，于是去设置页反复确认凭据明明存在，真实故障被彻底掩盖。现在把故障
+ *  原因留到「环境变量也没兜到 key」时抛出——那时真相就是「无法判断有没有 key」，比谎报
+ *  「没配 key」诚实。 */
 export async function resolveApiKey(ctx: Context, cfg: CloudAsrConfig): Promise<string> {
   const legacy = cfg.apiKey.trim();
   if (legacy !== '') return legacy;
   const ref = keyRefFor(cfg);
   const credentials = ctx.get('credentials') as CredentialsLike | undefined;
+  let lookupError: unknown;
   if (credentials !== undefined) {
     try {
       const hit = await credentials.resolve(ref);
       if (hit?.value) return hit.value;
-    } catch { /* fall through to env */ }
+    } catch (error) {
+      lookupError = error;
+    }
   }
   // 兜底：环境变量（DSH 进程若以 export 方式注入也能读到）。
   const globalProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
-  return globalProcess?.env?.[ref] ?? '';
+  const fromEnv = globalProcess?.env?.[ref] ?? '';
+  if (fromEnv !== '') return fromEnv;
+  if (lookupError !== undefined) {
+    const cause = lookupError instanceof Error ? lookupError.message : String(lookupError);
+    throw new Error(`credential ${ref} lookup failed: ${cause} — cannot tell whether a key is configured`);
+  }
+  return '';
 }
 
 /** 根据 MIME 推断文件扩展名（用于 multipart filename；不影响转写）。 */
@@ -284,7 +298,8 @@ export function registerTranscribeRoute(
         const reason = audio.length > 0 ? `${base} (audio ${audio.length}B, ${mime})` : base;
         // 失败时把原始音频落盘到 ~/.dsh/asr-voice-debug/（重放定位用，不影响主流程）。
         if (audio.length > 0) void saveDebugAudio(audio, mime, `${ua}-${base}`);
-        return sendJson(res, 502, { ok: false, reason });
+        // 超限/超时是输入问题（413/408），不该报成 502 把排查引向上游。
+        return sendJson(res, statusOfBodyError(error, 502), { ok: false, reason });
       }
     },
   });

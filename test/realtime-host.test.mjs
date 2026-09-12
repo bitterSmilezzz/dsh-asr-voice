@@ -387,3 +387,130 @@ test('SSE 背压：pending 满 cap 时溢出只丢 partial/最旧 final，新 fi
   assert.ok(!events.some((e) => e.text === 'final-1'), '仅当全队都是 final 才允许丢最旧')
   channel.close()
 })
+
+// ── 上游报错后的会话收尾（僵尸会话修复）─────────────────────────────────────
+// 缺陷形态：provider 报错后 host 不拆会话，而客户端仍按 40ms 一帧上行 PCM，每帧
+// `feedAudio` → `refreshIdle` 都把 lastActive 顶到现在 → 死连接的会话永远等不到空闲
+// 过期，SSE 一直挂着、麦克风一直开。修法：终态报错即进入「拒绝上行 + 不续命 + 短窗拆除」，
+// 非终态报错（单条转写失败）不动会话。
+
+/** 可手动推事件的上游连接替身（真 provider 的报错时机由测试掌控）。 */
+function makeManualProvider() {
+  const conns = []
+  const provider = {
+    connect: async () => {
+      const conn = {
+        onEvent: null,
+        sent: [],
+        closed: false,
+        send(pcm) { this.sent.push(pcm) },
+        close() { this.closed = true },
+      }
+      conns.push(conn)
+      return conn
+    },
+  }
+  return { provider, conns }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+test('终态报错：拒绝后续上行（不再续命），宽限期到点拆除会话', async () => {
+  const { provider, conns } = makeManualProvider()
+  // idleMs 设成 10 分钟：会话若被拆，只可能是「报错收尾」生效，不是空闲自然过期。
+  const host = new RealtimeHost({ createProvider: () => provider.connect(), idleMs: 10 * 60 * 1000, errorLingerMs: 40, heartbeatMs: 0 })
+  const { sid } = await host.createSession()
+  const conn = conns[0]
+
+  // 对照组：报错前上行成功且被转发给上游。
+  assert.equal(host.feedAudio(sid, toneBytes(40)), true)
+  assert.equal(conn.sent.length, 1)
+
+  conn.onEvent({ type: 'error', code: 'provider-closed', fatal: true })
+  assert.ok(host.hasSession(sid), '报错当刻会话还在（错误帧要先有机会送达）')
+
+  // 关键断言：报错后上行被拒 —— 客户端再怎么发帧都不能给死连接续命。
+  assert.equal(host.feedAudio(sid, toneBytes(40)), false, '终态报错后不再接受上行')
+  assert.equal(conn.sent.length, 1, '被拒的上行不得转发给已死的上游')
+
+  await sleep(120)
+  assert.ok(!host.hasSession(sid), '宽限期到点后会话应被拆除（不再永久滞留）')
+  assert.equal(conn.closed, true, '上游连接应随之释放')
+})
+
+test('非终态报错（单条转写失败）：不拆会话，后续上行照常', async () => {
+  const { provider, conns } = makeManualProvider()
+  const host = new RealtimeHost({ createProvider: () => provider.connect(), idleMs: 10 * 60 * 1000, errorLingerMs: 30, heartbeatMs: 0 })
+  const { sid } = await host.createSession()
+  const conn = conns[0]
+
+  // qwen 的 …transcription.failed 是单项失败（官方文档：与其他 error 事件分开处理），
+  // 连接仍活、后续回合照常——拆会话等于用户说错一句就掐掉整场对话。
+  conn.onEvent({ type: 'error', code: 'transcription-failed', fatal: false })
+  assert.equal(host.feedAudio(sid, toneBytes(40)), true, '非终态报错后上行必须照常')
+  await sleep(80)
+  assert.ok(host.hasSession(sid), '非终态报错不得拆除会话')
+  host.closeSession(sid)
+})
+
+test('终态报错：错误帧仍送达 SSE（收尾不吞掉错误原因）', async () => {
+  const { provider, conns } = makeManualProvider()
+  const host = new RealtimeHost({ createProvider: () => provider.connect(), idleMs: 10 * 60 * 1000, errorLingerMs: 40, heartbeatMs: 0 })
+  const { sid } = await host.createSession()
+  const sseRes = new FakeRes()
+  assert.equal(host.attachSse(sid, sseRes), true)
+
+  conns[0].onEvent({ type: 'error', code: 'provider-unreachable', fatal: true })
+  const events = sseEvents(sseRes)
+  assert.deepEqual(events, [{ type: 'error', code: 'provider-unreachable', fatal: true }], '错误帧必须先送出再收尾')
+
+  await sleep(120)
+  assert.ok(!host.hasSession(sid), '宽限期到点后会话应被拆除')
+  assert.equal(sseRes.ended, true, 'SSE 下行应随会话关闭（客户端据此结束并释放麦克风）')
+  host.dispose()
+})
+
+test('终态报错：SSE 未挂时错误帧留缓冲，挂上后补送', async () => {
+  const { provider, conns } = makeManualProvider()
+  const host = new RealtimeHost({ createProvider: () => provider.connect(), idleMs: 10 * 60 * 1000, errorLingerMs: 200, heartbeatMs: 0 })
+  const { sid } = await host.createSession()
+
+  conns[0].onEvent({ type: 'error', code: 'provider-timeout', fatal: true })
+  // SSE 还没连上（建连有延迟）：此时不能把会话直接删掉，否则错误原因丢失。
+  assert.ok(host.hasSession(sid))
+  const sseRes = new FakeRes()
+  assert.equal(host.attachSse(sid, sseRes), true)
+  assert.deepEqual(sseEvents(sseRes), [{ type: 'error', code: 'provider-timeout', fatal: true }], '挂上 SSE 应补送缓冲的错误帧')
+  host.closeSession(sid)
+})
+
+test('audio 路由：超限 PCM 回 413（不再笼统回 400）', async () => {
+  const host = makeHost()
+  const { register, routes } = makeRegistry()
+  host.registerRoutes(register)
+  let res = new FakeRes()
+  await routes.get('exact:/api/asr-voice/realtime/session')(reqOf('POST', '/api/asr-voice/realtime/session'), res)
+  const sid = JSON.parse(res.body).sid
+
+  // 4MB + 1：刚好越过 MAX_PCM_BYTES（客户端发这么大的单帧本身已是异常）。
+  res = new FakeRes()
+  await routes.get('exact:/api/asr-voice/realtime/audio')(
+    reqOf('POST', `/api/asr-voice/realtime/audio?sid=${sid}`, { body: new Uint8Array(4 * 1024 * 1024 + 1) }),
+    res,
+  )
+  assert.equal(res.status, 413, `超限应回 413，实际 ${res.status}`)
+  assert.match(JSON.parse(res.body).reason, /exceeds/)
+  host.closeSession(sid)
+})
+
+test('audio 路由：会话不存在仍回 404（不受状态码映射影响）', async () => {
+  const host = makeHost()
+  const { register, routes } = makeRegistry()
+  host.registerRoutes(register)
+  const res = new FakeRes()
+  await routes.get('exact:/api/asr-voice/realtime/audio')(
+    reqOf('POST', '/api/asr-voice/realtime/audio?sid=no-such', { body: toneBytes(40) }),
+    res,
+  )
+  assert.equal(res.status, 404)
+})

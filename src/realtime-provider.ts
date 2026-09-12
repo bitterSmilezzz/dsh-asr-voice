@@ -27,8 +27,15 @@ export type RealtimeProviderEvent =
   | { type: 'speech-started' }
   /** 服务端 VAD 检测到语音终点（对齐 qwen 的 input_audio_buffer.speech_stopped）。 */
   | { type: 'speech-stopped' }
-  /** 上游会话级错误（对齐 qwen 的 error）。 */
-  | { type: 'error'; code: string }
+  /** 上游会话级错误（对齐 qwen 的 error）。
+   *  `fatal` 区分**连接级终态**与**可继续的错误**——这是 host 决定要不要拆会话的唯一依据：
+   *  - true（默认）：连接已死（握手超时 / 对端关闭 / 不可达），此后再无 final 可能到达；
+   *  - false：连接可能仍可用——单条音频转写失败（qwen 的 …transcription.failed，官方文档
+   *    明确它与通用 error 分开处理）与通用 error（含 invalid_request_error 等参数错）。
+   *    此时 host 不得拆会话，否则用户说错一句就把整场语音对话掐掉；是否结束交给客户端
+   *    既有的连败阈值。
+   *  省略等价于 true（旧实现/假 provider 的既有语义：报错即终态）。 */
+  | { type: 'error'; code: string; fatal?: boolean }
 
 /** 一条与上游 provider 的实时连接。 */
 export interface RealtimeProviderConnection {

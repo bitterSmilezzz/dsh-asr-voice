@@ -17,7 +17,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { guardRoute, readRawBody, sendJson } from './http.ts';
+import { guardRoute, readRawBody, sendJson, statusOfBodyError } from './http.ts';
 import type { RealtimeProviderConnection, RealtimeProviderEvent } from './realtime-provider.ts';
 
 /** 单次 PCM 上行体上限（16k int16 ≈ 每 100ms 3200B；40ms 帧 1280B）。 */
@@ -25,6 +25,11 @@ const MAX_PCM_BYTES = 4 * 1024 * 1024
 
 /** 会话空闲上限（毫秒）：没有数据进来也没有消费者，自动拆会话防泄漏。 */
 const DEFAULT_SESSION_IDLE_MS = 10 * 60 * 1000
+
+/** 上游终态报错后的收尾宽限期（毫秒）：错误帧入队后给它这段时间送达客户端（SSE 若正
+ *  背压则等 drain 冲刷），到点无条件拆会话。设短值即可——客户端收到错误帧后自己会走
+ *  failNow → /close；这个宽限只是「客户端没反应」时的兜底，不是正常路径。 */
+const ERROR_LINGER_MS = 5_000
 
 /** webserver register 的最小面（与 transcribe.ts 的 register 参数同构）。 */
 export type RealtimeRouteRegister = (def: {
@@ -186,6 +191,9 @@ interface RealtimeSession {
   lastActive: number
   /** 空闲清理定时器。 */
   idleTimer: ReturnType<typeof setTimeout> | null
+  /** 上游是否已给出**终态**报错（连接已死）。置位后不再接受上行、不再刷新空闲计时，
+   *  只等 ERROR_LINGER_MS 到点拆会话。 */
+  errored: boolean
 }
 
 /** RealtimeHost 构造参数（依赖注入，便于单测）。 */
@@ -196,6 +204,8 @@ export interface RealtimeHostOptions {
   idleMs?: number
   /** SSE 心跳间隔（毫秒，默认 15s）。 */
   heartbeatMs?: number
+  /** 上游终态报错后的收尾宽限期（毫秒，默认 5s）。测试注入小值以确定性覆盖拆除路径。 */
+  errorLingerMs?: number
   /** 现在的时间（毫秒，测试注入）。 */
   now?: () => number
 }
@@ -203,7 +213,7 @@ export interface RealtimeHostOptions {
 /** 实时转写会话注册表 + 路由。 */
 export class RealtimeHost {
   private readonly sessions = new Map<string, RealtimeSession>()
-  private readonly opts: Required<Pick<RealtimeHostOptions, 'idleMs' | 'heartbeatMs' | 'now'>>
+  private readonly opts: Required<Pick<RealtimeHostOptions, 'idleMs' | 'heartbeatMs' | 'errorLingerMs' | 'now'>>
   private readonly createProvider: RealtimeHostOptions['createProvider']
 
   constructor(options: RealtimeHostOptions) {
@@ -211,6 +221,7 @@ export class RealtimeHost {
     this.opts = {
       idleMs: options.idleMs ?? DEFAULT_SESSION_IDLE_MS,
       heartbeatMs: options.heartbeatMs ?? 15_000,
+      errorLingerMs: options.errorLingerMs ?? ERROR_LINGER_MS,
       now: options.now ?? Date.now,
     }
   }
@@ -219,22 +230,42 @@ export class RealtimeHost {
   async createSession(): Promise<{ sid: string }> {
     const sid = randomUUID()
     const conn = await this.createProvider()
-    const session: RealtimeSession = { sid, conn, sse: null, pending: [], lastActive: this.opts.now(), idleTimer: null }
+    const session: RealtimeSession = { sid, conn, sse: null, pending: [], lastActive: this.opts.now(), idleTimer: null, errored: false }
     // provider 事件统一走同一个收口：无 SSE 时缓冲（有界），挂上后冲刷。
     conn.onEvent = (ev) => {
       const s = this.sessions.get(sid)
       if (s === undefined) return
-      if (s.sse !== null) { s.sse.enqueue(ev); return }
-      s.pending.push(ev)
-      if (s.pending.length > 64) s.pending.shift()
+      if (s.sse !== null) {
+        s.sse.enqueue(ev)
+      } else {
+        s.pending.push(ev)
+        if (s.pending.length > 64) s.pending.shift()
+      }
+      // 终态报错（连接已死）才收尾：错误帧先入队（无 SSE 时留缓冲，等 SSE 挂上补送），
+      // 再进入宽限拆除。非终态错误（如单条转写失败）不动会话——连接还活着，后续回合
+      // 照常，拆掉等于用户说错一句就掐掉整场对话。注意这个判定必须在「SSE 已挂」分支
+      // 之外：SSE 挂着才是常态，放在分支里等于永不收尾。
+      if (ev.type === 'error' && ev.fatal !== false) this.armErrorTeardown(sid)
     }
     this.sessions.set(sid, session)
     this.armIdle(sid)
     return { sid }
   }
 
-/** 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂， 真正空闲满 idleMs 才拆会话防泄漏。 */
-  private armIdle(sid: string): void {
+  /** 上游终态报错后的收尾：标记会话已终结 + 把空闲窗口收紧到 ERROR_LINGER_MS。
+   *  修的是「僵尸会话」：此前 provider 报错后 host 不拆会话，客户端仍在按 40ms 一帧
+   *  上行 PCM，每帧 `feedAudio` → `refreshIdle` 都把 lastActive 顶到现在——死连接的
+   *  会话因此永远等不到空闲过期，SSE 一直挂着、麦克风一直开。 */
+  private armErrorTeardown(sid: string): void {
+    const s = this.sessions.get(sid)
+    if (s === undefined || s.errored) return
+    s.errored = true
+    s.lastActive = this.opts.now()
+    this.armIdle(sid, this.opts.errorLingerMs)
+  }
+
+/** 空闲守卫：到点复查——期间有任何上行/下行活动会走 refreshIdle 重挂， 真正空闲满 windowMs 才拆会话防泄漏（默认 idleMs；上游终态报错后用更短的收尾宽限）。 */
+  private armIdle(sid: string, windowMs: number = this.opts.idleMs): void {
     const s = this.sessions.get(sid)
     if (s === undefined) return
     if (s.idleTimer !== null) clearTimeout(s.idleTimer)
@@ -242,23 +273,25 @@ export class RealtimeHost {
       const cur = this.sessions.get(sid)
       if (cur === undefined) return
       const idle = this.opts.now() - cur.lastActive
-      if (idle >= this.opts.idleMs) this.closeSession(sid)
-      else this.armIdle(sid)
-    }, this.opts.idleMs)
+      if (idle >= windowMs) this.closeSession(sid)
+      else this.armIdle(sid, windowMs)
+    }, windowMs)
   }
 
-  /** 刷新空闲计时（每次上行/下行活动调用）。 */
+  /** 刷新空闲计时（每次上行/下行活动调用）。已终结的会话不续命——否则死连接被
+   *  客户端的持续上行"续命"，永远到不了过期点。 */
   private refreshIdle(sid: string): void {
     const s = this.sessions.get(sid)
-    if (s === undefined) return
+    if (s === undefined || s.errored) return
     s.lastActive = this.opts.now()
     this.armIdle(sid)
   }
 
-  /** 上行 PCM（16k int16 LE）到指定会话。会话不存在返回 false。 */
+  /** 上行 PCM（16k int16 LE）到指定会话。会话不存在**或上游已终态报错**返回 false
+   *  （路由据此回 404，客户端停止上行）。 */
   feedAudio(sid: string, pcm: Uint8Array): boolean {
     const s = this.sessions.get(sid)
-    if (s === undefined) return false
+    if (s === undefined || s.errored) return false
     this.refreshIdle(sid)
     s.conn.send(pcm)
     return true
@@ -337,7 +370,8 @@ export class RealtimeHost {
             if (!this.feedAudio(sid, pcm)) return sendJson(res, 404, { ok: false, reason: 'no such session' });
             return sendJson(res, 200, { ok: true });
           } catch (error) {
-            return sendJson(res, 400, { ok: false, reason: error instanceof Error ? error.message : String(error) });
+            // 超限/超时是请求侧问题（413/408），其余（含 sid 不存在）仍按 400 口径。
+            return sendJson(res, statusOfBodyError(error, 400), { ok: false, reason: error instanceof Error ? error.message : String(error) });
           }
         },
       }),
