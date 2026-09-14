@@ -26,7 +26,7 @@
 
 - insert:
     - id: dsh-asr-voice
-      name: dsh-asr-voice
+      name: '@bittersmilezzz/dsh-asr-voice'
       inject:
         - webServer
         - llm

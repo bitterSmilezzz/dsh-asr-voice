@@ -31,7 +31,7 @@ const EXTERNALS = [
 
 export default defineConfig([
   {
-    name: 'dsh-asr-voice/client',
+    name: '@bittersmilezzz/dsh-asr-voice/client',
     entry: { client: 'src/client/index.ts' },
     outDir: 'lib',
     format: 'cjs',
@@ -52,7 +52,7 @@ export default defineConfig([
     },
     outputOptions: {
       entryFileNames: 'client.js',
-      banner: 'window.__ModuleLoader__.load({ id: "dsh-asr-voice", factory: (require) => {',
+      banner: 'window.__ModuleLoader__.load({ id: "@bittersmilezzz/dsh-asr-voice", factory: (require) => {',
       footer: 'return module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },

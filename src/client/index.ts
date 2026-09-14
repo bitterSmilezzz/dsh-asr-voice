@@ -121,11 +121,11 @@ function applyHotkey(): () => void {
 export function apply(ctx: ClientContext): void {
   // 词典注册。
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'asr-voice: dictionaries')
-  // 样式注入（单 <style data-plugin="dsh-asr-voice"> 标签）。
+  // 样式注入（单 <style data-plugin="@bittersmilezzz/dsh-asr-voice"> 标签）。
   ctx.effect(() => {
     const tag = document.createElement('style')
-    tag.dataset.plugin = 'dsh-asr-voice'
-    tag.dataset.pluginCss = 'dsh-asr-voice'
+    tag.dataset.plugin = '@bittersmilezzz/dsh-asr-voice'
+    tag.dataset.pluginCss = '@bittersmilezzz/dsh-asr-voice/client'
     tag.textContent = CSS
     document.head.appendChild(tag)
     return () => tag.remove()

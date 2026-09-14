@@ -1,12 +1,13 @@
 /** dsh-asr-voice — client 样式。
  * 全部用 DSH 主题 CSS 变量（--dsw-*），随明暗主题自适应；data 标签
- * `dsh-asr-voice` 唯一，避免与其它插件样式冲突（独立性契约）。
+ * `@bittersmilezzz/dsh-asr-voice`（`data-plugin-css` 为
+ * `@bittersmilezzz/dsh-asr-voice/client`）唯一，避免与其它插件样式冲突（独立性契约）。
  * GSAP 驱动的波纹/过渡由 animate.ts 写内联 transform/opacity，本表只提供
  * 基础布局、主题变量与降级关键帧。
  */
 
 export const CSS = `
-/* 主题变量挂 :root（页面没有 [dsh-asr-voice] 属性的容器元素——那是 <style> 标签的
+/* 主题变量挂 :root（页面没有 [data-plugin] 属性的容器元素——那是 <style> 标签的
    data 属性，不作用于渲染树；挂错选择器会让 --dshav-* 全部未定义 → 背景透明）。
    --dshav-* 前缀唯一，挂全局不影响其它插件（独立性契约）。 */
 :root {

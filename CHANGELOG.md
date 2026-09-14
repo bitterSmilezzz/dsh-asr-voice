@@ -6,6 +6,21 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
+## [0.3.1] - 2026-09-13
+
+### 变更
+
+- **包名迁移**：`dsh-asr-voice` → **`@bittersmilezzz/dsh-asr-voice`**，以便发布到 npm registry
+  （统一到自有 scope）。同步更新的加载契约：`package.json` name、`cordis.patch.yml` 的
+  bundle `name`（`id` 保持短原名，那是实例标识）、客户端 bundle 的
+  `window.__ModuleLoader__.load({ id })`、样式注入的 `data-plugin` / `data-plugin-css` 标记。
+  功能、配置 schema 与 UI 文案均未改动。
+- **npm 首次发布**：本版是包进入 npm registry 的首个版本。
+- **桌面端兼容**：客户端平台模块（`react`、`react-dom`、`@deepseek-ai/dsh-client-ui-slots`、
+  `@deepseek-ai/dsh-client-ui-primitives`）改标为 **optional peer**（`peerDependenciesMeta`）。
+  它们由 DSH 客户端的冻结模块表在运行时提供，不属于宿主共享包；不标 optional 会被
+  Desktop 的 profile 校验以 `requires missing …` 拒绝加载。
+
 ## [0.3.0] - 2026-09-12
 
 ### 变更（破坏性）
