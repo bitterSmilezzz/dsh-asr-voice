@@ -102,8 +102,11 @@ export interface VoiceChatHandle {
   active: boolean
   /** 对话能力是否可用（realtime.enabled）。关闭时长按退化成点击。 */
   enabled: boolean
-  /** 按钮的悬停/无障碍标题。 */
+  /** 按钮的悬停标题（跟**系统语言**，与界面语言解耦是刻意的）。 */
   title: string
+  /** 按钮的 aria-label（跟**界面语言**：屏幕阅读器按界面语言朗读，混用会读出
+   *  「英文按钮名 + 中文状态」这类错配）。 */
+  ariaLabel: string
   /** 点按钮该做的事：进/出对话或打断。 */
   toggle: () => void
   /** 对话的状态提示条（错误 / 提示 / 字幕）。放进按钮的同一个 wrap 里。 */
@@ -423,6 +426,10 @@ export function useVoiceChat(props: VoiceChatProps): VoiceChatHandle {
     : phase === 'listening' ? sys.chatListeningTitle
       : phase === 'thinking' ? sys.chatThinkingTitle
         : sys.chatSpeakingTitle
+  const ariaLabel = phase === 'idle' ? t('chatTitle')
+    : phase === 'listening' ? t('chatListeningTitle')
+      : phase === 'thinking' ? t('chatThinkingTitle')
+        : t('chatSpeakingTitle')
   const shown = phase === 'listening' ? tailText(live) : tailText(replyText)
   const hintText = shown !== ''
     ? shown
@@ -475,6 +482,7 @@ export function useVoiceChat(props: VoiceChatProps): VoiceChatHandle {
     active: busy,
     enabled,
     title,
+    ariaLabel,
     toggle,
     status,
   }

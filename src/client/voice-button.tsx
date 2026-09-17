@@ -576,7 +576,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const onPointerAbort = (): void => { longPressRef.current?.cancel() }
 
   const busy = state !== 'idle'
-  // 悬停提示按系统语言（与 DSH 界面语言解耦），其余文案仍随界面语言。
+  // 悬停提示按系统语言（与 DSH 界面语言解耦），aria-label 按**界面语言**——
+  // 屏幕阅读器按界面语言朗读，混用会读出「英文按钮名 + 中文状态」这类错配。
   const sys = systemDict()
   // 对话进行中时按钮的语义整个归对话；空闲时提示「长按可对话」，否则用户没处知道。
   const title = chat.active
@@ -584,6 +585,15 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     : busy
       ? state === 'recording' ? sys.recordingTitle : state === 'transcribing' ? sys.transcribingTitle : sys.optimizingTitle
       : chat.enabled ? sys.micTitleHoldChat : sys.micTitle
+  const ariaLabel = chat.active
+    ? chat.ariaLabel
+    : busy
+      ? state === 'recording' ? t('recordingTitle') : state === 'transcribing' ? t('transcribingTitle') : t('optimizingTitle')
+      : chat.enabled ? t('micTitleHoldChat') : t('micTitle')
+  // 长按（语音对话）没有键盘等价手势，但对话热键是等价入口——把它声明给辅助技术。
+  const shortcut = chat.enabled && config.realtime.hotkey !== ''
+    ? config.realtime.hotkey.replace(/\bCtrl\b/gi, 'Control').replace(/\bCmd\b/gi, 'Meta')
+    : undefined
   // 两条链路共用一条提示位（同一个 wrap，绝对定位会重叠）。优先级：
   // 对话进行中的字幕 > 录音的错误/提示 > 录音进行中的状态 > 对话留下的提示。
   // 录音在途的状态排在对话「留下的」提示之前——前者是正在发生的事。
@@ -599,7 +609,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           data-state={chat.active ? chat.phase : state}
           data-mode={chat.active ? 'chat' : 'input'}
           data-chat={chat.enabled ? 'ready' : 'none'}
-          aria-label={title}
+          aria-label={ariaLabel}
+          aria-keyshortcuts={shortcut}
           aria-pressed={chat.active || state === 'recording'}
           disabled={disabled}
           onClick={onButtonClick}
@@ -625,14 +636,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
               <span className="dshav-hotkey-hint" data-kind="err" role="status">
                 <span className="dshav-dot" style={{ background: 'var(--dshav-danger)' }} />
                 <span className="dshav-hint-text">{error}</span>
-                <button type="button" className="dshav-hint-dismiss" aria-label={sys.dismiss} onClick={dismissHint}>×</button>
+                <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={dismissHint}>×</button>
               </span>
             )}
             {notice !== null && (
               <span className="dshav-hotkey-hint" data-kind="notice" role="status">
                 <span className="dshav-dot" />
                 <span className="dshav-hint-text">{notice}</span>
-                <button type="button" className="dshav-hint-dismiss" aria-label={sys.dismiss} onClick={dismissHint}>×</button>
+                <button type="button" className="dshav-hint-dismiss" aria-label={t('dismiss')} onClick={dismissHint}>×</button>
               </span>
             )}
             {busy && (
