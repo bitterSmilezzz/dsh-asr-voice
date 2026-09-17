@@ -112,6 +112,10 @@ export const CSS = `
 .dshav-mic-button[data-mode='chat']::after { opacity: 0; }
 /* 字幕行：这里上屏的文字就是主角，给它比状态提示更宽的可视区（截断在 JS 做）。 */
 .dshav-hotkey-hint[data-kind='caption'] { max-width: min(520px, calc(100vw - 120px));}
+/* 只放宽容器没用：内层 .dshav-hint-text 的 220px + ellipsis 会把 JS 已裁到
+   末尾 80 字的字幕再截一次，而 ellipsis 截的正是右端——最新说出的话。
+   这里解掉内层宽度上限，让它跟着容器走（flex 收缩交给容器 max-width）。 */
+.dshav-hotkey-hint[data-kind='caption'] .dshav-hint-text { max-width: none; min-width: 0; flex: 0 1 auto;}
 .dshav-hotkey-hint[data-kind='caption'][data-state='speaking'] .dshav-hint-text { color: var(--dshav-accent);}
 
 /* 录音实心点（呼吸）。 */
@@ -165,6 +169,9 @@ export const CSS = `
   white-space: nowrap;
   box-shadow: var(--dsw-shadow-lv3, 0 4px 16px rgba(0,0,0,.12));
   animation: dshav-hint-in .22s var(--dshav-ease-exit, cubic-bezier(.3,0,.8,.15));
+  /* 状态条浮在输入区上方：err/notice 折行后可盖住左侧工具组，而条本身只承载
+     文字——整条不接收指针，避免「看得见却点不到」的死区（关闭按钮单独恢复）。 */
+  pointer-events: none;
 }
 .dshav-hotkey-hint[data-kind='err'] {
   color: var(--dshav-danger);
@@ -191,18 +198,27 @@ export const CSS = `
 .dshav-hotkey-hint[data-kind='err'] .dshav-hint-dismiss { align-self: flex-start; }
 .dshav-hint-dismiss {
   flex: none;
+  /* 触摸目标 24×24（WCAG 2.5.8 最低目标尺寸）：它是错误提示唯一的手动关闭
+     入口，原来 17×13 的命中区在触屏上几乎点不中。 */
+  min-width: 24px;
+  min-height: 24px;
+  display: grid;
+  place-items: center;
   margin-left: 2px;
-  padding: 0 2px;
+  padding: 0;
   border: none;
   background: transparent;
+  /* 用继承色而不是 opacity: .55 —— 半透明会把 × 一起压暗，深色模式下对比度
+     不足；继承也让错误条里的 × 保持红色（与整条语义一致）。 */
   color: inherit;
   font-size: 13px;
   line-height: 1;
-  opacity: .55;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
+  /* 整条 pointer-events: none，这里必须单独打开，否则 × 点不动。 */
+  pointer-events: auto;
 }
-.dshav-hint-dismiss:hover { opacity: 1; background: var(--dsw-alias-fill-2, rgba(128,128,128,.18)); }
+.dshav-hint-dismiss:hover { background: var(--dsw-alias-fill-2, rgba(128,128,128,.18)); }
 .dshav-hotkey-hint .dshav-dot {
   flex: none;
   width: 8px;
@@ -212,6 +228,20 @@ export const CSS = `
   animation: dshav-blink 1.1s ease-in-out infinite;
 }
 .dshav-hint-text { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+/* 只给屏幕阅读器的状态词：视觉隐藏但留在无障碍树里。状态条把逐字字幕标成
+ * aria-hidden、改用这个节点播报「聆听中 / 思考中 / 正在朗读」——字幕每秒可更新
+ * 数次，喂给 live region 会把 SR 用户刷屏。 */
+.dshav-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* 频谱条：CSS 变量 --level（0~1）驱动柱高；每柱 --bar 系数错落。 */
 .dshav-spectrum {
@@ -420,12 +450,16 @@ export const CSS = `
   accent-color: var(--dsw-alias-brand-primary);
   cursor: pointer;
 }
+/* 开关行的文字也可点（见 ToggleRow 的 onClick）：没有指针光标的话，
+   点得到却没有「可点」的提示。 */
+.dshav-toggle > span { cursor: pointer; }
 /* 条件禁用（如 barge-in 仅 segmented 引擎可用）：整行降透明度并去掉指针 */
 .dshav-field-disabled { opacity: 0.55; pointer-events: none;}
 /* ── 原生控件：跟随 DSH 主题（--dsw-alias-*），与官方设置页一致 ── */
 .dshav-field select,
 .dshav-field input[type='text'],
-.dshav-field input[type='password'] {
+.dshav-field input[type='password'],
+.dshav-field input[type='number'] {
   box-sizing: border-box;
   height: 34px;
   padding: 0 12px;
@@ -454,8 +488,26 @@ export const CSS = `
   background-position: right 12px center;
   background-size: 12px 12px;
 }
+/* 数字字段与文本字段同宽：高级区 20 来个数值输入曾漏在规则外，
+   深色模式下是浏览器原生浅色控件（与整卡割裂）。 */
 .dshav-field input[type='text'],
-.dshav-field input[type='password'] { flex: 1; min-width: 0; width: auto; }
+.dshav-field input[type='password'],
+.dshav-field input[type='number'] { flex: 1; min-width: 0; width: auto; }
+/* 明文 HTTP 端点警告（settings 卡 BaseURL 字段下方）：
+   底色/描边用主题的 danger 淡色 token（明暗两套自动切换），文字用主文本色——
+   danger 文字色在深色主题的实际取值无法在此验证，主文本色保证两种主题都够对比度，
+   「警告」语义交给描边与底色承载。 */
+.dshav-warn {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--dshav-danger) 40%, transparent);
+  border-radius: 8px;
+  background: var(--dsw-alias-interactive-bg-hover-danger, color-mix(in srgb, var(--dshav-danger) 8%, transparent));
+  color: var(--dsw-alias-label-primary, var(--dshav-text));
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .dshav-status { font-size: 12px; color: var(--dshav-text-2); min-height: 16px; }
 .dshav-status[data-kind='err'] { color: var(--dshav-danger); }
 .dshav-status[data-kind='ok'] { color: var(--dshav-accent); }

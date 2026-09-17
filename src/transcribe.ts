@@ -15,16 +15,21 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CHAT_COMPLETIONS_PATH, MAX_AUDIO_BYTES, TRANSCRIBE_PATH, resolveAsrMode } from './presets.ts';
 import { keyRefFor } from './key-ref.ts';
 import type { KeyRefSource } from './key-ref.ts';
-import { guardRoute, readRawBody, sendJson, statusOfBodyError } from './http.ts';
+import { guardRoute, readRawBody, readUpstreamJson, redactSecret, sendJson, statusOfBodyError } from './http.ts';
 
 /** 上游 ASR 请求超时（ms）：上游不可达/卡死时不无限挂起请求。 */
 const UPSTREAM_TIMEOUT_MS = 60_000
+
+/** 在途转写请求上限：单请求峰值约 4~5× 音频大小（25MB 音频 → ~120MB 瞬时），而路由
+ *  此前没有任何在途计数——一个页面（或本机若干页面）并发几发就能把宿主内存打爆。
+ *  超限立刻 503，且**在读取 body 之前**拒绝（拒绝成本最低）。 */
+const MAX_INFLIGHT = 4
 
 /** 云端 ASR 配置面（来自 settings scope 解析出的当前生效供应商）。 id / preset / name 由 KeyRefSource 提供，name 是自定义供应商的显示名。 */
 export interface CloudAsrConfig extends KeyRefSource {
@@ -47,14 +52,16 @@ function upstreamLanguage(language: string | undefined): string | undefined {
   return map[language] ?? language
 }
 
-/** 从响应里抽错误原因（兼容 { error: string|{message} } 与 { message } 两种形状）。 */
+/** 从响应里抽错误原因（兼容 { error: string|{message} } 与 { message } 两种形状）。
+ *  上游文本一律过 {@link redactSecret}：它会经 reason 直通浏览器并显示给用户，
+ *  而上游（或用户自填的 baseUrl）完全可能把 `Bearer <key>` 回显在错误体里。 */
 function errorReason(data: { error?: unknown; message?: unknown }, status: number): string {
-  if (typeof data.error === 'string' && data.error !== '') return data.error
+  if (typeof data.error === 'string' && data.error !== '') return redactSecret(data.error)
   if (typeof data.error === 'object' && data.error !== null) {
     const msg = (data.error as { message?: unknown }).message
-    if (typeof msg === 'string' && msg !== '') return msg
+    if (typeof msg === 'string' && msg !== '') return redactSecret(msg)
   }
-  if (typeof data.message === 'string' && data.message !== '') return data.message
+  if (typeof data.message === 'string' && data.message !== '') return redactSecret(data.message)
   return `upstream ASR failed (HTTP ${status})`
 }
 
@@ -64,8 +71,12 @@ function debugDir(): string {
   return env && env !== '' ? env : join(homedir(), '.dsh', 'asr-voice-debug')
 }
 
-/** 成功转写是否也落盘（诊断期用 DSH_ASR_DEBUG_KEEP_WAVS=1 dsh web 开启；默认只存失败样本）。 */
-function keepAllWavs(): boolean {
+/** 诊断落盘的**总开关**（`DSH_ASR_DEBUG_KEEP_WAVS=1|true|yes` 开启，默认关闭）。
+ *  落盘写的是用户的**原始录音**，隐私面远大于诊断价值：此前「静音守卫失败」「识别结果
+ *  ≤8 字」「转写失败」三条路径无条件写盘，且 `?capture=1` 是一条任意本机页面都能调用的
+ *  写盘原语（信任围栏只管回环，localhost:5173 上的页面同样调得到）。现在默认一条都不落，
+ *  开启后连成功样本一起留（诊断期重放用）。 */
+function debugCaptureEnabled(): boolean {
   const v = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.DSH_ASR_DEBUG_KEEP_WAVS
   return v === '1' || v === 'true' || v === 'yes'
 }
@@ -84,23 +95,42 @@ function uaTag(req: IncomingMessage): string {
   return 'UA'
 }
 
-/** 目录里最多保留的音频个数（超出删最旧，防长期诊断撑爆磁盘）。 */
+/** 目录裁剪上限：文件数 + 总字节数双约束。只按个数裁不够——单个 wav 上限就是
+ *  MAX_AUDIO_BYTES（25MB），100 个 = 2.5GB，长期诊断照样撑爆磁盘。 */
 const MAX_KEPT_FILES = 100
+const MAX_KEPT_BYTES = 200 * 1024 * 1024
 
-/** 把原始音频落盘（fire-and-forget，绝不阻断路由）。 */
+/** 裁剪落盘目录：超出文件数或总字节就删最旧的（按 ISO 时间戳文件名排序），
+ *  但**永不删刚写的这一条**（否则一次裁剪就把现场删了）。 */
+async function pruneDebugDir(dir: string, keepName: string): Promise<void> {
+  const names = (await readdir(dir).catch(() => [] as string[])).sort()
+  const sizes = new Map<string, number>()
+  let total = 0
+  for (const name of names) {
+    const size = await stat(join(dir, name)).then((s) => s.size).catch(() => 0)
+    sizes.set(name, size)
+    total += size
+  }
+  let count = names.length
+  for (const name of names) {
+    if (count <= MAX_KEPT_FILES && total <= MAX_KEPT_BYTES) break
+    if (name === keepName) continue
+    await unlink(join(dir, name)).catch(() => {})
+    count -= 1
+    total -= sizes.get(name) ?? 0
+  }
+}
+
+/** 把原始音频落盘（fire-and-forget，绝不阻断路由；调用方负责过 {@link debugCaptureEnabled}）。 */
 async function saveDebugAudio(audio: Buffer, mime: string, tag: string): Promise<void> {
   try {
     const dir = debugDir()
     await mkdir(dir, { recursive: true })
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     const safeTag = tag.replace(/[^a-z0-9]+/gi, '-').slice(0, 40) || 'unknown'
-    await writeFile(join(dir, `${stamp}-${audio.length}B-${safeTag}.${extForMime(mime)}`), audio)
-    const entries = await readdir(dir).catch(() => [] as string[])
-    if (entries.length > MAX_KEPT_FILES) {
-      for (const name of entries.sort().slice(0, entries.length - MAX_KEPT_FILES)) {
-        await unlink(join(dir, name)).catch(() => {})
-      }
-    }
+    const name = `${stamp}-${audio.length}B-${safeTag}.${extForMime(mime)}`
+    await writeFile(join(dir, name), audio)
+    await pruneDebugDir(dir, name)
   } catch {
     // 诊断落盘失败不影响主流程
   }
@@ -126,7 +156,8 @@ async function upstreamTranscribeMultipart(cfg: CloudAsrConfig, audio: Buffer, m
     // 上游卡死时及时失败（客户端 60s 超时后 host 不应继续占着请求）。
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
-  const data = (await res.json().catch(() => ({}))) as { text?: unknown; error?: unknown; message?: unknown };
+  // 带上限读上游响应：baseUrl 可指向不可信端点，无上限的 res.json() 是宿主 OOM 入口。
+  const data = (await readUpstreamJson(res)) as { text?: unknown; error?: unknown; message?: unknown };
   if (!res.ok) {
     throw new Error(errorReason(data, res.status));
   }
@@ -155,7 +186,8 @@ async function upstreamTranscribeChat(cfg: CloudAsrConfig, audio: Buffer, mime: 
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
-  const data = (await res.json().catch(() => ({}))) as {
+  // 同 multipart 通道：上游响应体带上限读取。
+  const data = (await readUpstreamJson(res)) as {
     choices?: { message?: { content?: unknown } }[]
     error?: unknown
     message?: unknown
@@ -244,6 +276,7 @@ function extForMime(mime: string): string {
 }
 
 /** 注册 /api/asr-voice/transcribe 路由。
+ * 顺序：信任围栏 → 在途上限（超限 503，不读 body）→ 读 body → 上游转发。
  * @param register - webserver 的 register 方法（由调用方从 ctx 传入）。
  * @param getCloudConfig - 读取当前生效云端 ASR 配置的 thunk。
  * @param ctx - host context（供 MiMo key 兜底走 credentials 服务）。
@@ -256,50 +289,70 @@ export function registerTranscribeRoute(
   ctx: Context,
   recordStats?: (text: string, providerId: string) => void,
 ): () => void {
+  // 在途计数跨请求共享，故挂在注册闭包里（每个路由实例一份，disposer 回收时随之丢弃）。
+  let inflight = 0
+  /** 真正的转写处理（在途计数由下方 handler 负责增减）。 */
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let audio: Buffer = Buffer.alloc(0)
+    let mime = 'audio/webm'
+    let ua = 'UA'
+    try {
+      audio = await readRawBody(req, MAX_AUDIO_BYTES);
+      if (audio.length === 0) return sendJson(res, 400, { ok: false, reason: 'empty audio body' });
+      mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0]?.trim() || 'audio/webm';
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      // 诊断标记：从请求 UA 推断浏览器，让每个落盘文件的标签自带浏览器身份。
+      ua = uaTag(req);
+      // 纯抓取请求（诊断）：保存转换前的原始录音后直接返回，不调用上游。默认关闭
+      // （见 debugCaptureEnabled）——关闭时仍回合法 JSON，只是不落盘，免得让调用方
+      // 以为「抓到了」而拿着空目录排查。
+      if (url.searchParams.get('capture') === '1') {
+        if (!debugCaptureEnabled()) {
+          return sendJson(res, 200, { ok: false, saved: false, reason: 'debug capture disabled: set DSH_ASR_DEBUG_KEEP_WAVS=1 to enable' });
+        }
+        void saveDebugAudio(audio, mime, `raw-${ua}`);
+        return sendJson(res, 200, { ok: true, saved: true });
+      }
+      const language = url.searchParams.get('language') ?? undefined;
+      const cfg = getCloudConfig();
+      if (!cfg.baseUrl.trim()) {
+        return sendJson(res, 400, { ok: false, reason: 'cloud ASR not configured: set baseUrl in plugin settings' });
+      }
+      const apiKey = await resolveApiKey(ctx, cfg);
+      if (!apiKey) {
+        return sendJson(res, 400, { ok: false, reason: `no API key: set the credential ${keyRefFor(cfg)} in DSH (a same-named LLM key is reused automatically)` });
+      }
+      const { text } = await upstreamTranscribe(cfg, audio, mime, language, apiKey);
+      // 诊断抓取（默认关闭）：开启后成功样本也落盘，便于重放定位「听错/幻觉」。
+      // 关闭时一条都不写——落盘的是用户的原始录音，隐私优先。
+      if (debugCaptureEnabled()) void saveDebugAudio(audio, mime, `${ua}-ok-${text.slice(0, 18)}`);
+      // 用量统计（可选，dev 功能）。
+      recordStats?.(text, cfg.id);
+      return sendJson(res, 200, { ok: true, text });
+    } catch (error) {
+      const base = error instanceof Error ? error.message : String(error);
+      const reason = audio.length > 0 ? `${base} (audio ${audio.length}B, ${mime})` : base;
+      // 失败样本同样只在诊断开关打开时落盘（重放定位用，不影响主流程）。
+      if (audio.length > 0 && debugCaptureEnabled()) void saveDebugAudio(audio, mime, `${ua}-${base}`);
+      // 超限/超时是输入问题（413/408），不该报成 502 把排查引向上游。
+      return sendJson(res, statusOfBodyError(error, 502), { ok: false, reason });
+    }
+  }
   return register({
     kind: 'exact',
     path: '/api/asr-voice/transcribe',
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       const denied = guardRoute(req);
       if (denied !== null) return sendJson(res, denied.status, denied.payload);
-      let audio: Buffer = Buffer.alloc(0)
-      let mime = 'audio/webm'
-      let ua = 'UA'
+      // 在途上限：超限立刻拒绝，连 body 都不读（并发峰值就是内存峰值）。
+      if (inflight >= MAX_INFLIGHT) {
+        return sendJson(res, 503, { ok: false, reason: 'too many concurrent requests' });
+      }
+      inflight += 1;
       try {
-        audio = await readRawBody(req, MAX_AUDIO_BYTES);
-        if (audio.length === 0) return sendJson(res, 400, { ok: false, reason: 'empty audio body' });
-        mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0]?.trim() || 'audio/webm';
-        const url = new URL(req.url ?? '/', 'http://localhost');
-        // 诊断标记：从请求 UA 推断浏览器，让每个落盘文件的标签自带浏览器身份。
-        ua = uaTag(req);
-        // 纯抓取请求（诊断）：保存转换前的原始录音后直接返回，不调用上游。
-        if (url.searchParams.get('capture') === '1') {
-          void saveDebugAudio(audio, mime, `raw-${ua}`);
-          return sendJson(res, 200, { ok: true, saved: true });
-        }
-        const language = url.searchParams.get('language') ?? undefined;
-        const cfg = getCloudConfig();
-        if (!cfg.baseUrl.trim()) {
-          return sendJson(res, 400, { ok: false, reason: 'cloud ASR not configured: set baseUrl in plugin settings' });
-        }
-        const apiKey = await resolveApiKey(ctx, cfg);
-        if (!apiKey) {
-          return sendJson(res, 400, { ok: false, reason: `no API key: set the credential ${keyRefFor(cfg)} in DSH (a same-named LLM key is reused automatically)` });
-        }
-        const { text } = await upstreamTranscribe(cfg, audio, mime, language, apiKey);
-        // 诊断抓取：成功音频在 DSH_ASR_DEBUG_KEEP_WAVS=1 时全存；识别结果过短
-        // （≤8 字符，覆盖 "yeah"/单个语气词 等疑似听错/幻觉）时总是落盘，便于重放定位。
-        if (keepAllWavs() || text.trim().length <= 8) void saveDebugAudio(audio, mime, `${ua}-ok-${text.slice(0, 18)}`);
-        // 用量统计（可选，dev 功能）。
-        recordStats?.(text, cfg.id);
-        return sendJson(res, 200, { ok: true, text });
-      } catch (error) {
-        const base = error instanceof Error ? error.message : String(error);
-        const reason = audio.length > 0 ? `${base} (audio ${audio.length}B, ${mime})` : base;
-        // 失败时把原始音频落盘到 ~/.dsh/asr-voice-debug/（重放定位用，不影响主流程）。
-        if (audio.length > 0) void saveDebugAudio(audio, mime, `${ua}-${base}`);
-        // 超限/超时是输入问题（413/408），不该报成 502 把排查引向上游。
-        return sendJson(res, statusOfBodyError(error, 502), { ok: false, reason });
+        await handle(req, res);
+      } finally {
+        inflight -= 1;
       }
     },
   });

@@ -219,11 +219,32 @@ export interface AsrVoiceSettings {
     ttsVoice: string
     /** 进出实时模式的快捷键（'' = 关闭）。 */
     hotkey: string
+    /** 语音插话（默认关）：播报期间恢复收音，人声持续超出回声门才打断。 */
+    bargeIn: boolean
     turn: {
       /** 转写文字静默多久算「说完了」（毫秒）。 */
       settleMs: number
       /** 静音窗口之后再宽限这么久才提交（毫秒）。 */
       tailMs: number
+    }
+    /** 声学切段（仅 engine=segmented 生效）：只看 RMS，阈值是设备噪声底的函数。 */
+    vad: {
+      /** 采集帧长（毫秒）：越小越省延迟，越大越省调度开销。 */
+      frameMs: number
+      /** RMS 高于此值算有声（0~1）。 */
+      rms: number
+      /** 自动校准：实际判据 = max(rms, 静音期噪声底×3)，换设备免重校。 */
+      rmsAuto: boolean
+      /** 连续静音多久切一段（毫秒）。 */
+      silenceMs: number
+      /** 段前保留（毫秒）：不留就会切掉第一个音节。 */
+      prerollMs: number
+      /** 实际语音短于此不成为一段（毫秒）。 */
+      minSpeechMs: number
+      /** 单段语音长度上限（毫秒）。 */
+      maxSegmentMs: number
+      /** 待转写队列上限（不含在途那段）。 */
+      maxPending: number
     }
     /** 单次对话上限（毫秒）：到点自动结束，麦克风不无人值守常开。 */
     maxSessionMs: number

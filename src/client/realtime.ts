@@ -70,6 +70,10 @@ function clearTimer(timer: ReturnType<typeof setTimeout> | null): null {
 /** Web Speech 在 onend 后重新拉起前的最小间隔：紧接着 start() 会撞 InvalidStateError。 */
 const RESTART_DELAY_MS = 120
 
+/** 连续多少次 start() 抛错就判死会话：识别服务持续不可用时，冷却重启会无限空转，
+ *  而 UI 一直显示「聆听中」。连败到此即报错收摊，让用户看到真实原因。 */
+const START_FAIL_LIMIT = 3
+
 /** 取一个 webkitSpeechRecognition 构造器；不支持返回 null。 */
 function recognitionCtor(): (new () => SpeechRecognitionLike) | null {
   if (!isWebSpeechSupported()) return null
@@ -133,6 +137,8 @@ export function createBrowserRealtime(
   let interim = ''
   let recognition: SpeechRecognitionLike | null = null
   let restartTimer: ReturnType<typeof setTimeout> | null = null
+  /** 连续 start() 抛错计数（成功一次即清零），见 START_FAIL_LIMIT。 */
+  let startFailures = 0
   let stopLevel: (() => void) | null = null
   /** 上一次交出去的文本与其交出时刻：识别器重启后可能在很短窗口内把同一句再报一遍。 */
   let lastTurn = ''
@@ -225,19 +231,39 @@ export function createBrowserRealtime(
       if (recognition === rec) recognition = null
       if (!active || paused || failed) return
       // Chrome 会在一段静音后自行结束 continuous 会话：悄悄续上，用户不该察觉。
-      restartTimer = clearTimer(restartTimer)
-      restartTimer = setTimeout(() => {
-        restartTimer = null
-        if (active && !paused && !failed) openRecognition()
-      }, RESTART_DELAY_MS)
+      scheduleOpen()
     }
 
     recognition = rec
     try {
       rec.start()
+      startFailures = 0
     } catch {
-      // already started：交给 onend 续。
+      // start() 抛错（多为旧实例尚未释放的 InvalidStateError）**不会**有 onend 兜底：
+      // 只把 recognition 留在原地，链路就变聋了——active/!paused/!failed 全部成立，
+      // 既不重启也不报错，UI 停在「聆听中」而说话毫无反应。走与 onend 相同的冷却重启，
+      // 并计连败：一直起不来就判死，不让会话挂在半空。
+      if (recognition === rec) recognition = null
+      startFailures += 1
+      if (startFailures >= START_FAIL_LIMIT) {
+        failed = true
+        active = false
+        clearTimers()
+        events.onFail('speech-start-failed')
+        return
+      }
+      scheduleOpen()
     }
+  }
+
+  /** 冷却后重新装识别器：onend 续听、start 抛错重试、半双工还麦三条路径共用。
+   *  冷却不是可选项——紧接着 abort() 调 start() 会撞 InvalidStateError。 */
+  const scheduleOpen = (): void => {
+    restartTimer = clearTimer(restartTimer)
+    restartTimer = setTimeout(() => {
+      restartTimer = null
+      if (active && !paused && !failed) openRecognition()
+    }, RESTART_DELAY_MS)
   }
 
   const beginListening = (): void => {
@@ -268,7 +294,11 @@ export function createBrowserRealtime(
     resume(): void {
       if (!active || !paused) return
       lastTurn = ''
-      beginListening()
+      paused = false
+      stopLevel ??= startLevelSimulation((level) => { events.onLevel(level) })
+      // 半双工还麦：pause() 刚 abort 过识别器，不能立即 start()（会撞 InvalidStateError），
+      // 走与 onend 同款冷却——此前这条路径没有冷却，是 start 抛错最常见的触发点。
+      scheduleOpen()
     },
     stop(): void {
       active = false

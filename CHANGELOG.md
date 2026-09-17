@@ -6,6 +6,95 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
+## [0.3.3] - 2026-09-17
+
+多视角深度优化轮：正确性、安全边界、可访问性、发布护栏四线并行，测试 248 → **318** 项全绿。
+
+### 修复
+
+- **浏览器整段录音不再被静音截断**：Web Speech 的 `continuous` 会话会在用户停顿数秒后
+  自行结束，此前 `onend` 直接收摊——用户继续说，一个字都进不来，UI 却还停在「录音中」。
+  现在与实时链路同款冷却重启（已识别文字跨重启保留），连续三次起不来才收尾并报
+  `network`（`auto` 模式据此降级云端）；`no-speech` 也按「说过话就续听」区分处理。
+- **同一页面第二次实时对话必挂（`segmented` / `cloud` 引擎）**：AudioWorklet 的
+  `addModule` 此前每次会话都用新 blob URL 注册同名 processor，第二次必被
+  `NotSupportedError` 拒绝，而错误文案指向「浏览器不支持」。现在模块 URL 提到模块级
+  只创建一次（`addModule` 对同一 URL 幂等）。
+- **按住说话的三处键生命周期缺陷**：松键不再无脑 `toggle()`——录音已自行结束（静音自动
+  停止 / `no-speech` / 到达时长上限）时那会取消在途转写（刚口述的文本直接消失）或重新
+  开录（键已松开，麦克风录到上限）；改为只收尾「正在录音」这一种状态。`keyup` 只比主键
+  （先松 Ctrl 再松 Space 不再让 `held` 卡住、麦克风常开）；窗口失焦 / 切后台一并复位。
+- **实时对话回合判定改认 `running` 的上升沿**：打断后立刻说下一句时，旧回合尚未落回的
+  `running` 会把新回合提前 arm 掉——表现为提前还麦（半双工被破坏）且回复此后不再朗读。
+- **播报看门狗归属到句子**：打断后旧句子的迟到 `onend` 不再摘掉新句子的看门狗
+  （Chrome 长句不回 `onend`，失去它麦克风就永远还不回来）。
+- 整段录音 `stop()` 补看门狗：`onend` 不来时按已识别文本收尾，不再把 UI 钉在「识别中」。
+- 浏览器识别器 `start()` 抛错不再被静默吞掉：走冷却重试，连败判死并报错（此前会变聋但
+  UI 仍显示「聆听中」）。
+- 云端实时引擎的静音守卫复用 `isSilentPeak`（此前硬编码 `0.005`，改阈值会漏改一处）。
+- 解码失败的 AudioContext 现在真的 `close()`（此前只丢引用，反复失败会撞 Chrome 的
+  每文档上下文数量上限）；电平表上下文 `suspended` 时恢复一次（否则频谱不动，且开着的
+  「静音自动停止」会立刻误停录音）。
+
+### 安全
+
+- **信任围栏补上端口**：同源判定从「主机名相等」改为「scheme + host + **port** 相等」
+  （默认端口两侧归一化）。此前 `http://localhost:5173` 上的任意本机页面都能借宿主代理
+  花用户的 API key——`Sec-Fetch-Site` 只是 `same-site`，拦不住。
+- **上游文本透出前脱敏**：`reason` 里的 `Bearer <key>`、`sk-…`、`ASR_VOICE_…` 形状一律
+  替换为 `<redacted>` 并截断到 200 字；上游响应体加 4MB 上限（流式计数，超限即断流），
+  TTS 的 PCM 累计加 8MB 上限。
+- **诊断音频默认不落盘**：`~/.dsh/asr-voice-debug/` 的写盘与 `?capture=1` 现在只在
+  `DSH_ASR_DEBUG_KEEP_WAVS=1` 时生效，裁剪改为「文件数 100 + 总字节 200MB」双约束。
+- **实时会话有上限**：并发会话数上限 8（超出 503，且在开上游连接之前拒绝）+ 每会话
+  绝对 TTL（取 `realtime.maxSessionMs`）——不再可能靠持续上行无限续命付费 WS。
+- `/transcribe` 与 `/optimize` 各加 4 个在途并发上限（超出 503）；
+  `/optimize` 补输入（1 万字符）与输出（2 万字符，超出截断并标 `truncated`）上限。
+- JSON `null` body 不再抛穿 handler：`/tts` 与 `/optimize` 均显式 400。
+- 设置页对明文 `http://` 的 BaseURL 给出警告（API key 将明文传输），不阻断保存。
+- 迁移密钥引用与读取路径统一派生入口（此前行缺 `id` 时两条路径派生出不同引用名，
+  迁移后密钥不可达）；凭据服务缺席时不再静默早退，改记一条 warn。
+
+### 变更
+
+- 设置卡的快捷键录制框不再吞掉 Tab / Shift+Tab（此前键盘用户进得去出不来，Shift+Tab
+  还会被**录成快捷键**）。
+- 实时字幕不再被二次截断（提示条内层 span 此前固定 220px，会把最新说出的话裁掉）；
+  尾部保留长度与容器宽度对齐（80 → 40 字）。录音中的 interim 字幕同样纳入该宽度。
+- 状态条不再挡点击（容器 `pointer-events: none`，仅关闭按钮可点）；`×` 触摸目标
+  24×24（此前约 17×13）。
+- 字幕不再刷屏屏幕阅读器：逐字字幕 `aria-hidden`，改播报低频状态词。
+- 优化预览卡：打开即接管焦点、Esc 关闭、`aria-modal`；主按钮文案按 `autoSend` 显示
+  「填入草稿 / 填入并发送」（此前一律「填入并发送」，而默认并不发送）。
+- 剪贴板写入失败会提示（此前静默——Safari 在异步回调里会拒绝写入，而该开关默认开）。
+- 高级区数字输入框补主题样式（此前是浏览器原生外观，深色模式下还是浅色控件）；
+  开关行文字可点；chip 单选组支持方向键（roving tabindex）。
+- 兼容 Safari < 16.4：`AbortSignal.timeout` 缺失时退回自建超时信号（此前模型列表与
+  「测试连接」会以 `TypeError` 失败）。
+
+### 工程
+
+- `build` / `scripts/build.sh` 在 tsdown 前增加 client 半区类型检查（放在 emit 之前，
+  失败则 `lib/` 保持原样）；新增 `pretest` 编译 host（测试跑的是 `lib/` 产物）。
+- 发布 workflow 增加护栏：`pnpm install --frozen-lockfile` → typecheck → build →
+  `git diff --exit-code -- lib` → 全量测试，任一步失败即中止发布。
+- `engines: node >= 22`（云端实时 / TTS 依赖全局 `WebSocket`，旧 Node 上的表现是
+  502「云端通道不可用」而非版本错误）；构建脚本的 Node 下限同步。
+- `files` 加入 `docs/images`（README 图片此前在 npm 页面 404）；删掉指向从不产出的
+  `lib/types/client/index.d.ts` 的 `exports` 映射与 tsconfig 里的死配置。
+- tsdown 的 external 策略从「字面量白名单 + 默认内联」改为「前缀正则 + 默认 external」，
+  避免将来新增的官方导入被静默打进 bundle（单例被复制且构建不报错）。
+- 新增测试：SSE 分帧纯函数与传输层（20 例）、schema ↔ client 默认值一致性守卫（5 例）、
+  引擎选择真值表（11 例）、产物 external 白名单（4 例）、host 边界守卫（12 例）；
+  信任围栏与迁移引用一致性补用例。
+
+### 文档
+
+- README 修正 5 处与代码不符：单按钮手势（点 = 转写 / 长按 = 对话）、`realtime.hotkey`
+  默认值、`realtime.tts` 的 `cloud` 档与缺失的 `provider` / `ttsVoice` 两行、
+  「真云端 provider 仍是后续阶段」（早已实现）、Node 版本要求；权限表更新诊断落盘口径。
+- `cordis.patch.yml` 同步：实时对话默认开、单按钮、engine 差异、client 侧硬依赖说明。
+
 ## [0.3.2] - 2026-09-15
 
 ### 变更

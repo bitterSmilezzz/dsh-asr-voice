@@ -14,6 +14,9 @@
  * speech-stopped（不可丢的回合边界）**必须**最终送达。drain 后按序冲刷。
  * 每会话一条 SSE（浏览器是单一消费者）；SSE 断开 / 会话超时都会拆掉整个会话，
  * 防止麦克风数据在 host 侧无人认领地堆积。
+ * 两道兜底（都在 host 侧，不信客户端的自觉）：同时存活会话数上限（8）、单会话绝对 TTL
+ * （默认 10 分钟，取 settings `realtime.maxSessionMs`）——客户端也会自停，但页面卡死时
+ * 不会发停止请求，云端付费 WS 与心跳 interval 就再没人回收。
  */
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -25,6 +28,21 @@ const MAX_PCM_BYTES = 4 * 1024 * 1024
 
 /** 会话空闲上限（毫秒）：没有数据进来也没有消费者，自动拆会话防泄漏。 */
 const DEFAULT_SESSION_IDLE_MS = 10 * 60 * 1000
+
+/** 同时存活会话数上限：每个会话 = 1 条 SSE 心跳 interval + 1 条云端付费 WS（按分钟计费），
+ *  而 createSession 此前只 randomUUID + set，没有任何数量限制——一个页面刷循环就能开出
+ *  任意多条云端连接。8 条足够「多标签页各开一场实时对话」的真实用法。 */
+const MAX_SESSIONS = 8
+
+/** 会话绝对上限（毫秒）：与 settings `realtime.maxSessionMs` 的默认值一致（10 分钟）。
+ *  客户端也按同一上限自停，但那只是 UI 层的礼貌——页面卡死/被系统挂起时不会发停止请求，
+ *  云端付费 WS 与心跳 interval 就永远不回收（见 refreshIdle 的续命问题）。host 必须自己兜底。 */
+const DEFAULT_MAX_SESSION_MS = 600_000
+
+/** 空闲定时器重挂的最小间隔（毫秒）：上行是 40ms 一帧，每帧 clearTimeout+setTimeout
+ *  等于每秒重挂 25 次（纯浪费，且让 timer 在 event loop 里持续抖动）。节流不影响正确性：
+ *  定时器到点会复查 lastActive，真空闲满一个窗口才拆会话。 */
+const IDLE_REARM_MIN_MS = 1_000
 
 /** 上游终态报错后的收尾宽限期（毫秒）：错误帧入队后给它这段时间送达客户端（SSE 若正
  *  背压则等 drain 冲刷），到点无条件拆会话。设短值即可——客户端收到错误帧后自己会走
@@ -178,6 +196,16 @@ export class SseChannel {
   }
 }
 
+/** 建会话失败（容量已满）：自带 HTTP 状态码，会话路由据此回 503（可重试）而不是 502
+ *  （上游故障）。其余建会话失败（provider 连不上）仍是 502。 */
+export class RealtimeSessionError extends Error {
+  readonly status = 503 as const
+  constructor(message: string) {
+    super(message)
+    this.name = 'RealtimeSessionError'
+  }
+}
+
 /** 一个实时转写会话。 */
 interface RealtimeSession {
   sid: string
@@ -191,6 +219,12 @@ interface RealtimeSession {
   lastActive: number
   /** 空闲清理定时器。 */
   idleTimer: ReturnType<typeof setTimeout> | null
+  /** 上次重挂空闲定时器的时刻（重挂节流用，见 IDLE_REARM_MIN_MS）。 */
+  idleArmedAt: number
+  /** 会话创建时刻（绝对 TTL 判定）。 */
+  startedAt: number
+  /** 绝对 TTL 定时器（到点无条件拆会话，不看是否有活动）。 */
+  ttlTimer: ReturnType<typeof setTimeout> | null
   /** 上游是否已给出**终态**报错（连接已死）。置位后不再接受上行、不再刷新空闲计时，
    *  只等 ERROR_LINGER_MS 到点拆会话。 */
   errored: boolean
@@ -206,6 +240,11 @@ export interface RealtimeHostOptions {
   heartbeatMs?: number
   /** 上游终态报错后的收尾宽限期（毫秒，默认 5s）。测试注入小值以确定性覆盖拆除路径。 */
   errorLingerMs?: number
+  /** 同时存活会话上限（默认 8）；超出时 createSession 抛 {@link RealtimeSessionError}。 */
+  maxSessions?: number
+  /** 单会话绝对上限（毫秒，默认 10 分钟）；非正数 = 不设上限。传函数则每次建会话现读
+   *  （settings 可热改，见 src/index.ts 的注入）。 */
+  maxSessionMs?: number | (() => number)
   /** 现在的时间（毫秒，测试注入）。 */
   now?: () => number
 }
@@ -213,8 +252,10 @@ export interface RealtimeHostOptions {
 /** 实时转写会话注册表 + 路由。 */
 export class RealtimeHost {
   private readonly sessions = new Map<string, RealtimeSession>()
-  private readonly opts: Required<Pick<RealtimeHostOptions, 'idleMs' | 'heartbeatMs' | 'errorLingerMs' | 'now'>>
+  private readonly opts: Required<Pick<RealtimeHostOptions, 'idleMs' | 'heartbeatMs' | 'errorLingerMs' | 'maxSessions' | 'now'>>
   private readonly createProvider: RealtimeHostOptions['createProvider']
+  /** 绝对 TTL 的取值入口（函数则现读，便于 settings 热改）。 */
+  private readonly maxSessionMsOf: () => number
 
   constructor(options: RealtimeHostOptions) {
     this.createProvider = options.createProvider
@@ -222,15 +263,26 @@ export class RealtimeHost {
       idleMs: options.idleMs ?? DEFAULT_SESSION_IDLE_MS,
       heartbeatMs: options.heartbeatMs ?? 15_000,
       errorLingerMs: options.errorLingerMs ?? ERROR_LINGER_MS,
+      maxSessions: options.maxSessions ?? MAX_SESSIONS,
       now: options.now ?? Date.now,
     }
+    const maxSessionMs = options.maxSessionMs ?? DEFAULT_MAX_SESSION_MS
+    this.maxSessionMsOf = typeof maxSessionMs === 'function' ? maxSessionMs : () => maxSessionMs
   }
 
   /** 铸造新会话：host 生成 sid，建 provider 连接。 */
   async createSession(): Promise<{ sid: string }> {
+    // 容量检查放在建 provider 连接**之前**：超限时不该先开一条云端付费 WS 再拒绝。
+    if (this.sessions.size >= this.opts.maxSessions) {
+      throw new RealtimeSessionError(`too many realtime sessions (max ${this.opts.maxSessions})`)
+    }
     const sid = randomUUID()
     const conn = await this.createProvider()
-    const session: RealtimeSession = { sid, conn, sse: null, pending: [], lastActive: this.opts.now(), idleTimer: null, errored: false }
+    const startedAt = this.opts.now()
+    const session: RealtimeSession = {
+      sid, conn, sse: null, pending: [], lastActive: startedAt, idleTimer: null,
+      idleArmedAt: startedAt, startedAt, ttlTimer: null, errored: false,
+    }
     // provider 事件统一走同一个收口：无 SSE 时缓冲（有界），挂上后冲刷。
     conn.onEvent = (ev) => {
       const s = this.sessions.get(sid)
@@ -249,7 +301,19 @@ export class RealtimeHost {
     }
     this.sessions.set(sid, session)
     this.armIdle(sid)
+    this.armTtl(sid)
     return { sid }
+  }
+
+  /** 绝对 TTL：到点**无条件**拆会话（不看有没有活动）。会话是「一次对话」而非常驻资源：
+   *  只要持续上行 PCM，空闲守卫就永远等不到过期（客户端每帧都在续命），云端 WS 按分钟
+   *  计费地开着。TTL 取值在建会话时现读（settings 热改立刻对新会话生效）。 */
+  private armTtl(sid: string): void {
+    const ms = this.maxSessionMsOf()
+    if (!(ms > 0)) return // 非正数 = 显式关闭绝对上限
+    const s = this.sessions.get(sid)
+    if (s === undefined) return
+    s.ttlTimer = setTimeout(() => this.closeSession(sid), ms)
   }
 
   /** 上游终态报错后的收尾：标记会话已终结 + 把空闲窗口收紧到 ERROR_LINGER_MS。
@@ -269,6 +333,7 @@ export class RealtimeHost {
     const s = this.sessions.get(sid)
     if (s === undefined) return
     if (s.idleTimer !== null) clearTimeout(s.idleTimer)
+    s.idleArmedAt = this.opts.now()
     s.idleTimer = setTimeout(() => {
       const cur = this.sessions.get(sid)
       if (cur === undefined) return
@@ -283,7 +348,11 @@ export class RealtimeHost {
   private refreshIdle(sid: string): void {
     const s = this.sessions.get(sid)
     if (s === undefined || s.errored) return
-    s.lastActive = this.opts.now()
+    const now = this.opts.now()
+    s.lastActive = now
+    // 重挂节流（见 IDLE_REARM_MIN_MS）：上行是 40ms 一帧，每帧重挂定时器纯属浪费。
+    // lastActive 每帧都更新，所以节流只推迟「定时器重挂」，不推迟过期判定本身。
+    if (now - s.idleArmedAt < IDLE_REARM_MIN_MS) return
     this.armIdle(sid)
   }
 
@@ -315,13 +384,20 @@ export class RealtimeHost {
     return true
   }
 
-  /** 关闭会话：拆 provider、拆 SSE、清定时器（幂等）。 */
+  /** 关闭会话：拆 provider、拆 SSE、清定时器（幂等）。
+   *  时序说明（**刻意不改**）：这里先摘掉事件汇（`conn.onEvent = null`）再 `conn.close()`，
+   *  而 provider（如 realtime-dashscope.ts）的 close 会发 session.finish 并保留 3s 宽限
+   *  （CLOSE_GRACE_MS）等上游在途 final——那条 final 到达时事件汇已摘，host 侧收不到任何
+   *  事件（客户端 stop 时本就丢弃事件，所以当前无功能损失）。若将来要「收尾取最后一句」，
+   *  必须调换顺序：先 conn.close()、宽限结束后再摘事件汇。 */
   closeSession(sid: string): void {
     const s = this.sessions.get(sid)
     if (s === undefined) return
     this.sessions.delete(sid)
     if (s.idleTimer !== null) clearTimeout(s.idleTimer)
     s.idleTimer = null
+    if (s.ttlTimer !== null) clearTimeout(s.ttlTimer)
+    s.ttlTimer = null
     s.sse?.close()
     s.sse = null
     s.conn.onEvent = null
@@ -331,6 +407,11 @@ export class RealtimeHost {
   /** 会话是否存活（供测试/诊断）。 */
   hasSession(sid: string): boolean {
     return this.sessions.has(sid)
+  }
+
+  /** 当前存活会话数（供测试/诊断）。 */
+  sessionCount(): number {
+    return this.sessions.size
   }
 
   /** 释放全部会话（插件卸载/热重载时由 fiber disposer 调用）：逐个 closeSession
@@ -352,7 +433,9 @@ export class RealtimeHost {
             const { sid } = await this.createSession();
             return sendJson(res, 200, { ok: true, sid });
           } catch (error) {
-            return sendJson(res, 502, { ok: false, reason: error instanceof Error ? error.message : String(error) });
+            // 容量已满 = 503（重试有意义，不是上游故障）；其余（provider 连不上等）仍按 502。
+            const status = error instanceof RealtimeSessionError ? error.status : 502;
+            return sendJson(res, status, { ok: false, reason: error instanceof Error ? error.message : String(error) });
           }
         },
       }),

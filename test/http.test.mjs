@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import { readRawBody, readJsonBody, sendJson, guardRoute, HttpBodyError, statusOfBodyError } from '../lib/http.js'
+import { readRawBody, readJsonBody, sendJson, guardRoute, HttpBodyError, statusOfBodyError, redactSecret, readUpstreamJson, MAX_UPSTREAM_JSON_BYTES } from '../lib/http.js'
 
 /** 起一个真实 http server，跑完即关（readRawBody 的 socket 行为只能在真实连接上验证）。 */
 async function withServer(handler, run) {
@@ -209,4 +209,87 @@ test('sendJson: 状态码 / JSON 头 / content-length 齐全', () => {
   assert.equal(res.headers['content-type'], 'application/json; charset=utf-8')
   assert.equal(res.headers['content-length'], Buffer.byteLength(JSON.stringify({ ok: true, text: '你好' })))
   assert.equal(chunks.join(''), JSON.stringify({ ok: true, text: '你好' }))
+})
+
+// ── 上游文本脱敏（reason 直通浏览器前的最后一道）─────────────────────────────
+// 上游（或用户自填的恶意 baseUrl）会把请求材料回显进错误体，而这些文本会经路由的
+// reason 显示给用户——等于把 key 印在页面上。
+
+test('redactSecret: 剥离 Bearer / sk- / ASR_VOICE_ 形状的密钥材料', () => {
+  assert.equal(
+    redactSecret('unauthorized: Bearer sk-live-abcdefgh12345678 rejected'),
+    'unauthorized: <redacted> rejected',
+  )
+  assert.equal(redactSecret('bad key sk-proj-ABCDEFGH1234_xyz'), 'bad key <redacted>')
+  assert.equal(
+    redactSecret('credential ASR_VOICE_MY_PROVIDER_API_KEY not found'),
+    'credential <redacted> not found',
+  )
+  // 短到不可能是密钥的 sk- 前缀不误伤（如 sk-1 这种模型名片段）
+  assert.equal(redactSecret('model sk-1 unavailable'), 'model sk-1 unavailable')
+})
+
+test('redactSecret: 折叠空白 + 截断到 maxLen（超出加省略号）', () => {
+  assert.equal(redactSecret('a\n\n  b\t c  '), 'a b c')
+  const long = redactSecret('x'.repeat(500))
+  assert.equal(long.length, 201, 'maxLen 200 + 省略号')
+  assert.equal(long.endsWith('…'), true)
+  assert.equal(redactSecret('x'.repeat(500), 10), `${'x'.repeat(10)}…`)
+  assert.equal(redactSecret(''), '')
+})
+
+// ── 上游响应体大小上限（宿主 OOM 入口）──────────────────────────────────────
+// `res.json()` 无上限：用户自填的 baseUrl 指向「把请求体回显回来」或单纯跑飞的端点时，
+// 宿主会吃下几百 MB。实现走流式计数（超限即 cancel），不是「先 res.text() 再判长度」。
+
+test('readUpstreamJson: 正常 JSON 解析；空体 → {}；非 JSON → {}（沿用既有口径）', async () => {
+  assert.deepEqual(await readUpstreamJson(new Response('{"a":1}')), { a: 1 })
+  assert.deepEqual(await readUpstreamJson(new Response('')), {})
+  assert.deepEqual(await readUpstreamJson(new Response('not json')), {})
+})
+
+test('readUpstreamJson: 实际字节超限即抛错（不等读完，且断掉下载）', async () => {
+  let cancelled = false
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('x'.repeat(64)))
+      controller.enqueue(new TextEncoder().encode('x'.repeat(64)))
+    },
+    cancel() { cancelled = true },
+  })
+  const err = await readUpstreamJson(new Response(stream), 100).then(() => null, (e) => e)
+  assert.ok(err instanceof Error, '超限必须抛错（路由据此回 502 上游故障）')
+  assert.match(err.message, /too large/)
+  assert.equal(cancelled, true, '超限应立刻取消下游下载，而不是把整个响应读完')
+})
+
+test('readUpstreamJson: content-length 声明超限时连读都不读', async () => {
+  let pulled = false
+  const stream = new ReadableStream({
+    pull(controller) { pulled = true; controller.enqueue(new TextEncoder().encode('{}')) },
+  })
+  const res = new Response(stream, { headers: { 'content-length': String(MAX_UPSTREAM_JSON_BYTES + 1) } })
+  const err = await readUpstreamJson(res).then(() => null, (e) => e)
+  assert.ok(err instanceof Error)
+  assert.match(err.message, /too large/)
+  assert.equal(pulled, false, '声明就超限 → 直接拒绝，不读 body')
+})
+
+test('readUpstreamJson: 恰好等于上限不误伤', async () => {
+  const body = `{"t":"${'y'.repeat(80)}"}`
+  const res = new Response(body)
+  const parsed = await readUpstreamJson(res, Buffer.byteLength(body))
+  assert.equal(parsed.t.length, 80)
+})
+
+test('readUpstreamJson: 真实 fetch 的网络流同样读得通（undici 的 Response.body 是可读流）', async () => {
+  // 上面的用例用构造的 Response；这里过一遍真 socket，确认 getReader() 在真实响应上
+  // 也成立（含服务端自己算的 content-length）。
+  await withServer(async (req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end('{"text":"真实上游"}')
+  }, async (port) => {
+    const upstream = await fetch(`http://127.0.0.1:${port}/models`)
+    assert.deepEqual(await readUpstreamJson(upstream), { text: '真实上游' })
+  })
 })

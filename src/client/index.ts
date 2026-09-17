@@ -23,7 +23,7 @@ import {
 import { VoiceSettingsCard } from './settings-card.tsx'
 import { VoiceButton, voiceController } from './voice-button.tsx'
 import { voiceChatController } from './voice-chat.tsx'
-import { matchHotkey, parseHotkey, type HotkeySpec } from './hotkey.ts'
+import { matchHotkey, normalizeKey, parseHotkey, type HotkeySpec } from './hotkey.ts'
 
 export { zh, en }
 
@@ -102,19 +102,36 @@ function applyHotkey(): () => void {
   const onKeyUp = (e: KeyboardEvent): void => {
     if (!held) return
     const spec = hotkeySpec()
-    if (spec === null || !matchHotkey(e, spec)) return
+    // 只比主键，不比修饰键状态：用户常先松 Ctrl 再松 Space，那一刻的 ctrlKey 已是 false，
+    // 用完整组合键匹配会让 held 永远停在 true——录音不会停，且下一次 keydown 因 !held
+    // 被跳过（热键在「下一次完整按松」之前都是死的）。
+    if (spec === null || normalizeKey(e.key) !== spec.key) return
     held = false
-    if (config.behavior.holdToTalk) voiceController.toggle()
+    if (config.behavior.holdToTalk) voiceController.releaseHold()
+  }
+  /** 按住状态复位：窗口失焦时 keyup 落到别的窗口，held 会一直停在 true（麦克风常开）。
+   *  复位时若仍在录音，按「松键」收尾——按住说话的语义里，用户已经松手了。 */
+  const releaseHeld = (): void => {
+    if (!held) return
+    held = false
+    if (config.behavior.holdToTalk && voiceController.isRecording()) voiceController.releaseHold()
+  }
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState === 'hidden') releaseHeld()
   }
   const off = subscribeConfig(() => {
     // 快捷键变更即时生效：无额外动作，监听器每次按键实时解析 config
   })
   window.addEventListener('keydown', onKeyDown, true)
   window.addEventListener('keyup', onKeyUp, true)
+  window.addEventListener('blur', releaseHeld)
+  document.addEventListener('visibilitychange', onVisibilityChange)
   return () => {
     off()
     window.removeEventListener('keydown', onKeyDown, true)
     window.removeEventListener('keyup', onKeyUp, true)
+    window.removeEventListener('blur', releaseHeld)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
   }
 }
 

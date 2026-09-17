@@ -9,7 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
-import { guardRoute, readJsonBody, sendJson, statusOfBodyError } from './http.ts';
+import { guardRoute, readJsonBody, redactSecret, sendJson, statusOfBodyError } from './http.ts';
 import { LIST_MODELS_TIMEOUT_MS } from './asr-models.ts';
 
 /** 最小当前模型选择面（由 DSH 的 agentDefaultModel 服务提供，peer 不 import）。 */
@@ -19,6 +19,21 @@ interface AgentDefaultModelLike {
 
 /** LLM 优化流超时（ms）：模型卡住/过慢时不把宿主流挂死。 */
 const LLM_STREAM_TIMEOUT_MS = 60_000
+
+/** 优化输入上限（字符）：请求体本身有 256KB 上限，但那允许 25 万字符的「一段语音转写」，
+ *  既不可能（说不了那么久）又白烧一次模型调用。 */
+const MAX_INPUT_CHARS = 10_000
+
+/** 优化输出上限（字符）：超出截断并在 payload 里标注 truncated，让客户端能提示用户。 */
+const MAX_OUTPUT_CHARS = 20_000
+
+/** 收集阶段的上限（4 倍输出上限）：到量就不再累积——跑飞的模型不该把宿主内存堆满。
+ *  停手不影响截断判定：收满即已远超输出上限，输出照旧标 truncated。 */
+const MAX_OUTPUT_COLLECT = MAX_OUTPUT_CHARS * 4
+
+/** 在途优化上限：每次优化 = 一条 LLM 流（最长 60s），无上限时并发请求会一起占着
+ *  provider 配额与宿主内存。超限 503，不读 body。 */
+const MAX_INFLIGHT = 4
 
 /** 提示词优化 system prompt（中英双语指令，要求保留语义、去掉口语、结构化）。 */
 const OPTIMIZE_SYSTEM = [
@@ -134,21 +149,25 @@ async function optimizeWithLlm(ctx: Context, text: string, target?: OptimizeTarg
     // 模型卡住/过慢时不把宿主流挂死（客户端 60s 超时后 host 应停止等待）。
     signal: AbortSignal.timeout(LLM_STREAM_TIMEOUT_MS),
   } as unknown as Parameters<typeof ctx.llm.stream>[0];
-  // 流式文本累积用数组 + join（避免长响应对每 chunk 反复拼接字符串）。
+  // 流式文本累积用数组 + join（避免长响应对每 chunk 反复拼接字符串）；累积有上限。
   const parts: string[] = [];
+  let collected = 0;
   // 上游失败的真实原因（错误码/网关响应体）只在 finish 的 failure 里，取出来透出给用户，
   // 否则一律变成笼统的 "model returned no text"（如 400 MissingSessionID 曾被完全吞掉）。
   let finishFailure: string | undefined;
   for await (const chunk of ctx.llm.stream(options)) {
-    if (chunk.type === 'text-delta') parts.push(chunk.text);
+    if (chunk.type === 'text-delta' && collected < MAX_OUTPUT_COLLECT) {
+      parts.push(chunk.text);
+      collected += chunk.text.length;
+    }
     if (chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
       finishFailure = chunk.reason.failure.message;
     }
   }
   const output = parts.join('');
   if (finishFailure !== undefined && finishFailure !== '') {
-    const detail = finishFailure.length > 240 ? `${finishFailure.slice(0, 240)}…` : finishFailure;
-    throw new Error(`LLM optimize failed: ${detail}`);
+    // 失败原因来自上游网关，可能回显请求材料（含 Authorization）——过脱敏再透出浏览器。
+    throw new Error(`LLM optimize failed: ${redactSecret(finishFailure, 240)}`);
   }
   if (output.trim() === '') {
     throw new Error('LLM optimize failed: model returned no text');
@@ -156,31 +175,53 @@ async function optimizeWithLlm(ctx: Context, text: string, target?: OptimizeTarg
   return output.trim();
 }
 
-/** 注册 /api/asr-voice/optimize 路由。 请求体：{ text, provider?, model? }——provider/model 须为 DSH 已配置模型； 缺省用当前所选 LLM。 */
+/** 注册 /api/asr-voice/optimize 路由。 请求体：{ text, provider?, model? }——provider/model 须为 DSH 已配置模型； 缺省用当前所选 LLM。
+ *  顺序：信任围栏 → 在途上限（超限 503）→ 读 body（形状/长度校验）→ LLM。 */
 export function registerOptimizeRoute(
   register: (def: { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void,
   ctx: Context,
 ): () => void {
+  let inflight = 0
   return register({
     kind: 'exact',
     path: '/api/asr-voice/optimize',
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       const denied = guardRoute(req);
       if (denied !== null) return sendJson(res, denied.status, denied.payload);
+      if (inflight >= MAX_INFLIGHT) {
+        return sendJson(res, 503, { ok: false, reason: 'too many concurrent requests' });
+      }
+      inflight += 1;
       try {
-        const body = (await readJsonBody(req)) as { text?: unknown; provider?: unknown; model?: unknown };
+        const body = (await readJsonBody(req)) as { text?: unknown; provider?: unknown; model?: unknown } | null;
+        // JSON 字面量 null / 非对象（数字、字符串）：此前 `body.text` 直接抛 TypeError，
+        // 被下面的 catch 兜成 502「上游故障」——其实是请求体形状不对，归 400。
+        if (typeof body !== 'object' || body === null) {
+          return sendJson(res, 400, { ok: false, reason: 'invalid JSON body: expected an object' });
+        }
         if (typeof body.text !== 'string' || body.text.trim() === '') {
           return sendJson(res, 400, { ok: false, reason: 'missing text' });
+        }
+        if (body.text.length > MAX_INPUT_CHARS) {
+          return sendJson(res, 400, { ok: false, reason: `text too long (${body.text.length} > ${MAX_INPUT_CHARS})` });
         }
         const target = typeof body.provider === 'string' && typeof body.model === 'string'
           ? { provider: body.provider, model: body.model }
           : undefined;
         const optimized = await optimizeWithLlm(ctx, body.text, target);
-        return sendJson(res, 200, { ok: true, text: optimized });
+        // 输出截断（不静默）：payload 带 truncated，客户端据此提示用户「结果被截短了」。
+        const truncated = optimized.length > MAX_OUTPUT_CHARS;
+        return sendJson(res, 200, {
+          ok: true,
+          text: truncated ? optimized.slice(0, MAX_OUTPUT_CHARS) : optimized,
+          truncated,
+        });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         // 非法 JSON / 超限 / 超时都是请求侧问题（400/413/408），只有 LLM 通道故障才是 502。
         return sendJson(res, statusOfBodyError(error, 502), { ok: false, reason });
+      } finally {
+        inflight -= 1;
       }
     },
   });

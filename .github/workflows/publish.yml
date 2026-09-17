@@ -9,7 +9,14 @@
 #   Allowed actions: npm publish
 #
 # 触发：Actions 页面手动 Run workflow，或 `gh workflow run publish.yml -R bitterSmilezzz/dsh-asr-voice`。
-# 发布内容取自仓库中已提交的 lib/ 产物（本仓库 lib/ 入库，无需在此构建）。
+#
+# ⚑ 发布护栏（为什么发布前要重跑一遍构建与测试）：
+#   lib/ 是入库产物（DSH 走 GitHub 固定源安装，安装期禁止构建脚本），因此**发布内容
+#   就是仓库里已提交的 lib/**。代价是产物可能与 src 脱节：改了 src 忘记 build、或
+#   build 失败仍把旧 lib/ 提交上去，都会把与源码不符的产物同时发到 npm 与固定源。
+#   所以这里在 publish 之前跑一遍完整验证（typecheck → build → lib/ 与源码一致性 →
+#   测试），任一步失败即中止发布，绝不带病上线。同一套护栏也在本地 `bash scripts/build.sh`
+#   与 `npm run build`（含 client 半区类型检查）里，CI 只是把它变成不可绕过的一步。
 name: publish
 
 on:
@@ -30,6 +37,12 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # pnpm 版本由 lockfileVersion（9.0）推导，无需 packageManager 字段。
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
       - name: Report target version and refuse duplicates
         run: |
           NAME=$(node -p "require('./package.json').name")
@@ -39,6 +52,27 @@ jobs:
             echo "::error::$NAME@$VERSION is already published"
             exit 1
           fi
+
+      # host + client 两个半区的类型检查（与 package.json 的 typecheck 同源）。
+      - name: Typecheck both halves
+        run: npm run typecheck
+
+      # 重建 host（tsc）与 client（tsdown）产物，重建前的 client 类型检查在 build.sh 里。
+      - name: Rebuild lib/ from src
+        run: bash scripts/build.sh
+
+      # 护栏核心：重建后 lib/ 必须与提交的产物逐字节一致——不一致即说明 src 改了但
+      # lib/ 没跟着重建（或重建失败仍提交），此时发布会把错误产物发出去。
+      # 注意：只检查 lib/（入库产物）；*.tsbuildinfo 已被 .gitignore 忽略，不会误报。
+      - name: Verify committed lib/ matches src
+        run: |
+          if ! git diff --exit-code -- lib; then
+            echo "::error::lib/ is stale: committed artifacts do not match src. Run 'bash scripts/build.sh' and commit lib/ before publishing."
+            exit 1
+          fi
+
+      - name: Run tests
+        run: node --test test/*.test.mjs
 
       - name: Publish to npm via OIDC
         run: npm publish --access public

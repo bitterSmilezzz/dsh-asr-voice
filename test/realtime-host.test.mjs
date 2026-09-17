@@ -514,3 +514,107 @@ test('audio 路由：会话不存在仍回 404（不受状态码映射影响）'
   )
   assert.equal(res.status, 404)
 })
+
+// ── 容量与生命周期兜底（host 侧不信客户端的自觉）─────────────────────────────
+// 缺陷形态：createSession 只 randomUUID + set（无数量上限），而 realtime.maxSessionMs
+// 只在客户端生效——页面卡死/被挂起时不会发停止请求，云端付费 WS 与心跳 interval 就
+// 再没人回收；refreshIdle 还在每次上行（40ms 一帧）重挂 idle timer。
+
+test('会话数上限：超出时创建路由回 503（且不先开上游连接）', async () => {
+  const { provider, conns } = makeManualProvider()
+  const host = new RealtimeHost({ createProvider: () => provider.connect(), maxSessions: 2, heartbeatMs: 0 })
+  const { register, routes } = makeRegistry()
+  host.registerRoutes(register)
+  const create = async () => {
+    const res = new FakeRes()
+    await routes.get('exact:/api/asr-voice/realtime/session')(reqOf('POST', '/api/asr-voice/realtime/session'), res)
+    return { status: res.status, body: JSON.parse(res.body) }
+  }
+
+  const first = await create()
+  const second = await create()
+  assert.equal(first.body.ok, true)
+  assert.equal(second.body.ok, true)
+
+  const third = await create()
+  assert.equal(third.status, 503, '容量问题是 503（可重试），不是 502 上游故障')
+  assert.match(third.body.reason, /too many realtime sessions/)
+  assert.equal(conns.length, 2, '被拒的创建不得先开一条云端付费 WS')
+  assert.equal(host.sessionCount(), 2)
+
+  // 容量随关闭回收：腾出位置后能再建。
+  host.closeSession(first.body.sid)
+  const fourth = await create()
+  assert.equal(fourth.body.ok, true)
+  host.dispose()
+})
+
+test('绝对 TTL：持续上行也不续命，到点无条件拆会话', async () => {
+  const { provider, conns } = makeManualProvider()
+  // idleMs 设成 10 分钟：会话若被拆，只可能是绝对 TTL 生效。
+  const host = new RealtimeHost({ createProvider: () => provider.connect(), maxSessionMs: 60, idleMs: 10 * 60 * 1000, heartbeatMs: 0 })
+  const { sid } = await host.createSession()
+
+  // 客户端每 10ms 一帧地持续上行（就是「把空闲守卫永远续命」的那种用法）。
+  const tick = setInterval(() => { host.feedAudio(sid, toneBytes(40)) }, 10)
+  await sleep(200)
+  clearInterval(tick)
+
+  assert.ok(!host.hasSession(sid), '绝对 TTL 到点必须拆会话（不看是否有活动）')
+  assert.equal(conns[0].closed, true, '上游连接应随之释放')
+  assert.equal(host.sessionCount(), 0)
+  host.dispose()
+})
+
+test('绝对 TTL：取值每次建会话现读（settings 热改只影响新会话）', async () => {
+  let ttl = 0 // 0 = 显式关闭绝对上限
+  const { provider } = makeManualProvider()
+  const host = new RealtimeHost({
+    createProvider: () => provider.connect(),
+    maxSessionMs: () => ttl,
+    idleMs: 10 * 60 * 1000,
+    heartbeatMs: 0,
+  })
+  const unlimited = await host.createSession()
+  await sleep(40)
+  assert.ok(host.hasSession(unlimited.sid), 'TTL 非正数 = 不设绝对上限')
+
+  ttl = 40
+  const limited = await host.createSession()
+  await sleep(120)
+  assert.ok(!host.hasSession(limited.sid), '新会话应吃到新 TTL')
+  assert.ok(host.hasSession(unlimited.sid), '已在跑的会话不受热改影响')
+  host.dispose()
+})
+
+test('空闲定时器重挂节流：1s 内的连续上行不再逐帧重挂', async () => {
+  const { provider } = makeManualProvider()
+  let clock = 1_000_000
+  const host = new RealtimeHost({
+    createProvider: () => provider.connect(),
+    idleMs: 10 * 60 * 1000,
+    heartbeatMs: 0,
+    now: () => clock,
+  })
+  const { sid } = await host.createSession()
+
+  const realSetTimeout = globalThis.setTimeout
+  let armed = 0
+  globalThis.setTimeout = (fn, ms) => { armed += 1; return realSetTimeout(fn, ms) }
+  try {
+    // 5 帧 × 40ms = 200ms，仍在 1s 节流窗口内：一次都不该重挂。
+    for (let i = 0; i < 5; i++) {
+      clock += 40
+      assert.equal(host.feedAudio(sid, toneBytes(40)), true)
+    }
+    assert.equal(armed, 0, '节流窗口内的上行不该重挂 idle timer')
+    // 越过窗口后重挂一次（lastActive 一直在更新，故不会误拆）。
+    clock += 1_100
+    host.feedAudio(sid, toneBytes(40))
+    assert.equal(armed, 1, '越过节流窗口应重挂一次')
+  } finally {
+    globalThis.setTimeout = realSetTimeout
+  }
+  assert.ok(host.hasSession(sid), '节流不得把活跃会话判成空闲')
+  host.closeSession(sid)
+})

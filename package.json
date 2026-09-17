@@ -1,6 +1,6 @@
 {
   "name": "@bittersmilezzz/dsh-asr-voice",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "开口即成文 · Speak-to-prompt for DeepSeek Harness：云端 ASR 语音识别 + 提示词优化 + 填入草稿/自动发送，跨平台 macOS / Windows。",
   "type": "module",
   "main": "lib/index.js",
@@ -11,7 +11,6 @@
       "default": "./lib/index.js"
     },
     "./client": {
-      "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
@@ -21,13 +20,18 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/images"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.host.json && tsdown",
+    "build": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json --noEmit && tsdown",
     "build:client": "tsdown",
     "bundle": "tsdown",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "pretest": "tsc -p tsconfig.host.json",
     "test": "node --test test/*.test.mjs"
   },
   "license": "MIT",

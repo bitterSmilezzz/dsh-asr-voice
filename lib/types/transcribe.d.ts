@@ -32,6 +32,7 @@ export interface CloudAsrConfig extends KeyRefSource {
  *  「没配 key」诚实。 */
 export declare function resolveApiKey(ctx: Context, cfg: CloudAsrConfig): Promise<string>;
 /** 注册 /api/asr-voice/transcribe 路由。
+ * 顺序：信任围栏 → 在途上限（超限 503，不读 body）→ 读 body → 上游转发。
  * @param register - webserver 的 register 方法（由调用方从 ctx 传入）。
  * @param getCloudConfig - 读取当前生效云端 ASR 配置的 thunk。
  * @param ctx - host context（供 MiMo key 兜底走 credentials 服务）。

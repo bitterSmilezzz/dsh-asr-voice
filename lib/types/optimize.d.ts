@@ -26,7 +26,8 @@ export interface OptimizeTarget {
 }
 /** 枚举 DSH 已配置模型（ctx.llm.listProviders + listModels）。 枚举失败/不可用/超时的 provider 给空模型列表（不阻断整体）。 */
 export declare function enumerateModels(ctx: Context): Promise<DshProviderEntry[]>;
-/** 注册 /api/asr-voice/optimize 路由。 请求体：{ text, provider?, model? }——provider/model 须为 DSH 已配置模型； 缺省用当前所选 LLM。 */
+/** 注册 /api/asr-voice/optimize 路由。 请求体：{ text, provider?, model? }——provider/model 须为 DSH 已配置模型； 缺省用当前所选 LLM。
+ *  顺序：信任围栏 → 在途上限（超限 503）→ 读 body（形状/长度校验）→ LLM。 */
 export declare function registerOptimizeRoute(register: (def: {
     kind: 'exact';
     path: string;

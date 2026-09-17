@@ -12,7 +12,7 @@
  * int16 LE 字节逐帧上行。
  */
 import { startPcmCapture, type PcmCapture, type PcmCaptureOptions } from './capture.ts'
-import { peakAbs, quantiseInt16 } from './pcm.ts'
+import { isSilentPeak, peakAbs, quantiseInt16 } from './pcm.ts'
 import type { RealtimeEvents, RealtimeSession } from './realtime.ts'
 import { meaningfulTurn } from './turn-guard.ts'
 
@@ -155,8 +155,9 @@ export function createCloudRealtime(
       frameMs: tuning.frameMs,
       onFrame: (pcm) => {
         if (!active || paused) return
-        // 静音守卫：趋零帧上行只会换来上游幻觉字（与整段模式同一判据）。
-        if (peakAbs(pcm) < 0.005) return
+        // 静音守卫：趋零帧上行只会换来上游幻觉字（与整段模式同一判据——共用
+        // isSilentPeak，阈值只有一份真相；此前这里硬编码 0.005，改阈值会漏改）。
+        if (isSilentPeak(peakAbs(pcm))) return
         pump.push(floatToInt16Le(pcm))
       },
       onFail: (code) => { if (active) failNow(code) },

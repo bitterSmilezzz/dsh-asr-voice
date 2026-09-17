@@ -40,19 +40,53 @@ function useConfigVersion(): number {
   return v
 }
 
+/** fetch 超时信号。AbortSignal.timeout 是 Safari 16.4 才有的静态方法：
+ *  更早的 Safari（含 16.x）调用它会同步抛 TypeError——三处请求全部当场失败，
+ *  用户看到「加载失败」或「AbortSignal.timeout is not a function」，模型列表与
+ *  「测试连接」永久不可用。这里回退到 AbortController + 定时器。
+ *  定时器在 abort 时清掉；请求正常返回时那个定时器会到点触发一次（对已结束的
+ *  请求是空操作，最多滞留 30s），不值得为它把三处调用点改成 try/finally。 */
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms)
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), ms)
+  controller.signal.addEventListener('abort', () => window.clearTimeout(timer), { once: true })
+  return controller.signal
+}
+
+/** 明文 HTTP 且主机不是本机回环 → 提示 key 会明文过网（只警告，不阻断保存）。
+ *  回环地址不需要警告：流量不出本机。 */
+function isInsecureBaseUrl(url: string): boolean {
+  if (!/^http:\/\//i.test(url.trim())) return false
+  let host = ''
+  try {
+    // URL.hostname 对 IPv6 保留方括号（如 '[::1]'），两种写法都要认。
+    host = new URL(url.trim()).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]'
+}
+
 /** 统一字段容器（垂直布局：label / control / hint，与官方 fields 一致）。
  * a11y：label 用 htmlFor 关联控件，id 由 useId 生成后经 render-prop 传给调用方
  * 挂到真实控件上；屏幕阅读器可读出字段名，点击标题聚焦控件。
  * control(ids) 收到 { controlId, labelId }：普通控件挂 controlId；
- * 组合控件（radio 组等）用 labelId 做 aria-labelledby 命名分组。 */
+ * 组合控件（radio 组等）用 labelId 做 aria-labelledby 命名分组，
+ * 并传 labelAs='span'（htmlFor 指向非 labelable 元素是无效关联）。 */
 interface FieldIds { controlId: string; labelId: string }
-function Field({ title, desc, control }: { title: string; desc?: string | undefined; control: (ids: FieldIds) => react.ReactNode }): react.ReactElement {
+function Field({ title, desc, control, labelAs = 'label' }: { title: string; desc?: string | undefined; control: (ids: FieldIds) => react.ReactNode; labelAs?: 'label' | 'span' }): react.ReactElement {
   const controlId = react.useId()
   const labelId = react.useId()
+  // labelAs='span'：控件不是 labelable 元素（如挂在 role=radiogroup 的 div 上）时，
+  // <label htmlFor> 是无效关联——点标题毫无反应，还会让 a11y 树里出现一个假标签。
+  // 这种情况渲染 span 并只保留 id，由调用方用 aria-labelledby 命名分组。
   return (
     <div className="dshav-field-item">
       <div className="dshav-field-head">
-        <label className="dshav-field-label" id={labelId} htmlFor={controlId}>{title}</label>
+        {labelAs === 'span'
+          ? <span className="dshav-field-label" id={labelId}>{title}</span>
+          : <label className="dshav-field-label" id={labelId} htmlFor={controlId}>{title}</label>}
       </div>
       <div className="dshav-field-control">{control({ controlId, labelId })}</div>
       {desc ? <p className="dshav-field-hint">{desc}</p> : null}
@@ -66,7 +100,9 @@ function ToggleRow({ title, desc, checked, onChange, disabled }: { title: string
     <div className={disabled ? 'dshav-field-item dshav-field-disabled' : 'dshav-field-item'}>
       <div className="dshav-toggle">
         <Switch checked={checked} onChange={onChange} label={title} disabled={disabled === true} />
-        <span>{title}</span>
+        {/* 官方 Switch 是 <button role="switch">，标题文字只是旁边的 span：
+            点文字没反应。挂 onClick 补上（span 不进 Tab 序列，不引入第二套键盘语义）。 */}
+        <span onClick={() => { if (disabled !== true) onChange() }}>{title}</span>
       </div>
       {desc ? <p className="dshav-field-hint">{desc}</p> : null}
     </div>
@@ -197,24 +233,57 @@ function Step({ index, title, desc, children }: { index: string; title: string; 
   )
 }
 
-/** 一行 chip 单选（点即选中并联动，替代原先层层条件展开的下拉）。 */
+/** 一行 chip 单选（点即选中并联动，替代原先层层条件展开的下拉）。
+ *  a11y：role=radiogroup 里的 radio 必须能只用方向键走完。这里做 roving tabindex
+ *  （选中项 tabIndex=0、其余 -1）把整组压成 1 个 Tab 停点，←→↑↓ 在组内循环切换
+ *  并把焦点移到新选中项（WAI-ARIA radiogroup 惯例：选中随焦点）。 */
 function Chips({ items, label, t }: {
   items: { key: string; label: string; selected: boolean; onSelect: () => void; disabled?: boolean }[]
   label: string
   t: LocaleT
 }): react.ReactElement {
+  const refs = react.useRef<(HTMLButtonElement | null)[]>([])
+  // 选中项是组内唯一的 Tab 停点；万一没有选中项则退到第一个可用项，
+  // 否则整组 tabIndex 全是 -1 = 键盘完全不可达。
+  const selectedIndex = items.findIndex((item) => item.selected)
+  const rovingIndex = selectedIndex !== -1 ? selectedIndex : items.findIndex((item) => item.disabled !== true)
+
+  const move = (from: number, delta: number): void => {
+    const count = items.length
+    if (count === 0) return
+    let next = from
+    // 跳过禁用项：disabled 按钮不可聚焦，焦点落上去会静默丢失。
+    for (let step = 0; step < count; step += 1) {
+      next = (next + delta + count) % count
+      if (items[next]?.disabled !== true) break
+    }
+    const target = items[next]
+    if (target === undefined || target.disabled === true) return
+    target.onSelect()
+    refs.current[next]?.focus()
+  }
+
   return (
     <div className="dshav-chips" role="radiogroup" aria-label={label}>
-      {items.map((item) => (
+      {items.map((item, index) => (
         <button
           key={item.key}
+          ref={(el) => { refs.current[index] = el }}
           type="button"
           role="radio"
           aria-checked={item.selected}
+          tabIndex={index === rovingIndex ? 0 : -1}
           className="dshav-chip"
           data-selected={item.selected ? 'true' : undefined}
           disabled={item.disabled ?? false}
           onClick={item.onSelect}
+          onKeyDown={(e) => {
+            const delta = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1
+              : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+            if (delta === 0) return
+            e.preventDefault()
+            move(index, delta)
+          }}
         >
           {item.label}
         </button>
@@ -230,6 +299,11 @@ function HotkeyRecorder({ inputId, value, onChange, t }: { inputId: string; valu
 
   const handleKeyDown = (e: react.KeyboardEvent<HTMLInputElement>): void => {
     if (!arming) return
+    // Tab / Shift+Tab 必须原样放行：它们既不是可录组合键，也不是取消键，
+    // 之前无条件 preventDefault 会吞掉默认焦点移动——键盘用户一旦进入这个
+    // 录制框就再也 Tab 不出去（键盘陷阱）。其余按键保持原有拦截语义
+    // （不冒泡到 window 上的全局快捷键监听）。
+    if (e.key === 'Tab') return
     e.preventDefault()
     e.stopPropagation()
     const combo = keyCombo(e)
@@ -303,7 +377,7 @@ function ModelPicker({ t, provider, model, onProvider, onModel }: {
     setStatus('loading')
     try {
       // 超时兜底：host /models 链路挂起时 UI 不能永久 loading（catch → err 提示）。
-      const res = await fetch('/api/asr-voice/models', { cache: 'no-store', signal: AbortSignal.timeout(30_000) })
+      const res = await fetch('/api/asr-voice/models', { cache: 'no-store', signal: timeoutSignal(30_000) })
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; providers?: DshProviderEntry[]; reason?: string }
       if (!res.ok || data.ok !== true || data.providers === undefined) throw new Error(data.reason || 'load failed')
       modelsCache = data.providers
@@ -359,7 +433,7 @@ function UsageStats({ t }: { t: LocaleT }): react.ReactElement {
     let live = true
     const load = async (): Promise<void> => {
       try {
-        const res = await fetch('/api/asr-voice/stats', { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
+        const res = await fetch('/api/asr-voice/stats', { cache: 'no-store', signal: timeoutSignal(10_000) })
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; stats?: typeof stats }
         if (live && res.ok && data.ok === true && data.stats) setStats(data.stats)
       } catch { /* ignore */ }
@@ -465,7 +539,7 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
     setTesting(true)
     if (dirty && !(await commit())) { setTesting(false); return }
     try {
-      const res = await fetch(`/api/asr-voice/asr-models?providerId=${encodeURIComponent(provider.id)}`, { cache: 'no-store', signal: AbortSignal.timeout(30_000) })
+      const res = await fetch(`/api/asr-voice/asr-models?providerId=${encodeURIComponent(provider.id)}`, { cache: 'no-store', signal: timeoutSignal(30_000) })
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; models?: DshModelEntry[]; reason?: string }
       if (!res.ok || data.ok !== true || !Array.isArray(data.models)) throw new Error(data.reason ?? 'request failed')
       if (data.models.length === 0) {
@@ -649,6 +723,11 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                       value={provider.baseUrl}
                       onChange={(v) => { edit((c) => patchProvider(c, provider.id, { baseUrl: v })); setTested(null) }}
                     />
+                    {/* 明文 http:// + 非回环主机：API key 会明文过网。只警告不阻断
+                        （自建内网网关常是 http，硬拦会把它们挡在门外）。 */}
+                    {isInsecureBaseUrl(provider.baseUrl) ? (
+                      <p className="dshav-warn" role="alert">{t('insecureBaseUrl')}</p>
+                    ) : null}
                     {tested === null ? (
                       <TextRow title={t('cloudModelLabel')} desc={t('cloudModelDesc')} value={provider.model} onChange={(v) => edit((c) => patchProvider(c, provider.id, { model: v }))} />
                     ) : (
@@ -675,6 +754,8 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
                       <Field
                         title={t('providerListLabel')}
                         desc={t('providerListDesc')}
+                        // 控件是 role=radiogroup 的 div（非 labelable），htmlFor 关联无效
+                        labelAs="span"
                         control={({ controlId, labelId }) => (
                           <div className="dshav-provider-list" id={controlId} role="radiogroup" aria-labelledby={labelId}>
                             {draft.asr.cloud.providers.map((p) => (

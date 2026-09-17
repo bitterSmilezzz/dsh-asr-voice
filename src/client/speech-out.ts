@@ -234,6 +234,9 @@ export function createSpeechSynthesisSink(tuning: SpeakTuning): SpeakSink {
   const synth = typeof window === 'undefined' ? undefined : window.speechSynthesis
   let voices: SpeechSynthesisVoice[] = []
   let watchdog: ReturnType<typeof setTimeout> | null = null
+  /** 看门狗当前归属的句子：打断后旧句子的 onend 可能迟到，无差别清除会把
+   *  新句子的安全网一起摘掉（见 clearWatchdog）。 */
+  let watchdogOwner: SpeechSynthesisUtterance | null = null
   /** 正在播的这句（interrupt/dispose 时 synth.cancel，看门狗一并清）。 */
   let current: SpeechSynthesisUtterance | null = null
   let disposed = false
@@ -242,9 +245,15 @@ export function createSpeechSynthesisSink(tuning: SpeakTuning): SpeakSink {
     ? (typeof navigator === 'undefined' ? '' : navigator.language)
     : tuning.language
 
-  const clearWatchdog = (): void => {
+  /** 清看门狗。`owner` 非空时只清属于它的那个：打断（interrupt）之后，被取消那句的
+   *  onend 若迟到，它的 finish() 会走到这里——而 watchdog 变量此刻已经是**新句子**的
+   *  定时器，无条件清除会让新句子失去唯一的安全网（Chrome 长句不回 onend，届时半双工
+   *  门控永远等不到 drain，麦克风还不回来）。 */
+  const clearWatchdog = (owner: SpeechSynthesisUtterance | null = null): void => {
+    if (owner !== null && watchdogOwner !== owner) return
     if (watchdog !== null) clearTimeout(watchdog)
     watchdog = null
+    watchdogOwner = null
   }
 
   const runner = createQueueRunner({
@@ -261,13 +270,14 @@ export function createSpeechSynthesisSink(tuning: SpeakTuning): SpeakSink {
           if (settled) return
           settled = true
           if (current === utter) current = null
-          clearWatchdog()
+          clearWatchdog(utter)
           resolve()
         }
         utter.onend = finish
         utter.onerror = finish
         // onend 不可信：Chrome 长句、部分音色会静默不回。超时按播完处理，
         // 否则麦克风永远还不回来（半双工门控挂在 onDrain 上）。
+        watchdogOwner = utter
         watchdog = setTimeout(() => {
           try { synth.cancel() } catch { /* noop */ }
           finish()

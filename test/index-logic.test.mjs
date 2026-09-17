@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
  * 走构建产物 lib/index.js；改动 src/index.ts 后需先重建 lib 再跑本文件。
  */
 import { providerView, resolveCloudProvider, listProviders, migrateLegacyKeys } from '../lib/index.js'
+import { keyRefFor } from '../lib/key-ref.js'
 
 /** 组装一份 AsrVoiceSettings 的最小形状（asr.cloud 为唯一读取面）。 */
 function settingsWith(cloud) {
@@ -78,11 +79,16 @@ function makeScope(initial) {
 
 const NOOP_LOG = { warn: () => {}, info: () => {} }
 
-test('migrateLegacyKeys: credentials 缺席 → 整批跳过（不读 scope、不写、不记日志）', async () => {
+test('migrateLegacyKeys: credentials 缺席 → 整批跳过 + warn 一条（不读 scope、不写）', async () => {
   let got = 0
+  const warns = []
   const scope = { get: () => { got += 1; throw new Error('不应被读取') }, update: async () => { throw new Error('不应被写') } }
-  await migrateLegacyKeys(scope, undefined, NOOP_LOG)
+  await migrateLegacyKeys(scope, undefined, { warn: (m) => { warns.push(m) }, info: () => {} })
   assert.equal(got, 0)
+  // 静默返回会让用户以为「已经搬完了」——明文 key 其实还在 settings 里躺着。
+  assert.equal(warns.length, 1, '凭据服务不可用必须留一条 warn')
+  assert.match(warns[0], /credentials service unavailable/)
+  assert.match(warns[0], /not migrated/)
 })
 
 test('migrateLegacyKeys: 无遗留 key → 空转早退（不 set、不 update、不记日志）', async () => {
@@ -138,4 +144,39 @@ test('migrateLegacyKeys: 任一条 set 被拒 → 停止迁移、明文保留（
   assert.deepEqual(scope.updates, [], '迁移未完成 → 明文 key 必须原样保留（抹掉就无处可寻）')
   assert.equal(warns.length, 1)
   assert.match(warns[0], /credentials\.set\(OPENAI_API_KEY\) refused: readonly source/)
+})
+
+// ── 引用名派生必须唯一（迁移写入的 ref 必须就是读取路径读的 ref）───────────────
+// 缺陷形态：读取路径（resolveCloudProvider / listProviders）先过 providerView 兜底
+// id='provider' 再 keyRefFor，而迁移路径直接拿原始行 keyRefFor。行缺 id/name 时两条
+// 路径分叉（读 ASR_VOICE_PROVIDER_API_KEY、写 ASR_VOICE_CUSTOM_API_KEY），明文一被
+// 抹掉，密钥就写进了一个没人读的引用名里——彻底不可达。
+
+test('migrateLegacyKeys: 行缺 id/name 时，写入的 ref 与读取路径派生的 ref 完全一致', async () => {
+  const rows = [
+    { id: '', preset: 'custom', name: '', apiKey: 'secret-a' },   // 两条路径原先分叉的那一行
+    { id: 'p2', preset: 'custom', name: '', apiKey: 'secret-b' }, // 有 id、无 name
+    { id: '', preset: 'openai', name: '', apiKey: 'secret-c' },   // 预置 id 不受影响（对照组）
+  ]
+  const scope = makeScope(settingsWith({ providers: rows }))
+  const sets = []
+  await migrateLegacyKeys(scope, { set: async (ref, key) => { sets.push([ref, key]) } }, NOOP_LOG)
+  assert.equal(sets.length, 3)
+
+  // 读取路径：迁移后的快照（key 已抹掉）逐行派生 —— 与迁移写入的 ref 必须逐行相等。
+  const readRefs = listProviders(scope.get()).map((p) => keyRefFor(p))
+  assert.deepEqual(sets.map(([ref]) => ref), readRefs, '迁移与读取必须走同一个派生入口')
+  // 钉住具体形状：缺 id/name 的行读取路径兜底 id='provider'（不是 'CUSTOM'）。
+  assert.equal(sets[0][0], 'ASR_VOICE_PROVIDER_API_KEY')
+  assert.equal(sets[1][0], 'ASR_VOICE_P2_API_KEY')
+  assert.equal(sets[2][0], 'OPENAI_API_KEY')
+})
+
+test('migrateLegacyKeys: 旧单配置的 ref 与 resolveCloudProvider 派生的 ref 一致', async () => {
+  const scope = makeScope(settingsWith({ preset: 'custom', baseUrl: 'https://x', apiKey: 'legacy-secret', providers: [] }))
+  const sets = []
+  await migrateLegacyKeys(scope, { set: async (ref, key) => { sets.push([ref, key]) } }, NOOP_LOG)
+  const readRef = keyRefFor(resolveCloudProvider(scope.get()))
+  assert.equal(sets[0][0], readRef)
+  assert.equal(sets[0][0], 'ASR_VOICE_LEGACY_API_KEY')
 })

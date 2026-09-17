@@ -61,18 +61,32 @@ export interface VoiceButtonProps {
 /** 组件内部状态机（与 button-route.ts 的 MicPhase 同源，单点定义防漂移）。 */
 type VoiceState = MicPhase
 
+/** 录音实例的最小面（全局控制器与快捷键只经它驱动当前可见会话）。 */
+interface VoiceControllerInstance {
+  toggle(): void
+  /** 按住说话的松键：只在确实录音时才收尾（见 releaseHold）。 */
+  releaseHold(): void
+  isRecording(): boolean
+  isBusy(): boolean
+}
+
 /** 全局录音控制器：只驱动「最后挂载」的实例（当前可见会话）。 */
 export const voiceController = {
   toggle: (): void => { current?.toggle() },
   isRecording: (): boolean => current?.isRecording() ?? false,
   /** 是否处于 busy（录音 / 识别 / 优化）——快捷键据此区分"打断"与"开始"。 */
   isBusy: (): boolean => current?.isBusy() ?? false,
-  mount(instance: { toggle(): void; isRecording(): boolean; isBusy(): boolean }): () => void {
+  /** 按住说话的松键。**不能**复用 toggle()：录音可能已经自己结束了
+   *  （静音自动停止 / no-speech / 到达时长上限），此时 toggle 落在 transcribing
+   *  会 cancel 掉在途转写（用户刚口述的文本直接消失），落在 idle 会重新开录
+   *  （键已松开，麦克风一直录到上限）。松键的语义只有一个：收尾正在进行的录音。 */
+  releaseHold: (): void => { current?.releaseHold() },
+  mount(instance: VoiceControllerInstance): () => void {
     current = instance
     return () => { if (current === instance) current = undefined }
   },
 }
-let current: { toggle(): void; isRecording(): boolean; isBusy(): boolean } | undefined
+let current: VoiceControllerInstance | undefined
 
 /** 录音按钮 + 状态提示条 + 预览卡。 @param props - slot 注入的 owner share + 标准 kit + 翻译函数。 */
 export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
@@ -93,6 +107,11 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   const wrapRef = react.useRef<HTMLSpanElement | null>(null)
   const hintRef = react.useRef<HTMLSpanElement | null>(null)
   const spectrumRef = react.useRef<HTMLSpanElement | null>(null)
+  // 预览卡的焦点管理：打开时把焦点交给「确认」按钮（键盘用户不必自己 Tab 找过来），
+  // 关闭（确认/取消/Esc）后还给麦克风按钮——否则焦点落在被卸载的节点上，退回 body。
+  const micButtonRef = react.useRef<HTMLButtonElement | null>(null)
+  const previewConfirmRef = react.useRef<HTMLButtonElement | null>(null)
+  const previewDescId = react.useId()
   // 频谱电平上次写入值：rAF 每帧都会回调，只在变化超过阈值时写 CSS 变量，
   // 避免无谓的样式传播（波动是连续的，0.01 步进视觉无差）。
   const levelRef = react.useRef(-1)
@@ -150,6 +169,10 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     setError(null)
     setNotice(null)
   }
+  // 预览卡出现即接管焦点（见 micButtonRef 的说明）。
+  react.useEffect(() => {
+    if (preview !== null) previewConfirmRef.current?.focus()
+  }, [preview])
 
   // 挂载/卸载：注册到全局控制器（快捷键驱动当前实例）。
   // instance 是 useMemo([]) 冻结产物，若直接捕获首帧 begin/finish/cancel，
@@ -162,6 +185,8 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     toggle: () => {
       if (stateRef.current === 'idle') { void handlersRef.current.begin() } else if (stateRef.current === 'recording') { void handlersRef.current.finish() } else { handlersRef.current.cancel() }
     },
+    // 松键只收尾「正在录音」这一种状态，其余一律不动（见 voiceController.releaseHold）。
+    releaseHold: () => { if (stateRef.current === 'recording') void handlersRef.current.finish() },
     isRecording: () => stateRef.current === 'recording',
     isBusy: () => stateRef.current !== 'idle',
   }), [])
@@ -431,8 +456,13 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     }
     if (config.behavior.copyToClipboard) {
       try {
-        void navigator.clipboard?.writeText(text).catch(() => { /* 剪贴板不可用：静默 */ })
-      } catch { /* noop */ }
+        const writing = navigator.clipboard?.writeText(text)
+        // 失败要说话：Safari 在非用户激活上下文（识别结果是异步回调）里会拒绝写入，
+        // 而该开关默认开——静默失败会让用户以为已经复制成功。
+        if (writing !== undefined) void writing.catch(() => { setNotice(t('copyFailed')) })
+      } catch {
+        setNotice(t('copyFailed'))
+      }
     }
     setPhase('idle')
     return text
@@ -440,9 +470,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
   // 最新闭包转发的挂载点：所有 handler 定义完毕后更新，供冻结的 instance 调用。
   handlersRef.current = { begin, finish, cancel }
 
+  /** 关闭预览卡（确认 / 取消 / Esc 共用）：焦点还给麦克风按钮。 */
+  const closePreview = (): void => {
+    setPreview(null)
+    micButtonRef.current?.focus()
+  }
   const onConfirm = (): void => {
     if (preview) finalize(preview.optimized)
-    setPreview(null)
+    closePreview()
   }
 
   // ── 呼吸光环（back.out 缓动 + 错开延迟 + 变化幅度，非机械同步） ──
@@ -558,6 +593,7 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
     <react.Fragment>
       <span className="dshav-mic-wrap" ref={wrapRef}>
         <button
+          ref={micButtonRef}
           type="button"
           className="dshav-mic-button"
           data-state={chat.active ? chat.phase : state}
@@ -600,9 +636,15 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
               </span>
             )}
             {busy && (
-              <span className="dshav-hotkey-hint" data-state={state} ref={hintRef} role="status">
+              <span className="dshav-hotkey-hint" data-kind="caption" data-state={state} ref={hintRef} role="status">
+                {/* 屏幕阅读器只播报**状态词**（每次状态变化一次）；interim 字幕每秒可更新
+                    数次，直接喂 live region 会把 SR 用户刷屏（录音中不播报——按下按钮时
+                    aria-pressed 已说明状态，真正需要听到的是「正在识别 / 正在优化」）。 */}
+                {state !== 'recording' && (
+                  <span className="dshav-sr-only">{state === 'transcribing' ? t('transcribingHint') : t('optimizingHint')}</span>
+                )}
                 {state === 'recording' ? <span className="dshav-dot" /> : <Spinner />}
-                {state === 'recording' && interim !== '' ? <span className="dshav-hint-text">{interim}</span> : null}
+                {state === 'recording' && interim !== '' ? <span className="dshav-hint-text" aria-hidden="true">{interim}</span> : null}
                 {state === 'optimizing' && optimizingDraft ? <span className="dshav-hint-text">{t('optimizingHint')}</span> : null}
                 {state === 'transcribing' ? <span className="dshav-hint-text">{t('transcribingHint')}</span> : null}
                 {state === 'recording' && (
@@ -619,7 +661,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
         )}
       </span>
       {preview !== null && (
-        <div className="dshav-preview" role="dialog" aria-label={t('previewTitle')}>
+        <div
+          className="dshav-preview"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('previewTitle')}
+          aria-describedby={previewDescId}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); closePreview() } }}
+        >
           <div className="dshav-preview-title">
             <MicIcon />
             <span>{t('previewTitle')}</span>
@@ -631,12 +680,14 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
             </div>
             <div className="dshav-preview-block" data-role="optimized">
               <span className="dshav-preview-label">{t('previewOptimized')}</span>
-              <p className="dshav-preview-text" data-role="optimized">{preview.optimized}</p>
+              <p className="dshav-preview-text" data-role="optimized" id={previewDescId}>{preview.optimized}</p>
             </div>
           </div>
           <div className="dshav-preview-actions">
-            <button type="button" className="dshav-button dshav-button-outline dshav-button-sm" onClick={() => setPreview(null)}>{t('previewCancel')}</button>
-            <button type="button" className="dshav-button dshav-button-primary dshav-button-sm" onClick={onConfirm}>{t('previewConfirm')}</button>
+            <button type="button" className="dshav-button dshav-button-outline dshav-button-sm" onClick={closePreview}>{t('previewCancel')}</button>
+            <button ref={previewConfirmRef} type="button" className="dshav-button dshav-button-primary dshav-button-sm" onClick={onConfirm}>
+              {config.behavior.autoSend ? t('previewConfirmSend') : t('previewConfirmDraft')}
+            </button>
           </div>
         </div>
       )}

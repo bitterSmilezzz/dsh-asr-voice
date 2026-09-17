@@ -69,6 +69,18 @@ export interface PcmCaptureOptions {
 /** 采集用 AudioContext：懒创建并跨会话复用（新建上下文的开销和数量上限都不划算）。 */
 let captureCtx: AudioContext | null = null
 
+/** worklet 源码的 blob URL：**模块级只创建一次**，跨会话复用。
+ *  规范规定每个 AudioContext 只有一个 AudioWorkletGlobalScope，`registerProcessor` 对
+ *  已注册的名字抛 `NotSupportedError`；而 `addModule` 对**同一 URL** 是幂等的（重复调用
+ *  不会重新求值模块）。此前每次会话都新建 blob URL → 模块被重新求值 → 同名重复注册被拒
+ *  → 同一页面**第二次**实时会话必然失败，且错误文案指向「浏览器不支持」这一错误方向。
+ *  不 revoke：revoke 后再次 `addModule` 会失败，而这份源码只有几十 KB 且随页面存活。 */
+let workletUrl: string | null = null
+function getWorkletUrl(): string {
+  workletUrl ??= URL.createObjectURL(new Blob([WORKLET_LINES.join('\n')], { type: 'application/javascript' }))
+  return workletUrl
+}
+
 function getCaptureCtx(): AudioContext | null {
   if (captureCtx !== null) return captureCtx
   try {
@@ -130,7 +142,7 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
     return NOOP_CAPTURE
   }
 
-  const blobUrl = URL.createObjectURL(new Blob([WORKLET_LINES.join('\n')], { type: 'application/javascript' }))
+  const blobUrl = getWorkletUrl()
   let node: AudioWorkletNode | null = null
   let source: MediaStreamAudioSourceNode | null = null
   let mutedSink: GainNode | null = null
@@ -159,7 +171,6 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
     source = null
     mutedSink = null
     stream.getTracks().forEach((t) => t.stop())
-    URL.revokeObjectURL(blobUrl)
   }
 
   function onMessage(event: MessageEvent<Float32Array>): void {
@@ -195,7 +206,7 @@ export async function startPcmCapture(options: PcmCaptureOptions): Promise<PcmCa
     node.port.onmessage = onMessage
   } catch {
     stream.getTracks().forEach((t) => t.stop())
-    URL.revokeObjectURL(blobUrl)
+    // blobUrl 不 revoke：模块级复用，revoke 后下次 addModule 会直接失败。
     options.onFail('no-worklet')
     return NOOP_CAPTURE
   }

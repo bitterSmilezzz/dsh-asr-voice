@@ -178,6 +178,22 @@ test('I6: 服务端 error 事件 → 拒绝并带错误码', async () => {
   }
 })
 
+test('I6: 累计 PCM 超过上限 → 拒绝（此前只受 20s 墙钟约束，够堆出几百 MB）', async () => {
+  // 3 片 × 3MB（解码后）≈ 9MB > 8MB 上限：每片正常量级，累计才是异常。
+  const chunk = Buffer.alloc(3 * 1024 * 1024, 7).toString('base64')
+  const svc = startTtsWsServer({ pcmChunks: [chunk, chunk, chunk] })
+  const port = await svc.listen()
+  try {
+    await assert.rejects(
+      () => synthesize('sk-test-123', '你好', 'Cherry', `ws://127.0.0.1:${port}/api-ws/v1/realtime`),
+      /response-too-large/,
+      '累计超限必须立刻失败，而不是把整段音频收进内存',
+    )
+  } finally {
+    await svc.close()
+  }
+})
+
 test('I6: 建连失败（服务端 401 拒绝）→ 拒绝', async () => {
   // 起一个拒绝升级的 HTTP 服务（返回 401），模拟无效 key 的握手失败。
   const server = http.createServer((req, res) => { res.writeHead(401); res.end() })

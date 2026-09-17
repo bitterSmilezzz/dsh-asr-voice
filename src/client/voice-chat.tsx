@@ -56,8 +56,11 @@ export interface VoiceChatProps {
 /** 会话状态机：idle = 麦克风未开；listening = 收音中；thinking/speaking = 门控关麦。 */
 export type ChatPhase = 'idle' | 'listening' | 'thinking' | 'speaking'
 
-/** 字幕行只显示尾部这么多字符（提示条是单行的，整段回复会把它撑破）。 */
-const CAPTION_TAIL_CHARS = 80
+/** 字幕行只显示尾部这么多字符（提示条是单行的，整段回复会把它撑破）。
+ *  取 40 而不是 80：提示条容器 520px、字号 12px，中文每字约 12px ⇒ 约 43 字，
+ *  超出部分会被 CSS 的 ellipsis 从右端裁掉——而右端正是**最新说出的话**。
+ *  这个数字与 styles.ts 的 caption 宽度是一对，改一处要同时看另一处。 */
+const CAPTION_TAIL_CHARS = 40
 
 /** 全局对话控制器：快捷键只驱动「最后挂载」的实例（当前可见会话）。 */
 export const voiceChatController = {
@@ -374,15 +377,24 @@ export function useVoiceChat(props: VoiceChatProps): VoiceChatHandle {
     return () => clearTimeout(timer)
   }, [error, notice])
 
+  // running 的上一次取值：回合的 arm 只认**上升沿**（见下方跟读 effect 的说明）。
+  const prevRunningRef = react.useRef(false)
+
   // 回复跟读：owner share 每次 flush 都会带新快照进来，这里只做「喂泵 + 判收摊」。
   react.useEffect(() => {
     const turn = turnRef.current
+    // running 的**上升沿**才是「这一回合开始跑」。interrupt() 取消回合是异步的，
+    // 用户紧接着说的下一句可能在旧回合的 running 仍为 true 时提交——若只看电平值，
+    // 旧回合的 true 会把新回合 arm 掉，等旧回合落回 false 时新回合被立刻 finish：
+    // 提前还麦（半双工被破坏）+ 回复此后不再被朗读。
+    const rising = running && !prevRunningRef.current
+    prevRunningRef.current = running
     if (turn === null) return
     if (replyText !== turn.lastText) {
       turn.lastText = replyText
       for (const sentence of turn.pump.feed(replyText)) speakSentence(sentence)
     }
-    if (running && !turn.armed) { clearNoReply(); turn.armed = true }
+    if (rising && !turn.armed) { clearNoReply(); turn.armed = true }
     if (turn.armed && !running) {
       for (const sentence of turn.pump.finish()) speakSentence(sentence)
       turnRef.current = null
@@ -440,9 +452,12 @@ export function useVoiceChat(props: VoiceChatProps): VoiceChatHandle {
     }
     if (!busy) return null
     return (
-      <span className="dshav-hotkey-hint" data-kind="caption" data-state={phase} role="status" aria-live="polite">
+      <span className="dshav-hotkey-hint" data-kind="caption" data-state={phase} role="status">
+        {/* 屏幕阅读器只播报**状态词**（每次 phase 变化一次）：逐字字幕每秒可更新数次，
+            喂给 live region 会把 SR 用户刷屏，反而听不到「该你了」这类关键状态。 */}
+        <span className="dshav-sr-only">{phase === 'listening' ? t('chatListeningTitle') : phase === 'thinking' ? t('chatThinkingHint') : t('chatSpeakingHint')}</span>
         {phase === 'listening' ? <span className="dshav-dot" /> : <Spinner />}
-        <span className="dshav-hint-text">{hintText}</span>
+        <span className="dshav-hint-text" aria-hidden="true">{hintText}</span>
         {phase === 'listening' && (
           <span className="dshav-spectrum" ref={spectrumRef} aria-hidden="true">
             <SpectrumBars />

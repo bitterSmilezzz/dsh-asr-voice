@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { keyRefFor } from './key-ref.ts';
 import type { KeyRefSource } from './key-ref.ts';
-import { guardRoute, sendJson } from './http.ts';
+import { guardRoute, readUpstreamJson, redactSecret, sendJson } from './http.ts';
 import { resolveApiKey } from './transcribe.ts';
 
 /** 单个供应商配置面（来自 settings providers 列表）。 */
@@ -78,14 +78,16 @@ export function registerAsrModelsRoute(
           headers: { Authorization: `Bearer ${apiKey}` },
           signal: AbortSignal.timeout(LIST_MODELS_TIMEOUT_MS),
         });
-        const raw = (await upstream.json().catch(() => ({}))) as { error?: unknown; message?: unknown };
+        // 带上限读上游响应（baseUrl 可指向不可信端点）：超限抛错 → 502 上游故障。
+        const raw = (await readUpstreamJson(upstream)) as { error?: unknown; message?: unknown };
         if (!upstream.ok) {
           const errObj = raw.error as { message?: unknown } | undefined
           const reason = typeof raw.error === 'string' ? raw.error
             : typeof errObj?.message === 'string' ? errObj.message
               : typeof raw.message === 'string' ? raw.message
                 : `failed to list models (HTTP ${upstream.status})`;
-          return sendJson(res, 502, { ok: false, reason });
+          // 上游文本会经 reason 直通设置页，先脱敏（可能回显 Bearer key / 内部 URL）。
+          return sendJson(res, 502, { ok: false, reason: redactSecret(reason) });
         }
         const models = pickAsrModels(raw);
         return sendJson(res, 200, { ok: true, providerId, model: provider.model, models });

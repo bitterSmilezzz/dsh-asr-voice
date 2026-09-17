@@ -3,6 +3,12 @@
   // and src/key-ref.ts, both dependency-free so both halves compile them).
   // JSX via react-jsx, DOM libs, no node ambient types — matches the official
   // client base shape.
+  //
+  // Type-check-only program: this half never emits. lib/client.js is produced
+  // by tsdown (which bundles without type-checking), and no .d.ts is published
+  // for it — package.json exports["./client"] therefore has no `types` entry,
+  // and `declaration` / `declarationMap` / `declarationDir` are deliberately
+  // absent here (they would have no effect without emit).
   "compilerOptions": {
     "target": "es2024",
     "module": "esnext",
@@ -22,12 +28,9 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
     "verbatimModuleSyntax": false,
-    "declaration": true,
-    "declarationMap": true,
     "sourceMap": true,
     "noEmit": true,
-    "rootDir": "src",
-    "outDir": "lib/types/client"
+    "rootDir": "src"
   },
   "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "src/presets.ts", "src/key-ref.ts"]
 }

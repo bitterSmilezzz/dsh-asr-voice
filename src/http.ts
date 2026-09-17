@@ -55,6 +55,67 @@ export async function readJsonBody(req: IncomingMessage, maxBytes = 256 * 1024):
   }
 }
 
+/** 上游响应体（JSON）大小上限：用户自填的 baseUrl 可以指向任意端点（含不可信的自建
+ *  服务），而 `res.json()` 是无上限的——一个「把请求体回显回来」或单纯跑飞的端点就能
+ *  让宿主吃下几百 MB（转写本身已占 4~5× 音频大小的瞬时内存）。4MB 远超正常 ASR 文本
+ *  与模型列表的量级。 */
+export const MAX_UPSTREAM_JSON_BYTES = 4 * 1024 * 1024
+
+/** 读取上游响应体并解析 JSON（带字节上限）。超限抛错（按上游故障报错），非 JSON 返回 {}
+ *  （沿用既有「解析失败 → 空对象 → 用 HTTP 状态码描述错误」的口径）。
+ *  实现取舍：**不**用 `res.text()` 再判长度——那等于先把整个响应读进内存，上限就成了
+ *  摆设。这里边读边计数，超限立刻 `reader.cancel()` 断掉下载；`content-length` 只是
+ *  便宜的快路径（声明就超限时连读都不读），不可信端点完全可以不报或谎报它。 */
+export async function readUpstreamJson(res: Response, maxBytes = MAX_UPSTREAM_JSON_BYTES): Promise<unknown> {
+  const declared = Number(res.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel().catch(() => { /* 取消失败无所谓：连接由 GC/超时收掉 */ });
+    throw new Error(`upstream response too large (${declared} > ${maxBytes} bytes)`);
+  }
+  if (res.body === null) return {};
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  let overflow = false;
+  for (;;) {
+    const step = await reader.read().catch(() => ({ done: true as const, value: undefined }));
+    if (step.done) break;
+    size += step.value.byteLength;
+    if (size > maxBytes) {
+      overflow = true;
+      await reader.cancel().catch(() => { /* 同上 */ });
+      break;
+    }
+    parts.push(step.value);
+  }
+  if (overflow) throw new Error(`upstream response too large (> ${maxBytes} bytes)`);
+  const text = Buffer.concat(parts.map((p) => Buffer.from(p.buffer, p.byteOffset, p.byteLength))).toString('utf8');
+  if (text === '') return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return {};
+  }
+}
+
+/** 上游文本透出给浏览器前的脱敏：剥掉密钥形状、折叠空白、截断。
+ *  上游（或用户自填的恶意 baseUrl）常把请求内容回显进错误体（`Bearer <key>`、内部
+ *  URL），而这些文本会经路由的 `reason` 直通浏览器并被客户端当文案显示——等于把 key
+ *  印在页面上。这里只做**形状级**剥离（不猜语义），宁可多脱一点。
+ *  @param text 上游/错误文本。 @param maxLen 截断长度（超出加省略号）。 */
+export function redactSecret(text: string, maxLen = 200): string {
+  const redacted = text
+    // 认证头回显（最典型的泄漏形状）
+    .replace(/\bBearer\s+\S+/gi, '<redacted>')
+    // OpenAI 系密钥（sk-… / sk-proj-…）
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '<redacted>')
+    // 本插件自己的凭据引用名（上游若回显请求头/环境变量名会带上它）
+    .replace(/\bASR_VOICE_[A-Z0-9_]+/g, '<redacted>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return redacted.length > maxLen ? `${redacted.slice(0, maxLen)}…` : redacted;
+}
+
 /** 写 JSON 响应。 */
 export function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   const body = JSON.stringify(payload);
@@ -71,8 +132,10 @@ export function sendJson(res: ServerResponse, status: number, payload: unknown):
  * dsh-email 的 web.ts 围栏同款）：
  * - sec-fetch-site === 'cross-site' 一票拒绝（浏览器注入、页面无法伪造）；
  * - Host 严格全等判定回环（127. 宽前缀会被 127.0.0.1.evil.com 之类 DNS rebinding 绕过）；
- * - 带 Origin 的请求要求同源且 Host 本身是回环——仅凭 originName === hostName 时，
- * 解析到 127.0.0.1 的攻击者域名（rebinding 惯用手法）即构成 Host/Origin 相等的
+ * - 带 Origin 的请求要求**同源（scheme+host+port）**且 Host 本身是回环——只比主机名时
+ * http://localhost:5173 上的任意页面（dev server / 预览服务 / 本机任何 web 应用）都算
+ * 「与宿主同源」，能借宿主代理花用户的 key（此时 Sec-Fetch-Site 是 same-site，拦不住）；
+ * 同理，解析到 127.0.0.1 的攻击者域名（rebinding 惯用手法）也只构成 Host/Origin 相等的
  * "同源"表象，Host 非回环一律不可信；
  * - Origin/Host 解析失败（如字面量 Origin: null）一律不可信，不抛异常冒泡路由。
  */
@@ -82,26 +145,34 @@ export function isTrusted(req: IncomingMessage): boolean {
   const stripBrackets = (h: string): string => (h.startsWith('[') && h.endsWith(']') ? h.slice(1, -1) : h);
   const loopbackOf = (h: string): boolean =>
     h === 'localhost' || h === '::1' || /^127\.\d+\.\d+\.\d+$/.test(h);
+  // 同源判定必须带上端口：浏览器的同源 = scheme + host + **port**，只比主机名会把
+  // http://localhost:5173 的页面当成与宿主 http://localhost:3080 同源。默认端口（80/443）
+  // 两侧都归一化掉——`Host: localhost:80` 与 `Origin: http://localhost` 在浏览器眼里本就
+  // 同源，不该因一侧显式写了默认端口而判成跨源（非默认端口则必须逐字一致）。
+  const stripDefaultPort = (h: string): string => h.replace(/:(?:80|443)$/, '');
   let hostName = '';
+  let hostWithPort = '';
   try {
-    hostName = stripBrackets(new URL(`http://${String(req.headers.host ?? 'invalid.invalid')}`).hostname.toLowerCase());
+    const hostUrl = new URL(`http://${String(req.headers.host ?? 'invalid.invalid')}`);
+    hostName = stripBrackets(hostUrl.hostname.toLowerCase());
+    hostWithPort = stripDefaultPort(hostUrl.host.toLowerCase());
   } catch {
     return false;
   }
   const hostLoopback = loopbackOf(hostName);
   const originHeader = req.headers.origin;
   if (originHeader === undefined) return hostLoopback; // 无 Origin（curl/页面导航）：只信回环 Host
-  let originName = '';
+  let originHost = '';
   try {
-    originName = stripBrackets(new URL(String(originHeader)).hostname.toLowerCase());
+    originHost = stripDefaultPort(new URL(String(originHeader)).host.toLowerCase());
   } catch {
     return false; // Origin: null / 畸形 → 不可信
   }
-  // 有 Origin：必须同源且 Host 本是回环。仅凭 originName === hostName 时，攻击者可注册
+  // 有 Origin：必须**同源（含端口）**且 Host 本是回环。仅凭主机名相等时，攻击者可注册
   // 一个解析到 127.0.0.1 的域名（如 127.0.0.1.evil.com，DNS rebinding 惯用手法），本机浏览器
   // 访问它即构成 Host/Origin 相等的"同源"请求——与"无 Origin 但 Host 非回环 → 拒绝"的
   // 既有口径一致：Host 非回环一律不可信。
-  return hostLoopback && originName === hostName;
+  return hostLoopback && originHost === hostWithPort;
 }
 
 /** 路由守卫：信任围栏 + method 白名单。通过返回 null；不通过返回已写好的 403/405 响应值（handler 直接 return 它）。 */

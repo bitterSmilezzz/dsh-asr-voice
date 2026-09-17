@@ -26,6 +26,9 @@ export declare const inject: string[];
  * 供应商行归一化：settings 深层结构（多供应商/旧单配置）里同一组字段的取值
  * 规则一致（缺省 preset=openai、mode=auto、其余空串），所有读取路径共用
  * 这一个视图，避免四处维护同一份兜底规则。
+ * **凭据引用名的派生入口也必须唯一**：`keyRefFor` 只认 preset/name/id 三个字段，
+ * 直接拿原始行（可能缺 id/name）派生的结果会与读取路径（先过本视图兜底 id）分叉——
+ * 迁移写入的引用名没人读，明文一被抹掉密钥就彻底不可达（见 migrateLegacyKeys）。
  * @param row 供应商原始行（name/id 均可缺省：name 用于显示，id 用于引用派生）。
  * @param idFallback 行缺 id 时的兜底 id。
  * @param modeOverride 显式 mode（undefined = 取行内 mode，缺省 'auto'）。

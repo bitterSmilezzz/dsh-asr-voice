@@ -16,6 +16,15 @@ import type { RecordBehavior } from './config.ts'
 /** 云端转写请求超时（毫秒）：上游不可达/卡住时不把 UI 永远钉在「识别中」。 */
 const TRANSCRIBE_TIMEOUT_MS = 60_000
 
+/** 浏览器引擎：onend 后重新拉起识别器前的最小间隔（紧接着 start() 会撞 InvalidStateError）。 */
+const RESTART_DELAY_MS = 120
+
+/** 浏览器引擎：连续多少次重启失败即收尾（Web Speech 服务持续不可用时别无限空转）。 */
+const RESTART_FAIL_LIMIT = 3
+
+/** 浏览器引擎：stop() 后等 onend 的上限（毫秒）：到点按已识别文本收尾，不把 UI 钉在「识别中」。 */
+const STOP_WATCHDOG_MS = 10_000
+
 /** 录音状态。 */
 export type RecordState = 'recording' | 'transcribing'
 
@@ -92,6 +101,15 @@ function resolveLang(language: string): string | undefined {
   return language
 }
 
+/** 两段文本按空格拼接（任一段为空则不产生多余分隔符）：浏览器引擎的显示与累加共用，
+ *  消除同一规则在 emitInterim / onresult 里的两份手写。与实时引擎的 `joinText` 的差异
+ *  是刻意的——后者折叠连续空白，这里保留逐字原文（字幕不因归一而抖动）。 */
+function joinSpaced(head: string, tail: string): string {
+  if (head === '') return tail
+  if (tail === '') return head
+  return `${head} ${tail}`
+}
+
 /** 装饰性电平：Web Speech 引擎不暴露音频流，用平滑随机波形近似语音起伏驱动频谱条。 只用于视觉反馈，绝不参与任何静音/回合判定。返回幂等的停止函数。 */
 export function startLevelSimulation(emit: (level: number) => void): () => void {
   let raf = 0
@@ -131,8 +149,14 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void,
   let stopped = false
   let cancelled = false
   let delivered = false
+  /** 用户已请求停止（stop() / 到达时长上限）：onend 据此收敛到 settle，而不是续听。 */
+  let stopping = false
   let endResolve: ((text: string) => void) | null = null
   let maxTimer: ReturnType<typeof setTimeout> | null = null
+  let restartTimer: ReturnType<typeof setTimeout> | null = null
+  let restartFailures = 0
+  /** stop() 后的看门狗：onend 不可信（见文件头与 speech-out.ts 的同款处置）。 */
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null
   let stopLevelSim: (() => void) | null = null
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -155,23 +179,48 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void,
   }
 
   const emitInterim = (): void => {
-    const text = `${finalText}${finalText && interim ? ' ' : ''}${interim}`.trim()
-    recorder.onInterim?.(text)
+    recorder.onInterim?.(joinSpaced(finalText, interim).trim())
   }
 
   const settle = (): void => {
     if (stopped) return
     stopped = true
+    if (restartTimer !== null) { clearTimeout(restartTimer); restartTimer = null }
+    if (watchdogTimer !== null) { clearTimeout(watchdogTimer); watchdogTimer = null }
     stopLevelSimNow()
     if (maxTimer) clearTimeout(maxTimer)
     // 被 abort（打断）时不送结果；正常结束时经 onDone 把文本送回 UI，
-    // 让「手动停止 / 自动停止」两条路径都能收敛到同一处消费。
+    // 让「手动停止 / 自动停止 / 看门狗兜底」几条路径都能收敛到同一处消费。
     if (!cancelled && endResolve) {
       const text = finalText.trim()
       endResolve(text)
       endResolve = null
       deliver(text)
     }
+  }
+
+  /** 冷却后重新拉起识别器：Chrome 会在一段静音后自行结束 continuous 会话。
+   *  整段模式没有实时链路那套回合判定，不续听就是**静默截断**——用户继续说，一个字
+   *  都进不来，UI 却还停在「录音中」（呼吸环还在动，只是频谱不再变化）。已识别的
+   *  finalText 跨重启保留；连败到上限则收尾并报 network（auto 模式据此降级云端）。 */
+  const scheduleRestart = (): void => {
+    if (restartTimer !== null) clearTimeout(restartTimer)
+    restartTimer = setTimeout(() => {
+      restartTimer = null
+      if (stopped || cancelled) return
+      try {
+        recognition.start()
+        restartFailures = 0
+      } catch {
+        restartFailures += 1
+        if (restartFailures >= RESTART_FAIL_LIMIT) {
+          settle()
+          onError('network')
+          return
+        }
+        scheduleRestart()
+      }
+    }, RESTART_DELAY_MS)
   }
 
   recognition.onstart = () => { recorder.onState?.('recording') }
@@ -185,7 +234,7 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void,
       if (result.isFinal) finalChunk += transcript
       else interimChunk += transcript
     }
-    if (finalChunk) finalText = `${finalText}${finalText && finalChunk ? ' ' : ''}${finalChunk}`
+    if (finalChunk) finalText = joinSpaced(finalText, finalChunk)
     if (interimChunk) interim = interimChunk
     else if (!finalChunk) interim = ''
     emitInterim()
@@ -197,9 +246,14 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void,
       settle()
       onError('mic-denied')
     } else if (event.error === 'no-speech') {
-      // 静音结束：当作正常结束（轻提示，非错误）。
-      settle()
-      onError('no-speech')
+      // 静音：还没说出任何文字 → 当作正常结束（轻提示，非错误）；
+      // 已经说了一半 → 只是浏览器的静音窗口到了，续听（否则后半段被静默丢掉）。
+      if (finalText.trim() === '') {
+        settle()
+        onError('no-speech')
+        return
+      }
+      scheduleRestart()
     } else if (event.error === 'aborted') {
       // 主动 abort：正常结束。
       settle()
@@ -213,12 +267,20 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void,
     }
   }
 
-  recognition.onend = () => settle()
+  recognition.onend = () => {
+    if (stopped || cancelled) return
+    if (stopping) { settle(); return }
+    scheduleRestart()
+  }
 
   recorder.start = () => {
     if (stopped) return
     startLevelSim()
-    maxTimer = setTimeout(() => { try { recognition.stop() } catch { /* noop */ } }, behavior.maxRecordMs)
+    maxTimer = setTimeout(() => {
+      // 到达时长上限：走与手动停止同一条收敛路径（stopping 让 onend 不再续听）。
+      stopping = true
+      try { recognition.stop() } catch { /* noop */ }
+    }, behavior.maxRecordMs)
     try {
       recognition.start()
     } catch {
@@ -232,8 +294,12 @@ function createBrowserRecorder(language: string, onError: (msg: string) => void,
       deliver(text)
       return Promise.resolve(text)
     }
+    stopping = true
     return new Promise<string>((resolve) => {
       endResolve = (text) => resolve(text)
+      // onend 不可信（本仓 speech-out.ts 早已为此给 utterance 配了看门狗）：它不来，
+      // UI 就永久停在「识别中」。到点按已识别文本走同一条 settle 收尾。
+      watchdogTimer = setTimeout(() => { watchdogTimer = null; settle() }, STOP_WATCHDOG_MS)
       try {
         recognition.stop()
       } catch {
@@ -349,6 +415,10 @@ function createCloudRecorder(language: string, onError: (msg: string) => void, b
     try {
       const audioCtx = getMeterCtx()
       if (audioCtx === null || stream === null) return
+      // 上下文可能因系统原因（设备切换 / 睡眠唤醒 / 浏览器策略）处于 suspended：
+      // 此时 AnalyserNode 读到的永远是零位（rms=0），频谱不动，开着的 silenceStop
+      // 还会在 silenceMs 后立刻误停录音。恢复一次，失败也不影响录音本身。
+      if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => { /* 保持静默 */ })
       // 复用上下文时先断开旧的 source（避免叠流）。
       for (const src of meterSources) {
         try { src.disconnect() } catch { /* noop */ }
@@ -611,9 +681,13 @@ async function blobToWav16k(blob: Blob): Promise<{ wav: Blob; peak: number }> {
     const bytes = encodeWav16MonoPcm(pcm, PCM_SAMPLE_RATE, normaliseGain(peak))
     return { wav: new Blob([bytes], { type: 'audio/wav' }), peak }
   } catch (error) {
-    // 共享 context 解码失败（可能被用户手动关闭）：重建一个再试一次。
+    // 共享 context 解码失败（可能被系统关闭/失效）：重建一个再试一次。
+    // 旧 context 必须真的 close：只丢引用会让它悬空占用——Chrome 对每文档未关闭的
+    // AudioContext 有数量上限（6），反复失败会撞上限，届时解码/电平/采集一起失效。
     if (sharedAudioCtx !== null) {
+      const stale = sharedAudioCtx
       sharedAudioCtx = null
+      void stale.close().catch(() => { /* 已关闭/已失效：忽略 */ })
       try {
         return await blobToWav16k(blob)
       } catch {

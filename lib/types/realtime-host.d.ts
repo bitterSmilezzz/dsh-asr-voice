@@ -44,6 +44,12 @@ export declare class SseChannel {
     close(): void;
     private readonly disconnect;
 }
+/** 建会话失败（容量已满）：自带 HTTP 状态码，会话路由据此回 503（可重试）而不是 502
+ *  （上游故障）。其余建会话失败（provider 连不上）仍是 502。 */
+export declare class RealtimeSessionError extends Error {
+    readonly status: 503;
+    constructor(message: string);
+}
 /** RealtimeHost 构造参数（依赖注入，便于单测）。 */
 export interface RealtimeHostOptions {
     /** 每次建会话时创建一条 provider 连接。 */
@@ -54,6 +60,11 @@ export interface RealtimeHostOptions {
     heartbeatMs?: number;
     /** 上游终态报错后的收尾宽限期（毫秒，默认 5s）。测试注入小值以确定性覆盖拆除路径。 */
     errorLingerMs?: number;
+    /** 同时存活会话上限（默认 8）；超出时 createSession 抛 {@link RealtimeSessionError}。 */
+    maxSessions?: number;
+    /** 单会话绝对上限（毫秒，默认 10 分钟）；非正数 = 不设上限。传函数则每次建会话现读
+     *  （settings 可热改，见 src/index.ts 的注入）。 */
+    maxSessionMs?: number | (() => number);
     /** 现在的时间（毫秒，测试注入）。 */
     now?: () => number;
 }
@@ -62,11 +73,17 @@ export declare class RealtimeHost {
     private readonly sessions;
     private readonly opts;
     private readonly createProvider;
+    /** 绝对 TTL 的取值入口（函数则现读，便于 settings 热改）。 */
+    private readonly maxSessionMsOf;
     constructor(options: RealtimeHostOptions);
     /** 铸造新会话：host 生成 sid，建 provider 连接。 */
     createSession(): Promise<{
         sid: string;
     }>;
+    /** 绝对 TTL：到点**无条件**拆会话（不看有没有活动）。会话是「一次对话」而非常驻资源：
+     *  只要持续上行 PCM，空闲守卫就永远等不到过期（客户端每帧都在续命），云端 WS 按分钟
+     *  计费地开着。TTL 取值在建会话时现读（settings 热改立刻对新会话生效）。 */
+    private armTtl;
     /** 上游终态报错后的收尾：标记会话已终结 + 把空闲窗口收紧到 ERROR_LINGER_MS。
      *  修的是「僵尸会话」：此前 provider 报错后 host 不拆会话，客户端仍在按 40ms 一帧
      *  上行 PCM，每帧 `feedAudio` → `refreshIdle` 都把 lastActive 顶到现在——死连接的
@@ -82,10 +99,17 @@ export declare class RealtimeHost {
     feedAudio(sid: string, pcm: Uint8Array): boolean;
     /** 挂起 SSE 下行（单消费者）。会话不存在 / 已有下行返回 false。 */
     attachSse(sid: string, res: ServerResponse): boolean;
-    /** 关闭会话：拆 provider、拆 SSE、清定时器（幂等）。 */
+    /** 关闭会话：拆 provider、拆 SSE、清定时器（幂等）。
+     *  时序说明（**刻意不改**）：这里先摘掉事件汇（`conn.onEvent = null`）再 `conn.close()`，
+     *  而 provider（如 realtime-dashscope.ts）的 close 会发 session.finish 并保留 3s 宽限
+     *  （CLOSE_GRACE_MS）等上游在途 final——那条 final 到达时事件汇已摘，host 侧收不到任何
+     *  事件（客户端 stop 时本就丢弃事件，所以当前无功能损失）。若将来要「收尾取最后一句」，
+     *  必须调换顺序：先 conn.close()、宽限结束后再摘事件汇。 */
     closeSession(sid: string): void;
     /** 会话是否存活（供测试/诊断）。 */
     hasSession(sid: string): boolean;
+    /** 当前存活会话数（供测试/诊断）。 */
+    sessionCount(): number;
     /** 释放全部会话（插件卸载/热重载时由 fiber disposer 调用）：逐个 closeSession
      *  （幂等），SSE 心跳、idle timer、provider 连接全部随之释放。 */
     dispose(): void;

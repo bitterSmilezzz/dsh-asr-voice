@@ -63,8 +63,10 @@ voice input.*
   点停止即整段去识别；可选静音自动停止），可选按住说话
 - 默认快捷键 **Ctrl+Shift+Space**（可配置，支持 macOS 的 Cmd 兼容）
 - 识别后**填入草稿**待确认；可选「识别后自动发送」（push-to-talk 风格）
-- **语音对话**（默认开，与麦克风并列第二个按钮；关 `realtime.enabled` 即回到纯整段模式）：边说边上字幕 →
-  停顿即发起 agent 回合 → 回复按句朗读 → 念完自动回到聆听，半双工、点按可打断
+- **语音对话**（默认开，`realtime.enabled`）：与麦克风**同一个按钮**——点 = 录音转写，
+  长按约 450ms = 进入语音对话（对话中再点 = 打断播报 / 结束对话）；关 `realtime.enabled`
+  即回到纯整段模式，按钮只剩「点 = 转写」。边说边上字幕 → 停顿即发起 agent 回合 →
+  回复按句朗读 → 念完自动回到聆听，半双工、点按可打断
 - 设置卡片：「设置 → 插件 → 配置 → 语音输入」= **三步向导** + 默认折叠的「高级」（BaseURL /
   模型 / 通道 / 多服务商 / 语言 / 优化 / 快捷键 / 用量）；改动先进本地草稿，点「保存」才写回，
   写回后按段读回校验
@@ -125,10 +127,12 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 行为 | `behavior.maxRecordMs` | `120000` | 单次录音上限（毫秒，5s~600s）：到点自动结束并送识别 |
 | 行为 | `behavior.silenceMs` | `2500` | 静音判定时长（毫秒，200~60000）：连续安静这么久即判定说完，需开 `silenceStop` |
 | 行为 | `behavior.silenceRms` | `0.02` | 静音阈值（0~1 响度比例）：低于它算安静 |
-| 实时 | `realtime.enabled` | `true` | 语音对话总开关（默认开）：开着才出现第二个按钮与 `realtime.hotkey`（改动即时生效，无需重载页面） |
-| 实时 | `realtime.engine` | `browser` | 出字来源：`browser`（浏览器 Web Speech，逐字上屏、零 key、不新增本机请求）/ `segmented`（本地能量 VAD 按句切段，每句走一次已有的云端整段转写，需先配好 ASR 服务商）/ `cloud`（16k PCM 帧上行 host 实时通道，SSE 下行驱动字幕与回合，服务端 VAD 判回合） |
-| 实时 | `realtime.tts` | `browser` | 回复播报：`browser`（浏览器 `speechSynthesis`，零配置）/ `off`（只出字不出声） |
-| 实时 | `realtime.hotkey` | 空 | 进出实时对话的快捷键（空 = 不用快捷键）；与 `behavior.hotkey` 撞键时**对话优先** |
+| 实时 | `realtime.enabled` | `true` | 语音对话总开关（默认开）：开着时麦克风按钮的长按（约 450ms）= 进入语音对话，`realtime.hotkey` 也生效；关掉后长按与对话快捷键都不动作，只剩「点 = 转写」（按钮本身不增删；改动即时生效，无需重载页面） |
+| 实时 | `realtime.engine` | `browser` | 出字来源：`browser`（浏览器 Web Speech，逐字上屏、零 key、不新增本机请求）/ `segmented`（本地能量 VAD 按句切段，每句走一次已有的云端整段转写，需先配好 ASR 服务商）/ `cloud`（16k PCM 帧上行 host 实时通道，SSE 下行驱动字幕与回合，服务端 VAD 判回合；配 `realtime.provider` 选 provider） |
+| 实时 | `realtime.provider` | `builtin` | `engine=cloud` 时走哪个实时 provider：`builtin`（host 端假 provider，开发态、不花配额）/ `dashscope-realtime`（真云端 qwen3-asr-flash-realtime，服务端 VAD 判回合，凭据复用 `DASHSCOPE_API_KEY`） |
+| 实时 | `realtime.tts` | `browser` | 回复播报：`browser`（浏览器 `speechSynthesis`，零配置）/ `cloud`（云端 TTS，qwen3-tts-flash-realtime，凭据复用 `DASHSCOPE_API_KEY`）/ `off`（只出字不出声） |
+| 实时 | `realtime.ttsVoice` | `Cherry` | 云端 TTS 音色（仅 `tts=cloud` 生效）：qwen3-tts-flash-realtime 的系统音色名 |
+| 实时 | `realtime.hotkey` | `Ctrl+Shift+Alt+Space` | 进出实时对话的快捷键（空 = 不用快捷键；macOS 上 `Ctrl` 兼容 `Cmd`）；与 `behavior.hotkey` 撞键时**对话优先** |
 | 实时 | `realtime.bargeIn` | `false` | **语音插话（全双工）**：播报回复期间继续收音，人声持续超过回声门即打断朗读。默认关（真机回环复测通过前保持半双工），仅 `engine=segmented` 支持 |
 | 实时 | `realtime.turn.settleMs` | `900` | 转写文字静默多久算「说完了」（毫秒，200~10000）：到点即提交并发起回合 |
 | 实时 | `realtime.turn.tailMs` | `300` | 判完之后再宽限这么久才提交（毫秒，0~5000）：接住最后一个词的迟到结果，0 = 不等 |
@@ -144,6 +148,8 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 | 实时切段 | `realtime.vad.maxSegmentMs` | `8000` | 单段语音长度上限（毫秒，1000~30000）：说不停也强制轮换，同时是单次上传体大小的上限 |
 | 实时切段 | `realtime.vad.maxPending` | `3` | 排队段数上限（1~20）：转写慢过说话时丢最旧并提示字幕断裂 |
 | 统计 | `/api/asr-voice/stats` | — | ASR 用量统计（次数/字符/最近时间，进程内） |
+| 实时 | `/api/asr-voice/realtime/*` | — | `engine=cloud` 的 host 实时通道：`session` / `audio` / `events`(SSE) / `close` 四条私有路由 |
+| 实时 | `/api/asr-voice/tts` | — | `tts=cloud` 的云端 TTS：浏览器把待播文本上行，host 用 DSH 凭据合成 PCM 回传（浏览器不持 key） |
 
 **API key 不在上表里。** 它存于 DSH 凭据服务，按引用名读取：预置供应商直接用
 `<PRESET>_API_KEY`（`OPENAI_API_KEY` / `GROQ_API_KEY` / `SILICONFLOW_API_KEY` /
@@ -159,23 +165,28 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 
 **怎么用好它**（三步）：
 
-1. **开口即出字，说话而不是打字**：点输入行的声波按钮或按 `realtime.hotkey`，说的时候字幕逐字
-   上屏——不用等把话说完：停顿约一秒即判定「说完了」，草稿自动填入并发送。你在对 agent 说话。
+1. **开口即出字，说话而不是打字**：**长按**输入行的麦克风按钮（约 450ms）或按 `realtime.hotkey`，
+   说的时候字幕逐字上屏——不用等把话说完：停顿约一秒即判定「说完了」，草稿自动填入并发送。
+   你在对 agent 说话。
 2. **回复朗读，随后自动还麦**：回复按句朗读（浏览器语音，或云端 TTS），念完麦克风自动回来听
    下一句。**半双工**保证扬声器里机器自己的声音不会被当成你说的话，回声不会触发奇怪的回合。
-3. **三处打断，随时收放**：再按一次按钮 / 再按一次快捷键 / 点提示条上的 `×`，立刻止读、取消
-   在途回合、回到聆听。开启「语音插话」（`realtime.bargeIn`，仅按句切段引擎）后更可以直接
-   开口打断朗读——人声持续超过回声门才生效，键盘和机器自己的声音不会误触。
+3. **三处打断，随时收放**：再点一次麦克风按钮（对话中点击 = 打断/结束）/ 再按一次快捷键 /
+   点提示条上的 `×`，立刻止读、取消在途回合、回到聆听。开启「语音插话」
+   （`realtime.bargeIn`，仅按句切段引擎）后更可以直接开口打断朗读——人声持续超过回声门才
+   生效，键盘和机器自己的声音不会误触。
 
 引擎怎么选：`browser` 零配置零配额，但依赖浏览器语音服务（部分地区被网络屏蔽，遇 `network`
 错误会自动降级到 `segmented`——提示「已自动改用云端识别」后照常说即可，不用手动切引擎）；`segmented`
 每句走你已配好的云端 ASR，天然适配国内网络；`cloud` 上传 PCM 到 host 实时通道、服务端判回合，
-出字延迟最低（需 `DASHSCOPE_API_KEY`）。
+出字延迟最低——已实现，需把 `realtime.provider` 选到 `dashscope-realtime`（真云端
+qwen3-asr-flash-realtime，凭据复用 `DASHSCOPE_API_KEY`），保持默认 `builtin` 则走 host 端
+假 provider（开发态，不花配额）。
 
 ## 实时语音对话 Realtime voice chat
 
 
-`realtime.enabled` 打开后，输入行多出第二个按钮（快捷键 `realtime.hotkey`）。一轮闭环：
+`realtime.enabled` 打开后，麦克风按钮**长按约 450ms** 即进入语音对话（也可用快捷键
+`realtime.hotkey`）；按钮不随开关增删，关掉开关只是长按与对话快捷键不再动作。一轮闭环：
 
 说 → 字幕逐字上屏 → 静默 `turn.settleMs`（再宽限 `turn.tailMs`）判定说完 → **填入草稿并直接
 发送** → agent 回复按句朗读 → 念完自动把麦克风还回来听下一句。
@@ -191,8 +202,9 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   `browser`/`segmented` 共用同一套 `realtime.turn.*` 静默判定，切换只改段边界的**来源**，不改
   「什么时候算说完」。`segmented` 连续三次转写失败即判死并结束会话；转写慢过说话时丢最旧的段并
   提示字幕断裂，而不是让字幕越拖越长。
-  `cloud` 走 host 实时通道（I3 交付）：16k PCM 帧量化后逐帧上行，SSE 下行事件驱动字幕与回合，
-  回合边界由**服务端 VAD** 判定（I3 假 provider / I5 真云端），本地不再文字静默判定——逐字延迟
+  `cloud` 走 host 实时通道：16k PCM 帧量化后逐帧上行，SSE 下行事件驱动字幕与回合，
+  回合边界由**服务端 VAD** 判定（`realtime.provider = builtin` 假 provider，或
+  `dashscope-realtime` 真云端 qwen3-asr-flash-realtime），本地不再文字静默判定——逐字延迟
   更低，代价是需要一条 host 实时通道。
 - **半双工（默认）与语音插话（可选）**：默认朗读期间不收音，回声不会被当成你说的话——
   虚拟设备上实测 Chromium AEC 消除率仅 0.42 dB（`echoCancellation` 基本无效），因此真机
@@ -202,11 +214,13 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   350ms 且显著超过回声门**才打断；键盘/关门等瞬态与 3dB 量级的弱声不会误断。
 - **不做提示词优化**：对话要的是即时，转写文本原样上屏；`optimize.*` 只作用于整段录音模式。
 - **到点自己收**：`realtime.maxSessionMs` 上限到即结束会话并释放麦克风，麦克风不会无人值守常开。
-- **I3/I4 已交付实时通道 + 浏览器侧 cloud 引擎**：host 会话注册表（`sid` 由 host 铸造）+ SSE
-  下行带背压 + `RealtimeProvider` 接缝 + 假 provider 已实现并全量测试（含 undici WebSocket 带
-  `Authorization` 的真实 socket 上线证据）；`realtime.engine = cloud` 时浏览器把采集帧上行到该
-  通道、SSE 下行驱动字幕/回合（7 例单测）。接入真云端 provider 属于后续阶段，届时只替换 host 的
-  `createProvider`。
+- **实时通道与真云端 provider 均已实现**：host 会话注册表（`sid` 由 host 铸造）+ SSE 下行带
+  背压 + `RealtimeProvider` 接缝 + 假 provider（含 undici WebSocket 带 `Authorization` 的真实
+  socket 上线证据）；`realtime.engine = cloud` 时浏览器把采集帧上行到该通道、SSE 下行驱动字幕/
+  回合；真云端 provider 也已落地（`src/realtime-dashscope.ts`，阿里云百炼
+  qwen3-asr-flash-realtime，服务端 VAD 判回合），把 `realtime.provider` 选到
+  `dashscope-realtime` 即启用，凭据复用 DSH 的 `DASHSCOPE_API_KEY`；云端 TTS 同理
+  （`realtime.tts = cloud`）。两者都在 Node 22+ 上运行（依赖全局 WebSocket）。
 
 ## 云端 ASR 预置 Presets
 
@@ -229,6 +243,11 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 
 ## 外部依赖 External Dependencies
 
+- **Node ≥ 22**（host 半区）：云端实时转写与云端 TTS 依赖 Node 内置全局 `WebSocket`
+  （undici，Node 22 起稳定）。Node 18/20 上这两条通道不可用——表现为路由 502
+  「云端通道不可用」，而不是可读的版本错误，因此 `package.json` 声明 `engines.node >= 22`，
+  `scripts/build.sh` 也会先挑一个 ≥22 的 node。其余功能（整段识别 / 优化 / browser、
+  segmented 实时引擎）不受影响。
 - 浏览器：Web Speech API（Chrome/Edge；Safari 部分支持）、`getUserMedia` + `MediaRecorder`；
   `realtime.engine = segmented` 另需 `AudioWorklet`（16k PCM 采集，Chrome/Edge/Safari 交集内）
 - 云端 ASR / LLM：你配置的 OpenAI-compatible 服务（网络请求由本机 host 发起）
@@ -237,18 +256,19 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 ## 生命周期脚本 Lifecycle Scripts
 
 **无** `preinstall` / `install` / `postinstall` / `prepare` 等安装期脚本；
-`build` / `build:client` / `bundle` / `typecheck` 仅开发者构建用，不参与安装。
+`build` / `build:client` / `bundle` / `typecheck` / `pretest` / `test` 仅开发者构建与验证用，
+不参与安装（`pretest` 是 npm 的测试前置钩子，只在本地 `npm test` 时触发，不是安装脚本）。
 
 ## 权限与已知风险 Permissions & Known Issues（保守披露）
 
 | 权限 | 等级 | 说明 |
 |---|---|---|
 | 麦克风 | 高 | 浏览器 `getUserMedia` 需要用户授权；采集只由点击/快捷键发起。整段模式在点击停止或静音判定时结束；**实时对话会持续占用麦克风**，直到你结束会话，或 `realtime.maxSessionMs` 到点自动结束 |
-| 网络 | 中 | 云端 ASR/LLM 时，本机 host 向**你配置的** baseUrl 发起 HTTPS 请求 |
-| 音频输出 | 低 | 实时对话用浏览器 `speechSynthesis` 经**系统默认输出设备外放** agent 回复：周围人听得到，且没有单独的音量/静音路由（止声用打断入口） |
+| 网络 | 中 | 云端 ASR/LLM 时，本机 host 向**你配置的** baseUrl 发起 HTTPS 请求；`realtime.provider = dashscope-realtime` 或 `realtime.tts = cloud` 时另向阿里云百炼发起 WSS（WebSocket）连接 |
+| 音频输出 | 低 | 实时对话把 agent 回复经**系统默认输出设备外放**：`realtime.tts = browser`（默认）走浏览器 `speechSynthesis`，`= cloud` 走云端 TTS 返回的 PCM；两种情况周围人都听得到，且没有单独的音量/静音路由（止声用打断入口） |
 | 设置读写 | 中 | 读写自有 namespace `asr-voice`（**不含密钥**：两个 `apiKey` 字段标了 `role('secret')`，过线即被脱敏） |
 | 凭据读写 | 中 | 只按**自己派生的引用名**读写：`OPENAI_API_KEY` / `GROQ_API_KEY` / `SILICONFLOW_API_KEY` / `MIMO_API_KEY` / `DASHSCOPE_API_KEY` / `ASR_VOICE_*_API_KEY`。预置引用名与官方 LLM 凭据**同名**（刻意复用，代价是共用同一把 key 与配额）。页面上输入的 key 仅在保存那一次经 connection RPC 送到 host 落库；**已存的值永不回传浏览器**，设置页只看得到「已配置 / 未配置」 |
-| 文件（诊断落盘） | 中 | 转写失败 / 识别结果异常短 / 显式诊断抓取时，将原始录音写入 `~/.dsh/asr-voice-debug/`（可用 `DSH_ASR_DEBUG_DIR` 重定向，自动裁剪至 100 个）；不执行命令、不读取其他凭据 |
+| 文件（诊断落盘） | 中 | **默认不落盘**：仅当显式设置 `DSH_ASR_DEBUG_KEEP_WAVS=1`（或 `true`/`yes`）时，才把原始录音写入 `~/.dsh/asr-voice-debug/`（可用 `DSH_ASR_DEBUG_DIR` 重定向，按**文件数 100 + 总字节 200MB** 双约束自动裁剪）用于排查采集/转码问题；未开启时连 `?capture=1` 显式抓取也一律拒绝。不执行命令、不读取其他凭据 |
 
 已知风险：
 
@@ -287,17 +307,21 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
   whether the default flips.*
 - 播报音色与断句取决于操作系统装了什么语音，长句可能出现机械停顿；不接受就 `realtime.tts = off`，
   字幕与自动提交照常。云端实时（PCM 流 + 服务端轮次判定）**已由 `engine=cloud` 接入**：host 实时
-  通道（会话注册表 + SSE 下行 + `RealtimeProvider` 接缝 + 假 provider）随 I3 交付，client 侧 cloud
-  引擎（采集帧上行 + SSE 下行驱动字幕/回合）随 I4 交付；真云端 provider（如 qwen3-asr-flash-realtime）
-  仍是后续阶段。
+  通道（会话注册表 + SSE 下行 + `RealtimeProvider` 接缝 + 假 provider）+ client 侧 cloud 引擎
+  （采集帧上行 + SSE 下行驱动字幕/回合）均已实现；**真云端 provider 也已实现**
+  （`src/realtime-dashscope.ts`，阿里云百炼 qwen3-asr-flash-realtime），把 `realtime.provider`
+  选到 `dashscope-realtime` 即走真云端，凭据复用 `DASHSCOPE_API_KEY`（需 Node 22+）。
   *Voice quality depends on installed system voices; set `realtime.tts = off` for captions only.
   The host realtime channel (session registry + SSE downlink + `RealtimeProvider` seam + fake
-  provider) shipped in I3, and the browser half now consumes it via `engine=cloud` (I4); a real
-  cloud provider is still a later stage.*
+  provider) and the browser half's `engine=cloud` consumer are both implemented, and so is the
+  real cloud provider (`src/realtime-dashscope.ts`, Alibaba Bailian qwen3-asr-flash-realtime):
+  point `realtime.provider` at `dashscope-realtime` to use it (credential `DASHSCOPE_API_KEY`,
+  Node 22+).*
 - API key 存于 DSH 凭据服务（落盘位置与格式由 host 的凭据策略决定），仅本机回环可访问代理路由
-  （信任围栏防 CSRF）。
+  （信任围栏防 CSRF：同源判定含端口，本机其它端口上的页面借不了道）。
   *Keys live in the DSH credential store (where and how they are persisted is the host's policy);
-  proxy routes are loopback-only (trusted-origin fence against CSRF).*
+  proxy routes are loopback-only (trusted-origin fence against CSRF; the same-origin check
+  includes the port, so pages on other local ports cannot borrow it).*
 - **升级自 v0.1/v0.2 的注意**：旧版本的 `apiKey` 是写在 settings 里的明文字段，且曾随
   `settings.describe` 过线到浏览器。本版本首次加载会自动把这些明文迁进凭据并抹掉 settings 里的值；
   若你想立刻处理，可自己删 `~/.dsh/settings.yaml` 中的 `apiKey` 字段。**迁移前已经过线的那把 key
@@ -315,9 +339,15 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 
 ## 开发 Development
 
-- 构建：`bash scripts/build.sh`（自动选用 Node ≥18；依赖树经 junction 链接到已装兄弟插件
-  或 `DSH_CHECKOUT`，**仅为构建期**便利，与运行时无关）
-- 类型检查：`node_modules/.bin/tsc -p tsconfig.host.json --noEmit && node_modules/.bin/tsc -p tsconfig.client.json --noEmit`
+- 构建：`bash scripts/build.sh`（自动选用 Node ≥22；依赖树经 junction 链接到已装兄弟插件
+  或 `DSH_CHECKOUT`，**仅为构建期**便利，与运行时无关）。脚本会先 type-check client 半区
+  （`tsc -p tsconfig.client.json --noEmit`）再跑 tsdown——tsdown 不做类型检查，漏掉这一步
+  就会把带类型错误的 `lib/client.js` 提交出去；`npm run build` 同款。
+- 类型检查：`npm run typecheck`（host + client 两个半区；`npm test` 前会自动先编译 host，
+  避免测试跑在过期的 `lib/` 上）
+- `lib/` 入库且是发布内容：改了 `src/` 必须重跑构建并把 `lib/` 一起提交；发布工作流
+  （`.github/workflows/publish.yml`）会在 `npm publish` 前重跑构建并用 `git diff --exit-code -- lib`
+  校验产物与源码一致，不一致即中止发布。
 - 契约：本仓库 AGENTS.md 指向伞仓库 `dsh-plugins/AGENTS.md`（单一来源）
 
 ## License

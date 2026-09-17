@@ -30,10 +30,11 @@ export type LocaleKey =
   'realtimeFirstSentenceLabel' | 'realtimeFirstSentenceDesc' | 'realtimeWatchdogLabel' | 'realtimeWatchdogDesc' | 'chatTitle' | 'chatListeningTitle' |
   'chatThinkingTitle' | 'chatSpeakingTitle' | 'chatWebSpeechFallback' | 'chatThinkingHint' | 'chatSpeakingHint' | 'chatInterrupt' |
   'chatEndedLimit' | 'chatNoReply' | 'chatNoTts' | 'chatGap' | 'errSegmentedNeedsCloud' | 'errSegmentedUnsupported' |
-  'errSegmentedUnreachable' | 'errRealtimeProvider' | 'dismiss' | 'loadFailed' | 'micTitle' | 'micTitleHoldChat' | 'recordingTitle' | 'transcribingTitle' |
+  'errSegmentedUnreachable' | 'errRealtimeProvider' | 'dismiss' | 'loadFailed' | 'copyFailed' | 'insecureBaseUrl' |
+  'micTitle' | 'micTitleHoldChat' | 'recordingTitle' | 'transcribingTitle' |
   'optimizingTitle' | 'errNoMic' | 'errRecorderStart' | 'errNoSound' | 'errNoSpeechSupport' | 'errWebSpeechNetwork' | 'errCloudNotConfigured' |
   'noSpeechDetected' | 'fallbackToCloud' | 'errTranscribe' | 'errOptimize' | 'previewTitle' | 'previewOriginal' |
-  'previewOptimized' | 'previewConfirm' | 'previewCancel' | 'groupStats' | 'statsTitle' | 'statsCount' |
+  'previewOptimized' | 'previewConfirm' | 'previewConfirmDraft' | 'previewConfirmSend' | 'previewCancel' | 'groupStats' | 'statsTitle' | 'statsCount' |
   'statsChars' | 'statsLastAt' | 'statsEmpty'
 export type LocaleDict = Record<LocaleKey, string>
 
@@ -223,6 +224,8 @@ export const zh: LocaleDict = {
 
   dismiss: '关闭',
   loadFailed: '加载失败',
+  copyFailed: '复制到剪贴板失败',
+  insecureBaseUrl: '明文 HTTP 端点：API key 将以明文传输，建议改用 https',
   micTitle: '语音输入',
   micTitleHoldChat: '语音输入（长按开始语音对话）',
   recordingTitle: '录音中…点击结束',
@@ -242,6 +245,10 @@ export const zh: LocaleDict = {
   previewOriginal: '原始转写',
   previewOptimized: '优化后',
   previewConfirm: '填入并发送',
+  // 预览卡按钮文案按 behavior.autoSend 二选一：autoSend 默认 false，
+  // 此时只把文本填进草稿，原来的「填入并发送」与真实行为不符。
+  previewConfirmDraft: '填入草稿',
+  previewConfirmSend: '填入并发送',
   previewCancel: '取消',
   groupStats: '用量统计',
   statsTitle: 'ASR 用量',
@@ -428,6 +435,8 @@ export const en: LocaleDict = {
 
   dismiss: 'Dismiss',
   loadFailed: 'Load failed',
+  copyFailed: 'Copy to clipboard failed',
+  insecureBaseUrl: 'Plain-HTTP endpoint: your API key will be sent unencrypted — use https instead',
   micTitle: 'Voice input',
   micTitleHoldChat: 'Voice input (hold to start voice chat)',
   recordingTitle: 'Recording… click to stop',
@@ -447,6 +456,9 @@ export const en: LocaleDict = {
   previewOriginal: 'Raw transcript',
   previewOptimized: 'Optimized',
   previewConfirm: 'Fill & send',
+  // Mirrors the zh keys: pick by behavior.autoSend (default false → draft only).
+  previewConfirmDraft: 'Insert into draft',
+  previewConfirmSend: 'Insert and send',
   previewCancel: 'Cancel',
   groupStats: 'Usage stats',
   statsTitle: 'ASR usage',

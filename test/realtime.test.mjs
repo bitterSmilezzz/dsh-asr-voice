@@ -168,6 +168,9 @@ test('半双工门控：pause 后不收音、不交出回合，resume 从干净�
 
     session.resume()
     assert.equal(session.listening, true)
+    // resume 与 onend 同款冷却（紧接着 abort 调 start() 会撞 InvalidStateError）：
+    // 新识别器要等 RESTART_DELAY_MS 才装好，这里等它出现再断言。
+    await until('resume 装上新的识别器', () => instances.length >= 2)
     assert.equal(instances.length, 2, 'resume 装一个新识别器，避免旧实例残留错误态')
     instances[1].emit([{ text: '下一句', final: true }])
     await until('第二句交出', () => events.turns.length >= 2)
@@ -289,6 +292,7 @@ test('整句交出后 pause/resume，再说同一句必须再算一次（去重�
     // 真实链路里 commitTurn 在 onTurn 内立刻 pause（半双工门控），念完才 resume。
     session.pause()
     session.resume()
+    await until('resume 装上新的识别器', () => instances.length >= 2)
     assert.equal(instances.length, 2, 'resume 必须换新识别器（旧实例的错误态会残留）')
     instances[1].emit([{ text: '再来一次', final: true }])
     await until('第二次交出', () => events.turns.length >= 2)

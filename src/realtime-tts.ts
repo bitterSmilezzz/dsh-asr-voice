@@ -39,6 +39,10 @@ export interface TtsResult {
 const MAX_TEXT_CHARS = 500
 /** 合成等待上限（毫秒）：一句语音正常远低于此。 */
 const TTS_TIMEOUT_MS = 20_000
+/** 合成 PCM 累计上限（字节）：8MB ≈ 16k 单声道 4 分钟语音，远超「一整句」的正常量级。
+ *  此前只受 20s 墙钟约束——上游（或用户自填的 wssUrl）狂发 delta 时，20 秒足够堆出
+ *  几百 MB，宿主直接 OOM。 */
+const MAX_PCM_BYTES = 8 * 1024 * 1024
 
 /** 建一条 DashScope TTS 连接并合成一整句。 */
 export async function synthesize(
@@ -55,6 +59,7 @@ export async function synthesize(
 
   return await new Promise<TtsResult>((resolve, reject) => {
     const chunks: Buffer[] = []
+    let pcmBytes = 0
     let settled = false
     let sessionReady = false
     let textSent = false
@@ -100,7 +105,16 @@ export async function synthesize(
           sessionReady = true
           break
         case 'response.audio.delta':
-          if (evt.delta !== undefined && evt.delta !== '') chunks.push(Buffer.from(evt.delta, 'base64'))
+          if (evt.delta !== undefined && evt.delta !== '') {
+            const delta = Buffer.from(evt.delta, 'base64')
+            pcmBytes += delta.length
+            // 累计超限即收口失败：一句正常语音远达不到 8MB，到这里就是上游异常。
+            if (pcmBytes > MAX_PCM_BYTES) {
+              fail('response-too-large')
+              break
+            }
+            chunks.push(delta)
+          }
           break
         case 'response.audio.done':
           audioDone = true
@@ -157,11 +171,16 @@ export function registerTtsRoute(
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       const denied = guardRoute(req);
       if (denied !== null) return sendJson(res, denied.status, denied.payload)
-      let body: TtsRequest
+      let body: TtsRequest | null
       try {
-        body = (await readJsonBody(req)) as TtsRequest
+        body = (await readJsonBody(req)) as TtsRequest | null
       } catch {
         return sendJson(res, 400, { ok: false, reason: 'invalid JSON body' })
+      }
+      // JSON 字面量 null / 非对象：`body.text` 会在 null 上抛 TypeError 逃出 handler
+      // （webserver 兜底成空体 400，客户端拿不到原因）——显式归 400。
+      if (typeof body !== 'object' || body === null) {
+        return sendJson(res, 400, { ok: false, reason: 'invalid JSON body: expected an object' })
       }
       const text = (body.text ?? '').trim()
       if (text === '') return sendJson(res, 400, { ok: false, reason: 'empty text' })
