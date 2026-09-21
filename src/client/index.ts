@@ -1,5 +1,5 @@
 /** dsh-asr-voice — client 半区入口（单 fiber）。
- * 组合：设置卡片（settings.plugin.item）、录音按钮（conversation.input.right）、
+ * 组合：设置卡片（plugins.bundle.config）、录音按钮（conversation.input.right）、
  * 快捷键（可选按住说话）。配置由 host settings 服务持有（config.ts）。
  * 独立性契约：入口 id / locale namespace / CSS data 标签 / 路由全部唯一，
  * 只依赖官方 @deepseek-ai/* 服务，不 import 任何第三方插件。
@@ -9,8 +9,8 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the settings slot merges (settings.general.item / settings.plugins.tab).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-// Type-only: pulls the ui-settings-plugins SlotMap merge (the settings.plugin.item card seat).
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+// Type-only: pulls the plugin-manager SlotMap merge (the plugins.bundle.config seat).
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import * as jsxRuntime from 'react/jsx-runtime'
@@ -20,7 +20,7 @@ import {
   adaptLegacyCredentials, bindConfigScope, bindCredentialsApi, config, subscribeConfig,
   type CredentialsApiLike, type LegacyCredentialsApiLike,
 } from './config.ts'
-import { VoiceSettingsCard } from './settings-card.tsx'
+import { VoiceSettingsCard, type VoiceCardView } from './settings-card.tsx'
 import { VoiceButton, voiceController } from './voice-button.tsx'
 import { voiceChatController } from './voice-chat.tsx'
 import { matchHotkey, normalizeKey, parseHotkey, type HotkeySpec } from './hotkey.ts'
@@ -28,6 +28,14 @@ import { matchHotkey, normalizeKey, parseHotkey, type HotkeySpec } from './hotke
 export { zh, en }
 
 const NS = 'asr-voice'
+
+/** 包名（`plugins.bundle.config` 的 key：bundle 的 package name）。 */
+const PACKAGE_NAME = '@bittersmilezzz/dsh-asr-voice'
+
+/** 卡片 occupant 的 owner props（view 由插件详情页传入）。 */
+interface VoiceCardOwnerProps {
+  view?: VoiceCardView | undefined
+}
 
 /** 硬依赖：设置卡/配置读写必须的顶层服务（与兄弟插件同款：settingsScope 必须硬依赖，
  * 否则卡片包在 scoped inject 里会因某服务不可注入而永不注册——这正是此前设置卡消失的根因）。 */
@@ -183,16 +191,16 @@ export function apply(ctx: ClientContext): void {
   // 快捷键（默认 Ctrl+Shift+Space；可选按住说话）。
   ctx.effect(applyHotkey, 'asr-voice: hotkey')
 
-  // 设置卡片（settings.plugin.item, key: asr-voice）+ 配置绑定。
+  // 设置卡片（plugins.bundle.config, key: 包名）+ 配置绑定。
   // settingsScope 已是顶层硬依赖，卡片直接在 apply 顶层注册（与兄弟插件同款）——
   // 绝不能把卡片包进 ctx.inject([...])：任一服务不可注入则回调永不执行、卡片永不出现
   // （此前把凭据服务的 connection 放进 scoped inject，设置卡就消失过）。
   ctx.effect(() => bindConfigScope(ctx.settingsScope), 'asr-voice: settings scope sync')
-  ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-    name: 'settings.plugin.item',
-    key: 'asr-voice',
+  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+    name: 'plugins.bundle.config',
+    key: PACKAGE_NAME,
     locale: NS,
-  }, () => jsxRuntime.jsx(VoiceSettingsCard, { t })))
+  }, (props: VoiceCardOwnerProps | undefined) => jsxRuntime.jsx(VoiceSettingsCard, { t, view: props?.view })))
 
   // 凭据绑定（可选服务，单独 scoped inject）：alpha.3 起凭据域在 `remote.credentials`，
   // 旧运行时经 `connection.api.credentials` 回退，由适配器归一化。这个回调只负责绑定

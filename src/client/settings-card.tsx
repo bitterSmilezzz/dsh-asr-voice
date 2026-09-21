@@ -17,9 +17,13 @@ import {
 import type { LocaleKey, LocaleT } from './locales.ts'
 import { bareKeyAllowed, normalizeKey } from './hotkey.ts'
 
-/** 设置卡片 props（settings.plugin.item 注入 + 翻译函数）。 */
+/** 卡片视图选择（插件详情页传入；兜底路径不传）。 */
+export type VoiceCardView = 'summary' | 'page'
+
+/** 设置卡片 props（插件详情页注入的 view + 翻译函数）。 */
 export interface SettingsCardProps {
   t: LocaleT
+  view?: VoiceCardView | undefined
 }
 
 /** 卡片内的一条提示（idle / 进行中 / 成功 / 失败，统一渲染在动作行下方）。 */
@@ -466,8 +470,8 @@ const SECTION_TITLE: Record<ConfigSection, LocaleKey> = {
   asr: 'groupAsr', optimize: 'groupOptimize', language: 'languageLabel', behavior: 'groupBehavior', realtime: 'groupRealtime',
 }
 
-/** 设置卡片：外层折叠与其他插件卡一致（header + chevron + 条件 body）。 */
-export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement {
+/** 设置卡片：插件详情页按 view 渲染（summary 一行 / page 表单），兜底路径自绘折叠外壳。 */
+export function VoiceSettingsCard({ t, view }: SettingsCardProps): react.ReactElement {
   const version = useConfigVersion()
   const [open, setOpen] = react.useState(false)
   const [showAdvanced, setShowAdvanced] = react.useState(false)
@@ -600,19 +604,26 @@ export function VoiceSettingsCard({ t }: SettingsCardProps): react.ReactElement 
   const needKey = keyState !== null && !keyState.configured && keyState.failure === null
   const keyNameMissing = presetById(provider.preset) === undefined && provider.name.trim() === ''
 
+  // 插件详情页（view === 'page'）：官方页面已画标题/外壳，跳过折叠头、body 常开；
+  // 卡片容器与 body 分隔线由 dshav-card-page / dshav-body-page 透明化。
+  const pageView = view === 'page'
+  if (view === 'summary') return <>{t('cardCopy')}</>
+
   return (
-    <li className={'dshav-card' + (open ? ' dshav-card-open' : '')}>
-      <button type="button" className="dshav-header" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="dshav-headtext">
-          <span className="dshav-name">{t('cardTitle')}</span>
-          <span className="dshav-desc">{t('cardCopy')}</span>
-        </span>
-        <svg className={'dshav-chevron' + (open ? ' dshav-open' : '')} width={16} height={16} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M3.5 5.75 8 10.25l4.5-4.5" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      {open ? (
-        <div className="dshav-body">
+    <li className={'dshav-card' + (open || pageView ? ' dshav-card-open' : '') + (pageView ? ' dshav-card-page' : '')}>
+      {pageView ? null : (
+        <button type="button" className="dshav-header" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <span className="dshav-headtext">
+            <span className="dshav-name">{t('cardTitle')}</span>
+            <span className="dshav-desc">{t('cardCopy')}</span>
+          </span>
+          <svg className={'dshav-chevron' + (open ? ' dshav-open' : '')} width={16} height={16} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3.5 5.75 8 10.25l4.5-4.5" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+      {open || pageView ? (
+        <div className={'dshav-body' + (pageView ? ' dshav-body-page' : '')}>
           {!writable ? <p className="dshav-field-hint" role="alert">{t('readOnlyDoc')}</p> : null}
           {cloudMode && provider.baseUrl.trim() === '' ? (
             <p className="dshav-field-hint">{t('howTo')}</p>

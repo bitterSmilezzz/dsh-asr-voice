@@ -379,6 +379,9 @@ export const CSS = `
 }
 .dshav-card:hover { border-color: var(--dsw-alias-label-dimmed); }
 .dshav-card.dshav-card-open { background: var(--dsw-alias-bg-layer-2); border-color: var(--dsw-alias-label-dimmed);}
+/* 插件详情页（view: 'page'）：官方页面已画标题/外壳，卡片容器透明化、body 无分隔线。 */
+.dshav-card.dshav-card-page { border: 0; background: none; }
+.dshav-card.dshav-card-page:hover { border-color: transparent; }
 .dshav-header {
   width: 100%;
   appearance: none;
@@ -407,6 +410,7 @@ export const CSS = `
 .dshav-chevron { flex: none; color: var(--dsw-alias-label-tertiary); transition: transform .16s;}
 .dshav-chevron.dshav-open { transform: rotate(180deg); }
 .dshav-body { border-top: 1px solid var(--dsw-alias-border-l2); margin: 0 16px; padding-bottom: 8px;}
+.dshav-body.dshav-body-page { border-top: 0; margin: 0; padding-top: 0; }
 .dshav-group { display: flex; flex-direction: column; }
 /* 分组之间用与字段一致的分割线（官方 border-l2）。 */
 .dshav-group + .dshav-group { border-top: 1px solid var(--dsw-alias-border-l2); }
