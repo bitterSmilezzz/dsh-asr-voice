@@ -669,7 +669,12 @@ export function VoiceSettingsCard({ t, view }: SettingsCardProps): react.ReactEl
                         placeholder={keyState?.configured === true ? t('keyKeepPlaceholder') : t('keyPastePlaceholder')}
                         spellCheck={false}
                         autoComplete="off"
-                        disabled={!writable || keyState?.writable === false}
+                        // 查询未回（keyState === null）时一并禁用：界面上已有
+                        // 「正在查询本机凭据…」提示，此时放一个可编辑的输入框会给出
+                        // 「可以操作」的错误信号。查询**失败**（failure 分支）保持可写——
+                        // 与官方 web-search-card 口径一致：未知引用按可写处理，真正拒绝
+                        // 的是 Host 侧。
+                        disabled={!writable || keyState === null || keyState?.writable === false}
                         onChange={(e: react.ChangeEvent<HTMLInputElement>) => setKeyInput(e.target.value)}
                       />
                       <button

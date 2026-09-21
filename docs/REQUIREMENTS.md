@@ -77,7 +77,8 @@
 
 **Client（Browser，tsdown → lib/client.js）**
 - 中英词典、样式（前端设计 skill）、GSAP 动效
-- 设置卡片：`settings.plugin.item`，key `asr-voice`
+- 设置卡片：`plugins.bundle.config`，key `@bittersmilezzz/dsh-asr-voice`
+  （DSH 0.1.6-alpha.2 起旧 `settings.plugin.item` 座位已退役）
 - 录音按钮：`conversation.input.right`（session 作用域 slot，
   标准 kit 注入 `useInput`/`inputActions`，用 `setDraft`/`submit`）
 - 录音引擎：
@@ -87,6 +88,16 @@
 - 快捷键：默认 `Ctrl+Shift+Space`（跨平台无冲突），可配置
 
 ### 设置 schema（namespace `asr-voice`）
+
+> ⚠ **部分过时**：下面是 0.1 时期的形态。v0.2 起云端 ASR 支持**多供应商**
+> （`asr.cloud.providers` 数组，读取时对旧单配置字段做兼容迁移），v0.3 起新增
+> `realtime` 段（实时语音对话：segmented 声学切段 / cloud 16k PCM 实时通道 /
+> browser 三引擎 + TTS 播报）。**API key 已不在 settings schema 里**：原为
+> `role: 'secret'` 字段，从不过 `settings.describe` 下发浏览器，改由 host 经
+> 官方 credentials 服务派生引用名持有（`keyRefFor`；预置供应商与官方 LLM
+> provider 同名时直接复用已配的 key）。**权威形状以 `src/settings.ts` 为准**
+> （`test/defaults-parity.test.mjs` 逐路径钉住 host schema ↔ client DEFAULTS）。
+
 ```yaml
 asr:
   provider: browser | cloud        # 默认 browser
@@ -126,7 +137,7 @@ behavior:
   （`asr-voice`）、host 路由唯一（`/api/asr-voice/*`）、client locale namespace 唯一、
   CSS 用插件专属 data 标签（`dsh-asr-voice`）。不写任何插件共享的 localStorage 键。
 - **slot 不抢占**：只用 `conversation.input.right`（list 槽，并排放置）与
-  `settings.plugin.item`（按 key 独立卡片），不 shadow 官方 `single` 槽、
+  `plugins.bundle.config`（按包名 key 独立卡片），不 shadow 官方 `single` 槽、
   不禁用任何官方 entry。
 - **组合可用**：与 ui-tweaks 等同时安装时各挂各的槽位/卡片/路由，互不干扰。
 - **构建隔离**：build.sh 可能用兄弟插件 node_modules 作**构建期**依赖解析兜底

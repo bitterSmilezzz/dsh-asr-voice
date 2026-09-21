@@ -268,6 +268,62 @@ test('/transcribe：在途上限 4 → 第 5 个请求 503，前 4 个照常完�
 
 // ── 5. 非法请求体形状 → 400（不是 502「上游故障」）────────────────────────────
 
+test('/tts：在途上限 4 → 第 5 个请求 503（与 transcribe/optimize 同构）', async () => {
+  // TTS 每条请求都会开一条云端付费 WebSocket 并堆一份 PCM，无上限时异常页面循环
+  // POST 会让宿主同时持有 N 条 WS + N 份音频缓冲。这里 stub WebSocket 让前 4 条
+  // 挂在「等上游响应」上，验证第 5 条被立刻拒绝且不打到上游。
+  const created = []
+  const RealWs = globalThis.WebSocket
+  class FakeWs {
+    static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3
+    readyState = FakeWs.CONNECTING
+    onopen = null
+    onmessage = null
+    onerror = null
+    onclose = null
+    constructor(url) { this.url = url; created.push(this) }
+    send() {}
+    close() { this.readyState = FakeWs.CLOSED }
+    /** 测试钩子：模拟上游回一段音频并关闭。 */
+    emitDone(bytes) {
+      this.onmessage?.({ data: Buffer.from(JSON.stringify({
+        type: 'response.audio.delta', delta: bytes.toString('base64'),
+      })) })
+      this.onmessage?.({ data: Buffer.from(JSON.stringify({ type: 'response.audio.done' })) })
+      this.onclose?.()
+    }
+  }
+  globalThis.WebSocket = FakeWs
+  try {
+    const { routes, register } = makeRegister()
+    registerTtsRoute(register, () => undefined, ctxWithKey())
+    const handler = routes.get('exact:/api/asr-voice/tts')
+    const body = JSON.stringify({ text: '你好' })
+    const running = []
+    for (let i = 0; i < 4; i++) {
+      running.push(handler(makeReq('/api/asr-voice/tts', Buffer.from(body), { ...TRUSTED, 'content-type': 'application/json' }), makeRes()))
+    }
+    for (let i = 0; i < 200 && created.length < 4; i++) await sleep(5)
+    assert.equal(created.length, 4, '前 4 条应各建一条 WS')
+
+    const fifth = makeRes()
+    await handler(makeReq('/api/asr-voice/tts', Buffer.from(body), { ...TRUSTED, 'content-type': 'application/json' }), fifth)
+    assert.equal(fifth.status, 503, '超限必须立刻拒绝')
+    assert.equal(JSON.parse(fifth.body).reason, 'too many concurrent requests')
+    assert.equal(created.length, 4, '被拒的请求不得新建 WebSocket')
+
+    // 放行前 4 条：在途计数回落（finally 递减），路由不锁死。
+    for (const ws of created) ws.emitDone(Buffer.alloc(1024))
+    await Promise.all(running)
+    const after = makeRes()
+    handler(makeReq('/api/asr-voice/tts', Buffer.from(body), { ...TRUSTED, 'content-type': 'application/json' }), after)
+    for (let i = 0; i < 200 && created.length < 5; i++) await sleep(5)
+    assert.equal(created.length, 5, '计数必须在 finally 里递减')
+  } finally {
+    globalThis.WebSocket = RealWs
+  }
+})
+
 /** 优化路由的 ctx 替身：当前所选模型 + 可编排的 LLM 流。 */
 function ctxWithLlm(chunks) {
   return {

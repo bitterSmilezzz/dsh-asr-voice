@@ -6,6 +6,36 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
+## [未发布]
+
+### 变更
+
+- 适配 DSH 0.1.6-alpha.2：设置卡片从已退役的 `settings.plugin.item` 迁到官方
+  `plugins.bundle.config`（key = package name），新增 `view: 'summary' | 'page'` 分支。
+
+### 修复
+
+- **TTS 路由补在途上限（4）**：与兄弟路由 transcribe/optimize 同构。此前唯一一条
+  「无上限 + 高单价 + 高内存」的路由——每条请求开一条云端付费 WebSocket 并堆一份
+  PCM，异常页面循环 POST 会让宿主同时持有 N 条 WS + N 份音频缓冲。
+- **PCM 上限 8MB → 4MB**：响应路径还要再放大一层（PCM Buffer → base64 字符串 →
+  JSON.stringify → byteLength Buffer，sendJson 同时持有约 4 份），8MB PCM 的
+  瞬时峰值接近 40MB/请求，与在途上限相乘是宿主内存的主要风险面。4MB PCM ≈
+  16k 单声道 130 秒，仍远超「一整句」的正常量级。
+- **`realtimeTuning()` 的 bargeIn 归一**：与设置卡片判据同源（仅 segmented 引擎
+  生效）。此前用户曾在 segmented 下开启插话后切到 cloud，`realtime.bargeIn` 仍为
+  true 被原样搬运，代码路径会认为自己有插话能力（实际 `armBargeIn` 未实现，
+  靠可选调用静默跳过）。
+- **凭据查询期间禁用 KEY 输入框**：`keyState === null`（查询未回）时界面已显示
+  「正在查询本机凭据…」，此前输入框仍可编辑，给出「可以操作」的错误信号。
+  查询**失败**态保持可写（与官方 web-search-card 口径一致：未知引用按可写处理）。
+
+### 文档
+
+- `docs/REQUIREMENTS.md` 修正三处失真：设置卡片座位改 `plugins.bundle.config`、
+  API key 已不在 settings schema（改由 host credentials 派生引用名持有）、
+  补多供应商 / realtime 段说明，并加「部分过时、以 src/settings.ts 为准」声明。
+
 ## [0.3.3] - 2026-09-17
 
 多视角深度优化轮：正确性、安全边界、可访问性、发布护栏四线并行，测试 248 → **318** 项全绿。

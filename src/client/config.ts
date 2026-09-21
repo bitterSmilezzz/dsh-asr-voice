@@ -388,7 +388,14 @@ export interface RealtimeTuning {
 export function realtimeTuning(source: AsrVoiceConfig = config): RealtimeTuning {
   const { enabled, engine, tts, ttsVoice, hotkey, bargeIn, turn, vad, maxSessionMs, speech } = source.realtime
   return {
-    enabled, engine, tts, ttsVoice, hotkey, bargeIn, maxSessionMs, language: source.language,
+    enabled, engine, tts, ttsVoice, hotkey,
+    // bargeIn（语音插话）只有 segmented 引擎实现了 armBargeIn；cloud/browser 走可选调用
+    // 静默跳过。设置卡片的开关已用 `engine === 'segmented'` 收窄（禁用 + checked 条件），
+    // 但用户曾在该引擎下打开过开关后切走，`realtime.bargeIn` 仍为 true——若原样搬运，
+    // 代码路径会认为自己该有插话能力（实际没有）。这里与 UI 判据同源归一，
+    // 与下方 `rmsAuto: vad.rmsAuto ?? true` 的老快照兜底同一思路。
+    bargeIn: engine === 'segmented' && bargeIn,
+    maxSessionMs, language: source.language,
     settleMs: turn.settleMs, tailMs: turn.tailMs,
     firstSentenceMinChars: speech.firstSentenceMinChars,
     utteranceWatchdogMs: speech.utteranceWatchdogMs,
