@@ -105,6 +105,11 @@ function openEvents(sid: string, onEvent: (ev: CloudProviderEvent) => void): () 
         headers: { accept: 'text/event-stream' },
         signal: controller.signal,
       })
+      // 409 = 该 sid 已有权威下行（本页面误触/网络重试挂了第二条 SSE）。
+      // 这是**正常**状态而不是故障：另有连接在收事件，本连接静默关闭即可，
+      // 绝不能走 events-unavailable → failNow 把会话判死（曾经的 bug：
+      // host 在写 SSE 头之后才拒绝，客户端收到 200 + 空 body，无从区分）。
+      if (res.status === 409) return
       if (!res.ok || res.body === null) {
         if (!disposed) onEvent({ type: 'error', code: 'events-unavailable' })
         return

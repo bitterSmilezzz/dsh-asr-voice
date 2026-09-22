@@ -8,6 +8,26 @@
 
 ## [未发布]
 
+### 修复
+
+- **SSE 重复消费者返回明确 409**（此前是 200 + 空 body）：host 曾在写完 SSE 头
+  之后才调 `attachSse`，失败只 `res.end()`——第二个消费者拿到「200 +
+  text/event-stream + 空 body」，客户端 `!res.ok || res.body === null` 判不出来，
+  而 `events-unavailable` 会让它 failNow **结束整个会话**：本页面误触/网络重试
+  挂两条 SSE，就把唯一权威下行那条的引擎一起判死。现在写头前预检，重复消费者拿
+  409（客户端对 409 静默跳过），仅「会话刚被拆」仍走 404。
+- **预览卡焦点陷阱**：`role="dialog" + aria-modal="true"` 已向辅助技术承诺模态，
+  实现上却没拦 Tab（SR 用户被告知在模态里，Tab 却能走到背后的整个 composer）。
+- **麦克风按钮的 `aria-keyshortcuts` 补录音热键**：此前只在启用对话时声明对话
+  热键，未启用对话时按钮对读屏用户「没有键盘等价入口」。
+
+### 工程
+
+- `presets.ts` 的 builtin 预置 `keyPreset` 从 `'openai'` 改为 `''`（该字段在
+  builtin 路径永不被读，填具体预置名会让人误以为要配 OpenAI key）。
+- `cancelTurn` 去掉对 `.catch` 的冗余 `?.`（`cancel()` 返回类型就是 Promise）。
+
+
 ### 变更
 
 - 适配 DSH 0.1.6-alpha.2：设置卡片从已退役的 `settings.plugin.item` 迁到官方

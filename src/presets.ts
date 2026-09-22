@@ -88,7 +88,10 @@ export interface RealtimePreset {
   wssUrl: string
   /** 默认实时模型（可改）。 */
   defaultModel: string
-  /** 凭据复用哪个 CLOUD_PRESETS 预置（keyRefFor 派生引用名）。 */
+  /** 凭据复用哪个 CLOUD_PRESETS 预置（keyRefFor 派生引用名）。
+   *  `''` = 不连云端、不需要 key（仅 builtin 预置）：createRealtimeProvider 对
+   *  `''` / `'builtin'` 早退到假 provider，这个字段根本不会被读。写成具体预置名
+   *  （曾误填 'openai'）会让读代码的人以为 builtin 也要配 OpenAI key。 */
   keyPreset: string
   /** 简介（设置页提示）。 */
   hint: string
@@ -101,7 +104,8 @@ export const REALTIME_PRESETS: readonly RealtimePreset[] = [
     label: '内置模拟（开发）',
     wssUrl: '',
     defaultModel: '',
-    keyPreset: 'openai',
+    // 不连云端 → 无 keyPreset（与 wssUrl/defaultModel 的「不可用」标记一致）。
+    keyPreset: '',
     hint: 'I3/I4 开发态：host 用能量 VAD 假 provider 驱动整条管道，不花配额',
   },
   {

@@ -591,9 +591,16 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
       ? state === 'recording' ? t('recordingTitle') : state === 'transcribing' ? t('transcribingTitle') : t('optimizingTitle')
       : chat.enabled ? t('micTitleHoldChat') : t('micTitle')
   // 长按（语音对话）没有键盘等价手势，但对话热键是等价入口——把它声明给辅助技术。
+  // 长按（语音对话）没有键盘等价手势，但对话热键是等价入口——把它声明给辅助技术。
+  // 没有对话热键（未启用对话 / 键位清空）时退回声明**录音**热键：SR 用户至少
+  // 要知道这个按钮有一个键盘等价入口，而不是「只能点」。
+  // aria-keyshortcuts 的值用 ARIA 规范的键名（Ctrl→Control、Cmd→Meta）；
+  // `+` 分隔的组合键顺序不敏感，读取方会自行归一。
+  const ariaKeyName = (spec: string): string =>
+    spec.replace(/\bCtrl\b/gi, 'Control').replace(/\bCmd\b/gi, 'Meta').replace(/\bAlt\b/gi, 'Alt')
   const shortcut = chat.enabled && config.realtime.hotkey !== ''
-    ? config.realtime.hotkey.replace(/\bCtrl\b/gi, 'Control').replace(/\bCmd\b/gi, 'Meta')
-    : undefined
+    ? ariaKeyName(config.realtime.hotkey)
+    : (config.behavior.hotkey !== '' ? ariaKeyName(config.behavior.hotkey) : undefined)
   // 两条链路共用一条提示位（同一个 wrap，绝对定位会重叠）。优先级：
   // 对话进行中的字幕 > 录音的错误/提示 > 录音进行中的状态 > 对话留下的提示。
   // 录音在途的状态排在对话「留下的」提示之前——前者是正在发生的事。
@@ -678,7 +685,24 @@ export function VoiceButton(props: VoiceButtonProps): react.ReactElement {
           aria-modal="true"
           aria-label={t('previewTitle')}
           aria-describedby={previewDescId}
-          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); closePreview() } }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { e.stopPropagation(); closePreview(); return }
+            // 焦点陷阱：`role="dialog" + aria-modal="true"` 已经向辅助技术承诺了
+            // 「模态」，实现上就得拦住 Tab——否则 SR 用户被告知在模态里，Tab 却
+            // 能走到背后的整个 composer，模态承诺落空。卡片只有两个按钮，
+            // 用最朴素的循环（不用 focusin 委托，也不引第三方 trap）。
+            if (e.key !== 'Tab') return
+            const focusables = e.currentTarget.querySelectorAll<HTMLElement>('button')
+            if (focusables.length === 0) return
+            const first = focusables[0]!
+            const last = focusables[focusables.length - 1]!
+            const active = document.activeElement
+            if (e.shiftKey && (active === first || !e.currentTarget.contains(active))) {
+              e.preventDefault(); last.focus()
+            } else if (!e.shiftKey && (active === last || !e.currentTarget.contains(active))) {
+              e.preventDefault(); first.focus()
+            }
+          }}
         >
           <div className="dshav-preview-title">
             <MicIcon />

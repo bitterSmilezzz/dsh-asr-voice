@@ -409,6 +409,13 @@ export class RealtimeHost {
     return this.sessions.has(sid)
   }
 
+  /** 该会话是否已有下行 SSE 消费者（单消费者设计的判据）。
+   *  与 attachSse 的失败条件同源，但**不产生副作用**——供 /events 路由在写
+   *  SSE 头之前做 409 预检（写头后就无法再改状态码了）。 */
+  hasSseConsumer(sid: string): boolean {
+    return this.sessions.get(sid)?.sse != null
+  }
+
   /** 当前存活会话数（供测试/诊断）。 */
   sessionCount(): number {
     return this.sessions.size
@@ -467,6 +474,17 @@ export class RealtimeHost {
           const sid = sidOf(req);
           if (sid === '') return sendJson(res, 400, { ok: false, reason: 'missing sid' });
           if (!this.hasSession(sid)) return sendJson(res, 404, { ok: false, reason: 'no such session' });
+          // 已有下行消费者：**在写 SSE 头之前**就明确拒绝。
+          // 曾经这里先 writeHead(200) + flushHeaders 再 attachSse，失败只 res.end()——
+          // 第二个消费者拿到的是「200 + text/event-stream + 空 body」，客户端
+          // `!res.ok || res.body === null` 判不出来（status 是 200、body 非 null），
+          // 而 events-unavailable 会让它 failNow **结束整个会话**：本页面误触/
+          // 网络重试挂两条 SSE，就把唯一权威下行那条的引擎一起判死了。
+          // 现在重复消费者拿 409（语义 = 另有权威下行，本连接请忽略），客户端
+          // 对 409 静默跳过；仅「会话刚被拆」仍走 404 路径让客户端结束会话。
+          if (this.hasSseConsumer(sid)) {
+            return sendJson(res, 409, { ok: false, reason: 'events stream already attached' })
+          }
           // SSE：先把头写出去（背压/断连交给 SseChannel），再挂会话。
           res.writeHead(200, {
             'content-type': 'text/event-stream; charset=utf-8',
@@ -476,7 +494,8 @@ export class RealtimeHost {
           });
           res.flushHeaders();
           if (!this.attachSse(sid, res)) {
-            // 已有下行消费者（或会话刚被拆）：本连接直接收掉。
+            // 竞态兜底：写头之后会话才被拆（idle/TTL/主动 close）。此时已无法改
+            // 状态码，只能收掉本连接——客户端读到流结束按既有路径处理。
             res.end();
           }
         },

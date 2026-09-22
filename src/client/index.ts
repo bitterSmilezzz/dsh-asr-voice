@@ -180,7 +180,10 @@ export function apply(ctx: ClientContext): void {
       try {
         const scoped = sessions?.scope(sessionId)
         const conversation = scoped?.get('conversation') as { cancel?(): Promise<void> } | undefined
-        void conversation?.cancel?.()?.catch?.(() => { /* 取消失败会体现在快照里 */ })
+        // 两级 `?.` 是必要的（会话作用域可能缺席、conversation 可能没实现 cancel）；
+        // `cancel()` 的返回类型就是 Promise<void>，无需再对 `.catch` 用 `?.`——
+        // 取消失败会体现在会话快照里，这里只需保证不产生未处理 rejection。
+        void conversation?.cancel?.().catch(() => { /* 取消失败会体现在快照里 */ })
       } catch { /* 无会话作用域：打断退化成「止住播报 + 继续听」 */ }
     }
   })

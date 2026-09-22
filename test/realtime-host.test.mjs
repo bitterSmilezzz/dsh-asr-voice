@@ -618,3 +618,44 @@ test('空闲定时器重挂节流：1s 内的连续上行不再逐帧重挂', as
   assert.ok(host.hasSession(sid), '节流不得把活跃会话判成空闲')
   host.closeSession(sid)
 })
+
+test('SSE 重复消费者 → 409（不写 SSE 头），首个连接不受影响', async () => {
+  const host = makeHost()
+  const { register, routes } = makeRegistry()
+  host.registerRoutes(register)
+  let res = new FakeRes()
+  await routes.get('exact:/api/asr-voice/realtime/session')(reqOf('POST', '/api/asr-voice/realtime/session'), res)
+  const sid = JSON.parse(res.body).sid
+
+  // 首个下行：正常 200 + SSE 头。
+  const first = new FakeRes()
+  await routes.get('exact:/api/asr-voice/realtime/events')(reqOf('GET', `/api/asr-voice/realtime/events?sid=${sid}`), first)
+  assert.equal(first.status, 200)
+  assert.match(first.headers['content-type'], /text\/event-stream/)
+  assert.ok(host.hasSseConsumer(sid), '首连后应有权威下行')
+
+  // 第二个下行：必须 409，且**不能**写 SSE 头（写了就再也改不了状态码，
+  // 客户端会收到 200 + 空 body，判 events-unavailable → failNow 把会话判死）。
+  const second = new FakeRes()
+  await routes.get('exact:/api/asr-voice/realtime/events')(reqOf('GET', `/api/asr-voice/realtime/events?sid=${sid}`), second)
+  assert.equal(second.status, 409)
+  assert.equal(JSON.parse(second.body).reason, 'events stream already attached')
+  // 409 走 sendJson（json 头），绝不是 SSE 头——客户端靠 status 区分，
+  // 而不是靠 content-type。
+  assert.equal(second.headers['content-type'], 'application/json; charset=utf-8')
+  assert.ok(host.hasSession(sid), '重复消费者不得拆掉会话')
+  assert.ok(host.hasSseConsumer(sid), '权威下行仍是第一个')
+
+  host.closeSession(sid)
+})
+
+test('SSE 会话不存在 → 404（客户端据此结束会话）', async () => {
+  const host = makeHost()
+  const { register, routes } = makeRegistry()
+  host.registerRoutes(register)
+  const res = new FakeRes()
+  await routes.get('exact:/api/asr-voice/realtime/events')(reqOf('GET', '/api/asr-voice/realtime/events?sid=nope'), res)
+  assert.equal(res.status, 404)
+  assert.equal(JSON.parse(res.body).reason, 'no such session')
+  assert.equal(res.headers['content-type'], 'application/json; charset=utf-8', '404 走 sendJson，不是 SSE 头')
+})

@@ -108,6 +108,10 @@ export declare class RealtimeHost {
     closeSession(sid: string): void;
     /** 会话是否存活（供测试/诊断）。 */
     hasSession(sid: string): boolean;
+    /** 该会话是否已有下行 SSE 消费者（单消费者设计的判据）。
+     *  与 attachSse 的失败条件同源，但**不产生副作用**——供 /events 路由在写
+     *  SSE 头之前做 409 预检（写头后就无法再改状态码了）。 */
+    hasSseConsumer(sid: string): boolean;
     /** 当前存活会话数（供测试/诊断）。 */
     sessionCount(): number;
     /** 释放全部会话（插件卸载/热重载时由 fiber disposer 调用）：逐个 closeSession
