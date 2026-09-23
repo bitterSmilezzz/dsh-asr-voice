@@ -21,8 +21,22 @@ import assert from 'node:assert/strict'
 const { AsrVoiceSettingsSchema, CloudProviderSchema } = await import('../lib/settings.js')
 const { DEFAULTS } = await import('../src/client/config.ts')
 
-/** 权威默认值：schema 对空文档的解析结果。 */
-const schemaDefaults = AsrVoiceSettingsSchema({})
+/**
+ * volatile 引用解引用（官方 `plainConfig()` 的最小等价实现，见
+ * `packages/settings/settings/src/schema.ts`）：schema 顶层标 .volatile() 后，
+ * 直接调用 schema 拿到的是 `{ get() }` 引用而不是字段树，必须先剥引才能比默认值。
+ */
+const plainOf = (value) => {
+  if (value !== null && typeof value === 'object' && typeof value.get === 'function') return plainOf(value.get())
+  if (Array.isArray(value)) return value.map(plainOf)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, plainOf(child)]))
+  }
+  return value
+}
+
+/** 权威默认值：schema 对空文档的解析结果（volatile 已剥引）。 */
+const schemaDefaults = plainOf(AsrVoiceSettingsSchema({}))
 
 /**
  * 刻意差异白名单：路径 → 理由。用**显式路径**而不是「模糊忽略密钥类字段」——

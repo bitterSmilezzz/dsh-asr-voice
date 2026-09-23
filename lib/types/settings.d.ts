@@ -18,47 +18,47 @@ import z from '@deepseek-ai/schemastery';
 /** 插件配置页的 settings namespace：注册后出现在「设置 → 插件 → 配置」分派列表。 */
 export declare const ASR_VOICE_SETTINGS_NAMESPACE = "asr-voice";
 /** 单个云端 ASR 供应商配置（密钥不在此处，见文件头）。 */
-export declare const CloudProviderSchema: z<Schemastery.ObjectS<{
+export declare const CloudProviderSchema: z<Schemastery.ObjectS<NoInfer<{
     /** 供应商唯一 id（新增时由前端生成，如 crypto.randomUUID）。 */
-    id: z<string, string>;
+    id: z<string, string, "defined">;
     /** 预置 id（openai | groq | siliconflow | mimo | dashscope | custom）。 */
-    preset: z<string, string>;
+    preset: z<string, string, "defined">;
     /** 显示名；自定义供应商同时是凭据引用名的派生依据（见 src/key-ref.ts）。 */
-    name: z<string, string>;
+    name: z<string, string, "defined">;
     /** OpenAI-compatible base URL（预置自动填充，可改）。 */
-    baseUrl: z<string, string>;
+    baseUrl: z<string, string, "defined">;
     /** 遗留密钥位置：只由 src/index.ts 的一次性迁移读取并搬进 credentials，之后恒为空。 */
-    apiKey: z<string, string>;
+    apiKey: z<string, string, "defined">;
     /** ASR 模型（预置自动填充，可改；可经「获取模型」动态拉取）。 */
-    model: z<string, string>;
+    model: z<string, string, "defined">;
     /** 调用通道：auto（按模型名判定）/ transcriptions（whisper 式）/ chat（MiMo/Qwen-ASR）。 */
-    mode: z<string, string>;
-}>, Schemastery.ObjectT<{
+    mode: z<string, string, "defined">;
+}>>, Schemastery.ObjectT<NoInfer<{
     /** 供应商唯一 id（新增时由前端生成，如 crypto.randomUUID）。 */
-    id: z<string, string>;
+    id: z<string, string, "defined">;
     /** 预置 id（openai | groq | siliconflow | mimo | dashscope | custom）。 */
-    preset: z<string, string>;
+    preset: z<string, string, "defined">;
     /** 显示名；自定义供应商同时是凭据引用名的派生依据（见 src/key-ref.ts）。 */
-    name: z<string, string>;
+    name: z<string, string, "defined">;
     /** OpenAI-compatible base URL（预置自动填充，可改）。 */
-    baseUrl: z<string, string>;
+    baseUrl: z<string, string, "defined">;
     /** 遗留密钥位置：只由 src/index.ts 的一次性迁移读取并搬进 credentials，之后恒为空。 */
-    apiKey: z<string, string>;
+    apiKey: z<string, string, "defined">;
     /** ASR 模型（预置自动填充，可改；可经「获取模型」动态拉取）。 */
-    model: z<string, string>;
+    model: z<string, string, "defined">;
     /** 调用通道：auto（按模型名判定）/ transcriptions（whisper 式）/ chat（MiMo/Qwen-ASR）。 */
-    mode: z<string, string>;
-}>>;
+    mode: z<string, string, "defined">;
+}>>, "plain">;
 /** 云端 ASR 配置：多供应商列表 + active（含旧单配置兼容字段）。 */
 export declare const CloudSchema: any;
 /** LLM 提示词优化目标（DSH 已配置模型的 provider/model；空 = 用当前所选 LLM）。 */
-export declare const LlmSchema: z<Schemastery.ObjectS<{
-    provider: z<string, string>;
-    model: z<string, string>;
-}>, Schemastery.ObjectT<{
-    provider: z<string, string>;
-    model: z<string, string>;
-}>>;
+export declare const LlmSchema: z<Schemastery.ObjectS<NoInfer<{
+    provider: z<string, string, "defined">;
+    model: z<string, string, "defined">;
+}>>, Schemastery.ObjectT<NoInfer<{
+    provider: z<string, string, "defined">;
+    model: z<string, string, "defined">;
+}>>, "plain">;
 /** 插件设置 schema（与 client 的 AsrVoiceConfig 结构一致）。 */
 export declare const AsrVoiceSettingsSchema: any;
 /** 业务侧类型（手写，不依赖 schema 推断——schema 已注解为 Schemastery.Schema 以便声明可移植，TypeT 会退化为 any）。 */

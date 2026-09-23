@@ -11,9 +11,9 @@
  * settingsScope / credentials 都是「可选服务」：按当前 DSH client 规范由 apply 里的
  * scoped inject 传入（拿不到就只更新本地快照），而不是列成插件级硬依赖。
  */
-// Type-only: pulls the settings domain's Context merge (ctx.settingsScope).
+// Type-only: pulls the settings domain's Context merge (ctx.configForms).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { SettingsScope, SettingsScopeBinder } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm, ConfigForms } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { SegmentedTuning } from './realtime.ts'
 import { keyRefFor, type KeyRefSource } from '../key-ref.ts'
 import { DEFAULT_PRESET_ID, presetById } from '../presets.ts'
@@ -151,8 +151,8 @@ export function subscribeConfig(fn: () => void): () => void {
 /** settings namespace（host schema 注册与 client 绑定共用同一个名字）。 */
 export const ASR_VOICE_NS = 'asr-voice'
 
-/** host settings scope 的写路径（官方 SettingsScopeBinder.bind 的返回类型）。 */
-export type SettingsScopeLike<T> = SettingsScope<T>
+/** host Config form 的写路径（DSH 0.1.7 官方 ConfigForms.get 的返回类型）。 */
+export type SettingsScopeLike<T> = ConfigForm<T>
 
 /** credentials RPC 的单条视图（脱敏后的配置态，永不含密钥本身）。 */
 export interface CredentialStateLike {
@@ -207,7 +207,7 @@ export function adaptLegacyCredentials(legacy: LegacyCredentialsApiLike | undefi
 }
 
 /** host settings scope 的写路径（apply 时绑定；未绑定则只更新本地快照）。 */
-let voiceScope: SettingsScopeLike<AsrVoiceConfig> | undefined
+let voiceScope: ConfigForm<AsrVoiceConfig> | undefined
 let credentialsApi: CredentialsApiLike | undefined
 
 /** 广播配置变更（设置卡片/录音按钮监听，驱动重渲染）。
@@ -295,10 +295,14 @@ function jsonEqual(a: unknown, b: unknown): boolean {
   return false
 }
 
-/** 绑定 host settings scope 并订阅：首次读取当前值，之后 scope 变化回写本地快照并广播。 @param binder - settingsScope 服务的 binder（SettingsScopeBinder）。 @returns 订阅 disposer（随 fiber 清理）。 */
-/** 绑定 host settings scope 并订阅：首次读取当前值，之后 scope 变化回写本地快照并广播。 @param binder - settingsScope 服务（官方 SettingsScopeBinder，随 fiber 注入）。 @returns 订阅 disposer（随 fiber 清理）。 */
-export function bindConfigScope(binder: SettingsScopeBinder): () => void {
-  const scope = binder.bind<AsrVoiceConfig>({ namespace: ASR_VOICE_NS })
+/**
+ * 绑定 host Config form 并订阅：首次读取当前值，之后 form 变化回写本地快照并广播。
+ * @param forms - configForms 服务（DSH 0.1.7 官方 ConfigForms，随 fiber 注入）。
+ * @returns 订阅 disposer（随 fiber 清理）。
+ */
+export function bindConfigScope(forms: ConfigForms): () => void {
+  // entryId 即 namespace：host 半区 cordis.patch.yml 的 entry id（= npm 包名）。
+  const scope = forms.get<AsrVoiceConfig>(ASR_VOICE_NS)
   voiceScope = scope
   const applySnapshot = (): void => {
     const value = scope.getSnapshot().value

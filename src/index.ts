@@ -13,14 +13,14 @@
  * credentials（引用名见 src/key-ref.ts），浏览器只经私有 JSON 路由调用，拿不到 key。
  * 纯 Node HTTP + 官方 LLM 通道，无平台专属二进制 → macOS / Windows 双平台。
  */
-import type { Context } from '@deepseek-ai/cordis';
+import type { Context, Volatile } from '@deepseek-ai/cordis';
 // Type-only: pulls the @deepseek-ai/cordis Context merge (ctx.webServer).
 import type {} from '@deepseek-ai/dsh-host-webserver';
 // Type-only: pulls ctx.llm (LlmRuntime).
 import type {} from '@deepseek-ai/dsh-llm';
 // Type-only: pulls ctx.settings (SettingsProvider) merge for scoped inject.
 import type {} from '@deepseek-ai/dsh-settings';
-import { ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema, type AsrVoiceSettings } from './settings.ts';
+import { ASR_VOICE_SETTINGS_NAMESPACE, type AsrVoiceSettings } from './settings.ts';
 import { keyRefFor } from './key-ref.ts';
 import { registerTranscribeRoute, resolveApiKey, type CloudAsrConfig } from './transcribe.ts';
 import { registerOptimizeRoute, registerModelsRoute } from './optimize.ts';
@@ -35,7 +35,47 @@ import { registerTtsRoute } from './realtime-tts.ts';
 /** Host context slice this plugin consumes (webServer/llm/settings via type merges). */
 type AsrVoiceHostContext = Context;
 
+/**
+ * DSH 0.1.7 起 apply 收到的配置：schema 顶层 volatile，所以每个字段都是
+ * `Volatile<T>` 引用（官方 llm-deepseek `plainOptions()` 同款语义）。
+ */
+type AsrVoiceHostConfig = {
+  [K in keyof AsrVoiceSettings]: AsrVoiceSettings[K] extends object
+    ? { [P in keyof AsrVoiceSettings[K]]: Volatile<AsrVoiceSettings[K][P]> }
+    : Volatile<AsrVoiceSettings[K]>
+};
+
+/** 是否 volatile 引用（官方同款判据：有 get 方法）。 */
+function isVolatileRef(value: unknown): value is Volatile<unknown> {
+  return typeof value === 'object' && value !== null && typeof (value as { get?: unknown }).get === 'function'
+}
+
+/**
+ * 把 volatile 配置递归解引用成业务侧读的普通快照（每次调用现取最新值）。
+ * 嵌套对象（asr.cloud / behavior / realtime.vad…）逐层剥引，叶子是 Volatile。
+ */
+function plainOf(value: unknown): unknown {
+  if (isVolatileRef(value)) return plainOf(value.get())
+  if (Array.isArray(value)) return value.map(plainOf)
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plainOf(v)]))
+  }
+  return value
+}
+
+/** 业务侧设置快照（深层解引用后的普通对象）。 */
+function plainSettings(config: AsrVoiceHostConfig): AsrVoiceSettings {
+  return plainOf(config) as AsrVoiceSettings
+}
+
 export const name = 'dsh-asr-voice';
+
+/**
+ * DSH 0.1.7 profile-backed forms：配置 schema 必须在入口模块**顶层导出**（官方
+ * SettingsForms 读 `entry.fiber.runtime.Config`，namespace 取 `entry.options.id`）。
+ * schema 本体在 ./settings.ts，这里转置出来；volatile 标记也在那边，勿在此重复。
+ */
+export { AsrVoiceSettingsSchema as Config, ASR_VOICE_SETTINGS_NAMESPACE } from './settings.ts';
 
 /** 所需 Cordis 服务（服务名，非 entry id）。 */
 // settings / agentDefaultModel 不作为硬依赖：settings 用 scoped inject（缺失时仅云端
@@ -204,20 +244,21 @@ function createRealtimeProvider(
   }
 }
 
-export function apply(ctx: AsrVoiceHostContext): void {
-  // 插件配置 namespace：设置统一存 host settings 服务（namespace `asr-voice`）。
-  let settingsScope: { get(): AsrVoiceSettings; update(patch: object): Promise<void> } | undefined
-  ctx.inject(['settings'], (sctx) => {
-    const scope = sctx.settings.register<typeof ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettings>(ASR_VOICE_SETTINGS_NAMESPACE, AsrVoiceSettingsSchema);
-    settingsScope = scope
-    // 遗留明文 key → credentials：启动时跑一次，迁移完成后每次都是空转早退。
-    const logger = sctx.logger('asr-voice')
-    sctx.effect(() => {
-      const migrating = migrateLegacyKeys(scope, sctx.get('credentials') as CredentialsLike | undefined, logger)
-        .catch((error: unknown) => { logger.warn(`legacy key migration stopped: ${error instanceof Error ? error.message : String(error)}`) })
-      return async () => { await migrating }
-    }, 'asr-voice: migrate legacy api keys')
-  });
+export function apply(ctx: AsrVoiceHostContext, config: AsrVoiceHostConfig): void {
+  // DSH 0.1.7 profile-backed forms：配置由 Cordis 作为函数插件第二参注入
+  // （schema 是本模块顶层导出的 Config）。volatile 字段每次显式 `.get()` 解引用，
+  // 热改后同一份闭包拿到的就是最新值，无需 scope 轮询或重挂插件。
+  const settingsScope: { get(): AsrVoiceSettings; update(patch: object): Promise<void> } = {
+    get: () => plainSettings(config),
+    update: (patch) => ctx.settings.update(ASR_VOICE_SETTINGS_NAMESPACE, patch),
+  }
+  // 遗留明文 key → credentials：启动时跑一次，迁移完成后每次都是空转早退。
+  const logger = ctx.logger('asr-voice')
+  ctx.effect(() => {
+    const migrating = migrateLegacyKeys(settingsScope, ctx.get('credentials') as CredentialsLike | undefined, logger)
+      .catch((error: unknown) => { logger.warn(`legacy key migration stopped: ${error instanceof Error ? error.message : String(error)}`) })
+    return async () => { await migrating }
+  }, 'asr-voice: migrate legacy api keys')
 
   const getCloudConfig = (): CloudAsrConfig => {
     const cfg = resolveCloudProvider(settingsScope?.get());

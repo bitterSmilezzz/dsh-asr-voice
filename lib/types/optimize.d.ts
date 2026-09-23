@@ -8,6 +8,14 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+declare module '@deepseek-ai/dsh-llm' {
+    interface MessageSourceMap {
+        /** LLM 提示词优化代理发出的用户消息（content 由本插件清洗过的转写文本组装）。 */
+        'asr-voice': {
+            readonly kind: 'asr-voice';
+        };
+    }
+}
 /** 一个 DSH 已配置模型的条目（给设置页选择器用）。 */
 export interface DshModelEntry {
     id: string;

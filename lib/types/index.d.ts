@@ -13,13 +13,28 @@
  * credentials（引用名见 src/key-ref.ts），浏览器只经私有 JSON 路由调用，拿不到 key。
  * 纯 Node HTTP + 官方 LLM 通道，无平台专属二进制 → macOS / Windows 双平台。
  */
-import type { Context } from '@deepseek-ai/cordis';
+import type { Context, Volatile } from '@deepseek-ai/cordis';
 import { type AsrVoiceSettings } from './settings.ts';
 import { type CloudAsrConfig } from './transcribe.ts';
 import { type CloudProviderLike } from './asr-models.ts';
 /** Host context slice this plugin consumes (webServer/llm/settings via type merges). */
 type AsrVoiceHostContext = Context;
+/**
+ * DSH 0.1.7 起 apply 收到的配置：schema 顶层 volatile，所以每个字段都是
+ * `Volatile<T>` 引用（官方 llm-deepseek `plainOptions()` 同款语义）。
+ */
+type AsrVoiceHostConfig = {
+    [K in keyof AsrVoiceSettings]: AsrVoiceSettings[K] extends object ? {
+        [P in keyof AsrVoiceSettings[K]]: Volatile<AsrVoiceSettings[K][P]>;
+    } : Volatile<AsrVoiceSettings[K]>;
+};
 export declare const name = "dsh-asr-voice";
+/**
+ * DSH 0.1.7 profile-backed forms：配置 schema 必须在入口模块**顶层导出**（官方
+ * SettingsForms 读 `entry.fiber.runtime.Config`，namespace 取 `entry.options.id`）。
+ * schema 本体在 ./settings.ts，这里转置出来；volatile 标记也在那边，勿在此重复。
+ */
+export { AsrVoiceSettingsSchema as Config, ASR_VOICE_SETTINGS_NAMESPACE } from './settings.ts';
 /** 所需 Cordis 服务（服务名，非 entry id）。 */
 export declare const inject: string[];
 /**
@@ -73,6 +88,5 @@ export declare function migrateLegacyKeys(scope: {
     warn(message: string): void;
     info(message: string): void;
 }): Promise<void>;
-export declare function apply(ctx: AsrVoiceHostContext): void;
-export {};
+export declare function apply(ctx: AsrVoiceHostContext, config: AsrVoiceHostConfig): void;
 //# sourceMappingURL=index.d.ts.map

@@ -9,6 +9,14 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
+// DSH 0.1.7 起 MessageSourceMap 不再有共享的 `plugin` 兜底 kind（每个生产方在
+// 自己的模块里声明自己的 kind，官方 user-approval / model-selection / webhook 均如此）。
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** LLM 提示词优化代理发出的用户消息（content 由本插件清洗过的转写文本组装）。 */
+    'asr-voice': { readonly kind: 'asr-voice' }
+  }
+}
 import { guardRoute, readJsonBody, redactSecret, sendJson, statusOfBodyError } from './http.ts';
 import { LIST_MODELS_TIMEOUT_MS } from './asr-models.ts';
 
@@ -142,7 +150,7 @@ async function optimizeWithLlm(ctx: Context, text: string, target?: OptimizeTarg
     messages: [
       createUserMessage({
         content: [{ type: 'text', text }],
-        source: { kind: 'plugin', plugin: 'dsh-asr-voice' },
+        source: { kind: 'asr-voice' },
       }),
     ],
     temperature: 0.2,

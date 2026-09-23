@@ -13,15 +13,16 @@
 #   host 实时通道（realtime.provider 选 'builtin' 假 provider 或真云端预置）。
 # - 提示词优化：本地启发式（zh/en 清洗）或可选 LLM 重写（optimize.mode 默认
 #   llm，走 DSH 当前所选模型的官方 LLM 通道，host 代理）。
-# - 设置页卡片：「设置 → 插件 → 配置」→「语音输入」（settings.plugin.item,
-#   key: asr-voice；host 注册同名 settings namespace 让配置 tab 枚举到卡片）。
+# - 设置页卡片：「设置 → 插件 → 配置」→「语音输入」（plugins.bundle.config,
+#   key: asr-voice；配置 schema 是入口模块顶层导出的 Config，DSH 0.1.7 起
+#   profile-backed forms，entry id 即 namespace）。
 # - API key 只进 **DSH 凭据服务**（预置引用名与官方 LLM 凭据同名），settings 与浏览器
 #   都不持有密钥；音频与转写请求经 /api/asr-voice/* 私有 JSON 代理。纯 Node HTTP 实现，
 #   macOS / Windows 双平台。
 #
-# host inject 只列硬依赖（webServer/llm）；settings 走 scoped inject（可选，
-# 缺失时仅云端 ASR 无 key、不影响挂载），agentDefaultModel 在优化路由内
-# ctx.get 可选读取。client 侧 settingsScope / locale / slots 是硬依赖（设置卡与
+# host inject 只列硬依赖（webServer/llm）；配置经函数插件第二参注入（DSH 0.1.7
+# Config 契约），无需 inject settings；agentDefaultModel 在优化路由内
+# ctx.get 可选读取。client 侧 configForms / locale / slots 是硬依赖（设置卡与
 # 按钮座位必需），connection / sessions / remote.credentials 是可选 ctx.inject
 # （缺失只让对应能力退化：密钥读写 / 回合打断，不影响挂载）。
 # 注意：inject 项是 Cordis 服务名（非 entry id）。

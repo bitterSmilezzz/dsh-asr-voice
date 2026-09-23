@@ -37,12 +37,13 @@ interface VoiceCardOwnerProps {
   view?: VoiceCardView | undefined
 }
 
-/** 硬依赖：设置卡/配置读写必须的顶层服务（与兄弟插件同款：settingsScope 必须硬依赖，
- * 否则卡片包在 scoped inject 里会因某服务不可注入而永不注册——这正是此前设置卡消失的根因）。 */
+/** 硬依赖：设置卡/配置读写必须的顶层服务（DSH 0.1.7 起 configForms 取代
+ * settingsScope；必须硬依赖，否则卡片包在 scoped inject 里会因服务不可注入而
+ * 永不注册——这正是此前设置卡消失的根因）。 */
 export const inject = [
   'slots',
   'locale',
-  'settingsScope',
+  'configForms',
 ]
 
 /** 快捷键处理（按住说话 / 点击切换 / 实时对话进出），随 fiber 生命周期注册。 */
@@ -195,10 +196,10 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(applyHotkey, 'asr-voice: hotkey')
 
   // 设置卡片（plugins.bundle.config, key: 包名）+ 配置绑定。
-  // settingsScope 已是顶层硬依赖，卡片直接在 apply 顶层注册（与兄弟插件同款）——
+  // configForms 已是顶层硬依赖，卡片直接在 apply 顶层注册（与兄弟插件同款）——
   // 绝不能把卡片包进 ctx.inject([...])：任一服务不可注入则回调永不执行、卡片永不出现
   // （此前把凭据服务的 connection 放进 scoped inject，设置卡就消失过）。
-  ctx.effect(() => bindConfigScope(ctx.settingsScope), 'asr-voice: settings scope sync')
+  ctx.effect(() => bindConfigScope(ctx.configForms), 'asr-voice: config form sync')
   ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
     name: 'plugins.bundle.config',
     key: PACKAGE_NAME,
@@ -208,7 +209,7 @@ export function apply(ctx: ClientContext): void {
   // 凭据绑定（可选服务，单独 scoped inject）：alpha.3 起凭据域在 `remote.credentials`，
   // 旧运行时经 `connection.api.credentials` 回退，由适配器归一化。这个回调只负责绑定
   // 凭据，任一服务缺席就永远不执行——但不影响上面卡片的注册。
-  ctx.inject(['settingsScope', 'connection', 'remote', 'remote.credentials'], (raw) => {
+  ctx.inject(['connection', 'remote', 'remote.credentials'], (raw) => {
     const c = raw as ClientContext & {
       connection?: { api?: { credentials?: LegacyCredentialsApiLike } }
       remote?: { credentials?: CredentialsApiLike }

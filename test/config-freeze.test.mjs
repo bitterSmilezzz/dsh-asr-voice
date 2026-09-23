@@ -43,6 +43,12 @@ function hostSnapshot(patch = {}, { withKeys = false } = {}) {
 }
 
 /** 可编排的假 scope：writable / 是否真的接受写入都能拨。 */
+/**
+ * 假 ConfigForm（DSH 0.1.7 契约）：`ConfigForms.get(entryId)` 返回它，
+ * `set` 返回 Promise<boolean>（宿主是否接受这次写入）。
+ * accept=false 对应「真实宿主把写入吞掉并重载状态」——旧 SettingsScope 的失败语义，
+ * 新契约用返回 false 表达；writeDraft 的读回校验逻辑照旧判定成败。
+ */
 function fakeScope(initial, { accept = true } = {}) {
   let value = structuredClone(initial)
   const written = []
@@ -51,11 +57,12 @@ function fakeScope(initial, { accept = true } = {}) {
     subscribe: () => () => {},
     set: async (field, next) => {
       written.push(field)
-      // 真实 SettingsScope 会吞掉失败并重载宿主状态——accept=false 就是这种情况。
-      if (accept) value = { ...value, [field]: structuredClone(next) }
+      if (!accept) return false
+      value = { ...value, [field]: structuredClone(next) }
+      return true
     },
   }
-  return { scope, written, binder: { bind: () => scope } }
+  return { scope, written, forms: { get: () => scope } }
 }
 
 test('mergeHostValue: 宿主冻结引用不会漏进运行时快照', () => {
@@ -124,7 +131,7 @@ test('pickPreset：切预置连带刷 baseUrl / model / mode', () => {
 test('writeDraft：只写真正改过的段，并按宿主读回判定成败', async () => {
   const initial = hostSnapshot()
   const ok = fakeScope(initial)
-  bindConfigScope(ok.binder)
+  bindConfigScope(ok.forms)
   mergeHostValue(structuredClone(initial))
 
   let draft = withProviders(newDraft(), [], '')
@@ -135,7 +142,7 @@ test('writeDraft：只写真正改过的段，并按宿主读回判定成败', a
 
   // 宿主把写回吞掉（真实 SettingsScope 的失败语义）：必须报出是哪一段没落盘。
   const refusing = fakeScope(initial, { accept: false })
-  bindConfigScope(refusing.binder)
+  bindConfigScope(refusing.forms)
   const failedDraft = { ...newDraft(), language: 'en-US' }
   assert.equal(await writeDraft(failedDraft), 'language')
   // 回归：第一次失败已经把草稿并进本地快照，重试仍要报失败而不是算出「零变更」。
@@ -145,7 +152,7 @@ test('writeDraft：只写真正改过的段，并按宿主读回判定成败', a
 test('writeDraft：realtime 段同样按需落盘（曾漏写：实时设置只在本地生效、宿主回声即打回）', async () => {
   const initial = hostSnapshot()
   const ok = fakeScope(initial)
-  bindConfigScope(ok.binder)
+  bindConfigScope(ok.forms)
   mergeHostValue(structuredClone(initial))
 
   const draft = { ...newDraft(), realtime: { ...newDraft().realtime, engine: 'segmented' } }

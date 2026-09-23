@@ -8,6 +8,31 @@
 
 ## [未发布]
 
+### 变更（破坏性）
+
+- **适配 DSH 0.1.7-rc.1 的设置架构迁移**（上游 `601d6761e4` profile-backed forms）：
+  host 半区原先的 `sctx.settings.register(namespace, schema)` **已被上游移除**
+  （`SettingsProvider` → `SettingsForms`，只剩 `configure/describe/update/replace/mutate`），
+  改为在入口模块顶层导出 `Config`（`AsrVoiceSettingsSchema`，顶层 `.volatile()`）+
+  `apply(ctx, config)` 函数插件；client 半区的 `ctx.settingsScope.bind({namespace})` →
+  `ctx.configForms.get(entryId)`。
+  **对使用者无行为影响**：多供应商列表 / active / preset·baseUrl·model·mode、
+  behavior 全组、realtime 全组、language 的默认值都不变，设置卡仍渲染在侧边栏
+  Plugins → 本插件 → 配置表单；「保存」仍只写真正改过的段并读回校验成败。
+- `ctx.llm.stream` 的消息 source 不再使用共享的 `plugin` kind（上游 `MessageSourceMap`
+  删除了该兜底成员，每个生产方在自己的模块里声明自己的 kind）→ 改为自有
+  `{ kind: 'asr-voice' }`。
+- 依赖对齐：`@deepseek-ai/*` 全部 devDependencies 与 peerDependencies 抬到
+  `^0.1.7-rc.1`。
+
+### 工程
+
+- Config schema 顶层标 `.volatile()`：0.1.7 起没有 volatile 标记的 entry 不会进入
+  `describe()`，官方配置页与 client 写入会**静默失效**（无编译错、无运行错）。
+- host 侧用官方同款递归 `plainOf()` 剥 volatile 引用（`Volatile<T>.get()` 返回
+  `VolatileSnapshot<T>`），既有的一次性明文 key 迁移（`migrateLegacyKeys`）与
+  `resolveCloudProvider` / `listProviders` 一行未改。
+
 ### 修复
 
 - **SSE 重复消费者返回明确 409**（此前是 200 + 空 body）：host 曾在写完 SSE 头

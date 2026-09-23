@@ -156,7 +156,10 @@ export const AsrVoiceSettingsSchema: any = z.object({
       utteranceWatchdogMs: z.natural().min(1_000).max(300_000).default(60_000),
     }),
   }),
-})
+  // DSH 0.1.7 profile-backed forms：顶层 volatile 让整份 schema 成为可热改表单
+  // （volatileForm() 见到 meta.volatile 即整棵纳入 describe）。缺了它这个 entry
+  // 根本不出现在 settings 里，设置卡与 client 写入全部静默失效。
+}).volatile()
 
 /** 业务侧类型（手写，不依赖 schema 推断——schema 已注解为 Schemastery.Schema 以便声明可移植，TypeT 会退化为 any）。 */
 export interface AsrVoiceCloudProvider {
