@@ -6,6 +6,26 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
+## [0.4.4] - 2026-09-25
+
+### 修复
+
+- **两个零引用的 `@deepseek-ai/*` peer 补标 `optional`**（Code Review 发现，低危）：
+  `@deepseek-ai/dsh-agent` 与 `@deepseek-ai/dsh-api-remotes` 在 `src/` 与 `test/`
+  全库 0 引用（连 `import type` 都没有），却未在 `peerDependenciesMeta` 中标 optional，
+  与上一轮刚补标的 `dsh-client-ui-theme` / `dsh-client-ui-input-trigger` 口径不一致。
+  现按同一把尺子补齐，消除「声明了却不被需要」的安装期误报。
+
+  说明：宿主侧 peer 兼容校验（`evaluatePluginCompatibility`）只比较 `@deepseek-ai/dsh*`
+  的版本区间，**不读** `peerDependenciesMeta`；`optional` 只影响包管理器安装期的必要性
+  判定，不影响运行时准入。故此项不改变任何运行行为。
+
+### 测试
+
+- 补一条口径守卫：**`src/` 与 `test/` 零引用的 `@deepseek-ai/*` peer 必须标 `optional`**，
+  防止以后再出现「同为 0 引用、一项标了一项没标」的口径分裂。守卫比对真实 `import` /
+  `from` 子句引用（排除注释与测试自身说明文字），已通过「剥掉 optional → 变红」反向验证。
+
 ## [0.4.3] - 2026-09-25
 
 ### 修复

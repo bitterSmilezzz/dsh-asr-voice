@@ -1,6 +1,6 @@
 {
   "name": "@bittersmilezzz/dsh-asr-voice",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "开口即成文 · Speak-to-prompt for DeepSeek Harness：云端 ASR 语音识别 + 提示词优化 + 填入草稿/自动发送，跨平台 macOS / Windows。",
   "type": "module",
   "main": "lib/index.js",
@@ -113,6 +113,12 @@
     "react-dom": "^18.2.0"
   },
   "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-remotes": {
+      "optional": true
+    },
     "@deepseek-ai/dsh-client-ui-plugin-manager": {
       "optional": true
     },
