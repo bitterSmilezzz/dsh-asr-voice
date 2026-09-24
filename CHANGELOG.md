@@ -6,6 +6,28 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
+## [0.4.3] - 2026-09-25
+
+### 修复
+
+- **两个零引用的客户端 peer 补标 `optional`**（`@deepseek-ai/dsh-client-ui-theme`、
+  `@deepseek-ai/dsh-client-ui-input-trigger`）：这两项在 `src/` 与 `test/` 全库 0 引用，
+  却未在 `peerDependenciesMeta` 中标 optional——而同为零引用的
+  `dsh-client-ui-plugin-manager` 已正确标了，属漏配。DSH Desktop profile 会校验插件
+  peer 的可满足性，非 optional 的必需 peer 一旦缺失会以 `requires missing` 拒载整棵
+  插件树。当前两包在各 profile 均已装上，故无实际故障；补齐后与既有做法一致、消除该
+  拒载风险。
+- **补「改包名四处契约」一致性钉子测试**：`package.json` 的 name /
+  `cordis.patch.yml` 的 `name`（模块说明符）/ client bundle 的
+  `__ModuleLoader__.load({ id })` / 样式注入的 `data-plugin`（+`data-plugin-css` 派生值）
+  五处现在由 `test/entry-id-parity.test.mjs` 钉住。此前这五处仅靠人工保持一致——改包名
+  漏任何一处都是静默失效（编译不错、运行不报，只是插件加载不到 / 样式挂错标签），
+  而兄弟插件 model-selector 早有同款钉子，本插件缺失。
+- 依赖与行为均无变化（`lib/` 未变）。
+- 验证：`pnpm install --frozen-lockfile` EXIT 0（lockfile 零改动）、
+  `pnpm test` 333 passed / 0 failed（新增 1 条）、双 program typecheck EXIT 0、
+  `pnpm build` EXIT 0。
+
 ## [0.4.2] - 2026-09-24
 
 ### 变更

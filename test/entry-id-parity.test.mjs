@@ -54,6 +54,39 @@ test('entry id 不是 npm 包名（防止有人把包名抄进 namespace）', ()
     `entry id 不能等于 npm 包名 "${pkg.name}"；本插件 entry id 是短名`)
 })
 
+test('包名四处契约一致：package.json / cordis.patch.yml name / loader id / 样式 data-plugin', () => {
+  // 改包名必须同步四处，漏任何一处都**静默失效**（AGENTS.md「插件加载契约」）：
+  // ① package.json 的 name；② cordis.patch.yml 的 **name**（模块说明符，不是同行 id）；
+  // ③ client bundle 的 `window.__ModuleLoader__.load({ id })`；④ 样式注入的
+  //    `data-plugin` / `data-plugin-css`。注意 entry `id` 是短名、**不**参与本契约。
+  const pkg = JSON.parse(read('package.json'))
+  const patch = read('cordis.patch.yml')
+  const source = read('src/client/index.ts')
+  const bundle = read('lib/client.js')
+
+  const patchName = patch.match(/^\s*name:\s*['"]?((?:@[^/]+\/)?[A-Za-z0-9._-]+)['"]?\s*$/m)
+  assert.ok(patchName, 'cordis.patch.yml 里找不到 insert 的 name（模块说明符）')
+
+  const loaderId = bundle.match(/__ModuleLoader__\.load\(\{\s*\n\s*id:\s*['"]([^'"]+)['"]/)
+  assert.ok(loaderId, 'lib/client.js 里找不到 __ModuleLoader__.load({ id })')
+
+  const dataPlugin = source.match(/tag\.dataset\.plugin\s*=\s*['"]([^'"]+)['"]/)
+  const dataPluginCss = source.match(/tag\.dataset\.pluginCss\s*=\s*['"]([^'"]+)['"]/)
+  assert.ok(dataPlugin, 'src/client/index.ts 里找不到 data-plugin 赋值')
+  assert.ok(dataPluginCss, 'src/client/index.ts 里找不到 data-plugin-css 赋值')
+
+  const expected = pkg.name
+  for (const [label, value] of [
+    ['cordis.patch.yml name', patchName[1]],
+    ['loader id', loaderId[1]],
+    ['data-plugin', dataPlugin[1]],
+  ]) {
+    assert.equal(value, expected, `${label} "${value}" != package.json name "${expected}"`)
+  }
+  assert.equal(dataPluginCss[1], `${expected}/client`,
+    `data-plugin-css "${dataPluginCss[1]}" != "${expected}/client"`)
+})
+
 test('schema 字段集 == client AsrVoiceConfig 顶层键集', async () => {
   // host schema 的顶层键：AsrVoiceSettingsSchema 解析空文档后剥 volatile。
   const { AsrVoiceSettingsSchema } = await import('../lib/settings.js')
