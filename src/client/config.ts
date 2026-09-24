@@ -1,5 +1,6 @@
 /** dsh-asr-voice — client 配置模型。
- * 配置权威源是 host settings 服务（namespace `asr-voice`），本模块持有运行时快照
+ * 配置权威源是 host settings 服务（namespace `dsh-asr-voice` = cordis.patch.yml 的
+ * entry id，见下方 ASR_VOICE_NS 的注释），本模块持有运行时快照
  * `config`（录音链路同步读取）与设置页的编辑草稿。**API key 不在此处也不在
  * settings**：它落 DSH credentials 服务，本模块只提供按引用名读写的那几个函数。
  * 两条铁律，都是踩过坑得来的：
@@ -148,8 +149,23 @@ export function subscribeConfig(fn: () => void): () => void {
   return () => { listeners.delete(fn) }
 }
 
-/** settings namespace（host schema 注册与 client 绑定共用同一个名字）。 */
-export const ASR_VOICE_NS = 'asr-voice'
+/**
+ * settings namespace = host 半区 `cordis.patch.yml` 的 entry `id`（DSH 0.1.7 起
+ * `SettingsForms.update/describe` 与 `ConfigForms.get` 都用这个字符串定位 entry，
+ * 官方实现是 `entries().find(row => row.options.id === ns)`）。
+ *
+ * ⚠ 它**不是** npm 包名（本插件 npm 包名是 `@bittersmilezzz/dsh-asr-voice`），也不
+ * 是文件里其它地方的插件短名。拿错字符串不会抛错：host 侧 update 抛
+ * `No configurable plugin entry`（migrateLegacyKeys 只落一句 warn），client 侧
+ * configForms.get 拿到 unavailable 快照 → 设置卡能渲染但**所有读写静默失效**。
+ * 一致性由 test/entry-id-parity.test.mjs 钉住（读 cordis.patch.yml 的 id，并与
+ * host 侧 `src/settings.ts` 的 `ASR_VOICE_SETTINGS_NAMESPACE` 三方比对）。
+ *
+ * 这里刻意**不再 import** host 侧的常量：client bundle 由 tsdown 打包，把
+ * `src/settings.ts`（整棵 schemastery schema）拖进浏览器产物没有意义；用一个字面量
+ * 加一条三方比对测试守住等价性，比共享导入更轻。
+ */
+export const ASR_VOICE_NS = 'dsh-asr-voice'
 
 /** host Config form 的写路径（DSH 0.1.7 官方 ConfigForms.get 的返回类型）。 */
 export type SettingsScopeLike<T> = ConfigForm<T>
@@ -301,7 +317,11 @@ function jsonEqual(a: unknown, b: unknown): boolean {
  * @returns 订阅 disposer（随 fiber 清理）。
  */
 export function bindConfigScope(forms: ConfigForms): () => void {
-  // entryId 即 namespace：host 半区 cordis.patch.yml 的 entry id（= npm 包名）。
+  // entryId 即 namespace：host 半区 cordis.patch.yml 的 entry `id`。注意它**不是**
+  // npm 包名（本插件 entry id 是短名 'asr-voice'，npm 包名是
+  // '@bittersmilezzz/dsh-asr-voice'）；`configForms.get` 拿错字符串不会报错，只会
+  // 拿到 unavailable 快照 → 设置卡能渲染但读写全部静默失效。
+  // 一致性由 test/entry-id-parity.test.mjs 钉住（读 cordis.patch.yml 的 id）。
   const scope = forms.get<AsrVoiceConfig>(ASR_VOICE_NS)
   voiceScope = scope
   const applySnapshot = (): void => {
@@ -496,6 +516,10 @@ export function keyRefOf(p: KeyRefSource): string {
 /** 保存草稿：只把真正改过的顶层段写回 host，然后**读回校验**。
  * `SettingsScope.set` 会把失败吞掉并重载宿主状态（promise 成功不代表落盘），所以
  * 判定标准只能是写完之后宿主那边到底剩什么——这也正是官方设置卡的做法。
+ *
+ * 两道防线：① `set` 返回 `false` = 宿主拒写/跳过，直接计入失败集合并提前返回段名，
+ * 不等读回——因为拒写时宿主刚触发过一次状态重载，重载值恰好等于草稿时读回会算出
+ * 「零变更」→ 静默报成功；② 读回校验兜住「set 说成功但宿主没留住」这一类。
  * @returns 未落盘的段名，undefined 表示全部落定。
  */
 export async function writeDraft(draft: AsrVoiceConfig): Promise<ConfigSection | undefined> {
@@ -513,7 +537,19 @@ export async function writeDraft(draft: AsrVoiceConfig): Promise<ConfigSection |
     announce()
     return undefined
   }
-  for (const key of changed) await scope.set(key, draft[key])
+  // 第一道防线：宿主当场拒写的段不再往下走。拒写常常伴随一次宿主状态重载，
+  // 重载值若恰好等于草稿，后面的读回校验会得出「全部落定」的错误结论。
+  const refused: ConfigSection[] = []
+  for (const key of changed) {
+    let accepted = false
+    try {
+      accepted = await scope.set(key, draft[key])
+    } catch {
+      accepted = false
+    }
+    if (!accepted) refused.push(key)
+  }
+  if (refused.length > 0) return refused[0]
   mergeHostValue(draft)
   announce()
   const resolved = scope.getSnapshot().value

@@ -28,6 +28,7 @@ type AsrVoiceHostConfig = {
         [P in keyof AsrVoiceSettings[K]]: Volatile<AsrVoiceSettings[K][P]>;
     } : Volatile<AsrVoiceSettings[K]>;
 };
+export declare function isVolatileRef(value: unknown): value is Volatile<unknown>;
 export declare const name = "dsh-asr-voice";
 /**
  * DSH 0.1.7 profile-backed forms：配置 schema 必须在入口模块**顶层导出**（官方

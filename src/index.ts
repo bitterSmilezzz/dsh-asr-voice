@@ -45,9 +45,23 @@ type AsrVoiceHostConfig = {
     : Volatile<AsrVoiceSettings[K]>
 };
 
-/** 是否 volatile 引用（官方同款判据：有 get 方法）。 */
-function isVolatileRef(value: unknown): value is Volatile<unknown> {
-  return typeof value === 'object' && value !== null && typeof (value as { get?: unknown }).get === 'function'
+/**
+ * 是否 volatile 引用。
+ *
+ * 判据与官方一致：cosmokit 的品牌 symbol `cosmokit.volatile.write`（见
+ * `vendor/cosmokit/src/volatile.ts` 的 `isVolatile`）。`get` 只作兼容回退——
+ * 只用「有 get 方法」会在两个方向咬人：不同 ESM/CJS 副本只带品牌 symbol 时
+ * **漏剥**（`plainSettings` 返回带 `get` 的假快照，整棵配置读成 undefined，
+ * 无编译错无运行错），以及业务对象带 `get` 时**误剥**一层。
+ */
+const VOLATILE_BRAND = Symbol.for('cosmokit.volatile.write')
+
+// 内部导出（非插件公共 API）：只为让 node 单测能直连这条判据（test/index-logic.test.mjs
+// 的「剥引判据与官方一致」用例）。判据本身不随导出改变。
+export function isVolatileRef(value: unknown): value is Volatile<unknown> {
+  if (typeof value !== 'object' || value === null) return false
+  if (VOLATILE_BRAND in value) return true
+  return typeof (value as { get?: unknown }).get === 'function'
 }
 
 /**
@@ -192,7 +206,20 @@ export async function migrateLegacyKeys(
   }
   const patch: Record<string, unknown> = { providers: cloud.providers }
   if (legacyKey !== '') patch.apiKey = ''
-  await scope.update({ asr: { cloud: patch } })
+  try {
+    await scope.update({ asr: { cloud: patch } })
+  } catch (error) {
+    // 到这儿 key 已经全部写进 credentials、settings 里的明文还在：半数完成态。
+    // 只落 warn 用户无法感知，所以把状态两边都点名——下次重启会重试，
+    // resolveApiKey 先读 settings 所以功能不降级。
+    const reason = error instanceof Error ? error.message : String(error)
+    log.warn(
+      `keys moved into credentials but clearing plugin settings failed: ${reason};`
+      + ' the plaintext keys remain in settings and will be retried on next start'
+      + ' (keys stay readable from settings meanwhile, so ASR keeps working)',
+    )
+    return
+  }
   log.info(`moved ${pending.length} API key(s) from plugin settings into DSH credentials`)
 }
 

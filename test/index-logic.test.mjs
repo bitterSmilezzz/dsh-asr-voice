@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
  * parameter property，node strip-only 不支持），与 realtime-dashscope.test.mjs 一致
  * 走构建产物 lib/index.js；改动 src/index.ts 后需先重建 lib 再跑本文件。
  */
-import { providerView, resolveCloudProvider, listProviders, migrateLegacyKeys } from '../lib/index.js'
+import { providerView, resolveCloudProvider, listProviders, migrateLegacyKeys, isVolatileRef } from '../lib/index.js'
 import { keyRefFor } from '../lib/key-ref.js'
 
 /** 组装一份 AsrVoiceSettings 的最小形状（asr.cloud 为唯一读取面）。 */
@@ -146,6 +146,23 @@ test('migrateLegacyKeys: 任一条 set 被拒 → 停止迁移、明文保留（
   assert.match(warns[0], /credentials\.set\(OPENAI_API_KEY\) refused: readonly source/)
 })
 
+test('migrateLegacyKeys: 抹明文失败（update 拒写）→ warn 点名半数态，不谎报完成', async () => {
+  // 走到这儿 key 已全部进 credentials、settings 里的明文还在 = 迁移做了一半。旧实现
+  // 让异常冒到 migrateLegacyKeys 的 .catch() 只落一句 warn，用户看不到是哪一半没做完。
+  const scope = makeScope(settingsWith({ preset: 'openai', providers: [{ id: 'p1', preset: 'openai', apiKey: 'key-a' }] }))
+  scope.update = async () => { throw new Error('config entry not writable') }
+  const warns = []
+  const infos = []
+  await migrateLegacyKeys(scope, { set: async () => {} }, { warn: (m) => { warns.push(m) }, info: (m) => { infos.push(m) } })
+  assert.deepEqual(infos, [], '没抹成功就不得记「moved N API key(s)」——那是谎报完成')
+  assert.equal(warns.length, 1)
+  assert.match(warns[0], /clearing plugin settings failed: config entry not writable/)
+  // 关键：warn 必须同时说清「钥匙在哪」和「现状可恢复」，别只说一句失败。
+  assert.match(warns[0], /keys moved into credentials/)
+  assert.match(warns[0], /plaintext keys remain in settings/)
+  assert.match(warns[0], /retried on next start/)
+})
+
 // ── 引用名派生必须唯一（迁移写入的 ref 必须就是读取路径读的 ref）───────────────
 // 缺陷形态：读取路径（resolveCloudProvider / listProviders）先过 providerView 兜底
 // id='provider' 再 keyRefFor，而迁移路径直接拿原始行 keyRefFor。行缺 id/name 时两条
@@ -179,4 +196,32 @@ test('migrateLegacyKeys: 旧单配置的 ref 与 resolveCloudProvider 派生的 
   const readRef = keyRefFor(resolveCloudProvider(scope.get()))
   assert.equal(sets[0][0], readRef)
   assert.equal(sets[0][0], 'ASR_VOICE_LEGACY_API_KEY')
+})
+
+// ── volatile 剥引判据必须与官方一致 ─────────────────────────────────────────
+// 缺陷形态：判据只用「有 get 方法」。Cordis 的 volatile 引用是 cosmokit 的
+// `Symbol.for('cosmokit.volatile.write')` 品牌对象，不同 ESM/CJS 副本、或上游换成
+// write-only 形态时，引用可能只有品牌 symbol 而没有 get → 插件把它当普通对象递归，
+// `plainSettings` 返回一个带 `get` 的假快照，整棵配置读成 undefined——无编译错、
+// 无运行错，正是本插件最怕的静默失效。反向也一样：任何带 get 的业务对象会被误剥一层。
+
+test('isVolatileRef: 品牌 symbol 命中即判 volatile（官方 isVolatile 同款判据）', () => {
+  const brand = Symbol.for('cosmokit.volatile.write')
+  // 只有品牌、没有 get：旧判据会漏剥。
+  const brandOnly = { [brand]: () => {} }
+  assert.equal(isVolatileRef(brandOnly), true, '只带品牌 symbol 的引用必须判 volatile')
+  // 品牌 + get：正常形态。
+  const both = { [brand]: () => {}, get: () => 42 }
+  assert.equal(isVolatileRef(both), true)
+})
+
+test('isVolatileRef: get 方法作兼容回退（无品牌的旧形状仍判 volatile）', () => {
+  assert.equal(isVolatileRef({ get: () => 42 }), true)
+  assert.equal(isVolatileRef({ get: () => 42, other: 1 }), true)
+})
+
+test('isVolatileRef: 普通值一律不判 volatile', () => {
+  for (const value of [null, undefined, 42, 'x', true, [], {}, { nested: { get: 1 } }]) {
+    assert.equal(isVolatileRef(value), false, `${JSON.stringify(value) ?? String(value)} 不是 volatile 引用`)
+  }
 })

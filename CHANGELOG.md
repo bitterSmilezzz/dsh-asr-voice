@@ -6,7 +6,40 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
-## [未发布]
+## [0.4.1] - 2026-09-24
+
+### 修复
+
+- **修复 settings namespace 与 profile entry id 不一致导致的设置卡静默失效**（P1，真实缺陷）：
+  `ASR_VOICE_NS` / `ASR_VOICE_SETTINGS_NAMESPACE` 此前是 `'asr-voice'`，而本插件在
+  `cordis.patch.yml` 里的 entry `id` 是 `'dsh-asr-voice'`。DSH 0.1.7 起 host 的
+  `settings.update(ns, …)` 与 client 的 `configForms.get(entryId)` 都按 entry id 定位
+  （官方实现 `entries().find(row => row.options.id === ns)`），字符串不相等时**不抛错、
+  不报编译错**：host 侧 update 抛 `No configurable plugin entry`（旧 key 迁移只落一句
+  warn），client 侧拿到 unavailable 快照 —— 设置卡照样渲染，但所有读写全部静默失效。
+  现两处统一为 `'dsh-asr-voice'`，并新增 `test/entry-id-parity.test.mjs` 三方钉住
+  （cordis.patch.yml 的 id / host 常量 / client 常量）。
+- **保存草稿时宿主拒写不再可能静默报成功**：`writeDraft` 此前丢掉
+  `ConfigForm.set` 的 `Promise<boolean>` 返回值，只靠读回校验判定成败。拒写时宿主会重载
+  状态，重载值恰好等于草稿（草稿本就来自宿主旧值重排）时读回校验算出「零变更」→ 静默
+  报成功。现把 `set` 的返回值当第一道防线，reject 也一并计入失败；读回校验保留作第二道
+  防线。补 3 条回归用例（拒写 + 重载值 == 草稿 / set 直接 reject / 原 accept=false）。
+- **volatile 剥引判据改为与官方一致**：`isVolatileRef` 此前只判「有 `get` 方法」，而官方
+  判据是 cosmokit 品牌 symbol `Symbol.for('cosmokit.volatile.write')`。只用 `get` 会在
+  两个方向咬人：不同 ESM/CJS 副本只带品牌 symbol 时**漏剥**（返回带 `get` 的假快照，
+  整棵配置读成 undefined），业务对象带 `get` 时**误剥**一层。现品牌 symbol 优先、
+  `get` 作兼容回退，补 3 条回归用例。
+- **旧 key 迁移的半数完成态有了明确诊断**：key 已写入 credentials、但抹除 settings 明文
+  失败时，此前只有一句笼统 warn。现日志点名三件事：钥匙已进 credentials、settings 里的
+  明文还在、重启后会重试（且功能不降级），并**不再谎报** `moved N API key(s)`。
+
+### 工程
+
+- 新增 `test/entry-id-parity.test.mjs`：除 entry id 三方一致外，还钉住「schema 字段集 ==
+  client `AsrVoiceConfig` 顶层键集」——`AsrVoiceSettingsSchema` 被标为 `any`，两份手写
+  类型此前没有编译期保护。
+
+## [0.4.0] - 2026-09-23
 
 ### 变更（破坏性）
 
@@ -410,7 +443,8 @@
 - `providerView` 归一化，避免不同 provider 返回值形状差异导致的展示错乱。
 - 补上 `http` / `presets` 相关测试用例。
 
-[未发布]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.3.3...v0.4.0
+[0.4.1]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.4.0...v0.4.1
 [0.3.0]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.15...v0.3.0
 [0.2.15]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/bitterSmilezzz/dsh-asr-voice/compare/v0.2.13...v0.2.14

@@ -15,8 +15,19 @@
  * 则回退到旧单配置（向后兼容，写回优先新 shape）。
  */
 import z from '@deepseek-ai/schemastery';
-/** 插件配置页的 settings namespace：注册后出现在「设置 → 插件 → 配置」分派列表。 */
-export declare const ASR_VOICE_SETTINGS_NAMESPACE = "asr-voice";
+/**
+ * 插件配置的 settings namespace = host 半区 `cordis.patch.yml` 的 entry `id`。
+ *
+ * DSH 0.1.7 起 host/client 两侧都用它定位 entry（官方实现：
+ * `SettingsForms`/`ConfigForms` 内部按 `row.options.id === ns` 查找）。⚠ 它**不是**
+ * npm 包名（`@bittersmilezzz/dsh-asr-voice`）：拿错字符串 host 侧 update 会抛
+ * `No configurable plugin entry`、client 侧拿到 unavailable 快照 → 设置卡渲染成功但
+ * 读写静默失效。一致性由 test/entry-id-parity.test.mjs 钉住（读 cordis.patch.yml）。
+ *
+ * client 半区不重复定义字面量，直接从本模块 re-export（见 src/client/config.ts），
+ * 避免 host/client 两个字符串各自漂移。
+ */
+export declare const ASR_VOICE_SETTINGS_NAMESPACE = "dsh-asr-voice";
 /** 单个云端 ASR 供应商配置（密钥不在此处，见文件头）。 */
 export declare const CloudProviderSchema: z<Schemastery.ObjectS<NoInfer<{
     /** 供应商唯一 id（新增时由前端生成，如 crypto.randomUUID）。 */

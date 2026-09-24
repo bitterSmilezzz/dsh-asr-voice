@@ -149,6 +149,41 @@ test('writeDraft：只写真正改过的段，并按宿主读回判定成败', a
   assert.equal(await writeDraft(failedDraft), 'language')
 })
 
+test('writeDraft：拒写后宿主重载值 == 草稿时不得静默报成功', async () => {
+  // 这条钉的是「只靠读回校验」的漏报窗口：`set` 返回 false 时真实宿主会**重载状态**，
+  // 重载值若恰好等于草稿（草稿本就来自宿主旧值的重排），读回校验会算出零变更 →
+  // 静默报成功。新实现把 `set` 的返回值当第一道防线，重载成什么都无所谓。
+  const initial = hostSnapshot()
+  const draft = { ...newDraft(), language: 'zh-CN' }
+  // 假 scope：set 一律拒写，且拒写的同时把值换成草稿（模拟重载）。
+  let value = structuredClone(initial)
+  const reloadTo = { ...structuredClone(initial), language: 'zh-CN' }
+  const scope = {
+    getSnapshot: () => ({ value, writable: true }),
+    subscribe: () => () => {},
+    set: async () => {
+      value = structuredClone(reloadTo)
+      return false
+    },
+  }
+  bindConfigScope({ get: () => scope })
+  mergeHostValue(structuredClone(initial))
+  assert.equal(await writeDraft(draft), 'language', '宿主拒写就必须报失败，即使读回值恰好等于草稿')
+})
+
+test('writeDraft：set 直接 reject 也按拒写处理（不当成成功）', async () => {
+  const initial = hostSnapshot()
+  const scope = {
+    getSnapshot: () => ({ value: structuredClone(initial), writable: true }),
+    subscribe: () => () => {},
+    set: async () => { throw new Error('host gone') },
+  }
+  bindConfigScope({ get: () => scope })
+  mergeHostValue(structuredClone(initial))
+  const draft = { ...newDraft(), language: 'zh-CN' }
+  assert.equal(await writeDraft(draft), 'language')
+})
+
 test('writeDraft：realtime 段同样按需落盘（曾漏写：实时设置只在本地生效、宿主回声即打回）', async () => {
   const initial = hostSnapshot()
   const ok = fakeScope(initial)
