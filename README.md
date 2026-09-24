@@ -105,7 +105,7 @@ dsh plugin --profile <profile> add <本插件路径或 GitHub 仓库>
 浏览器端依赖官方 client 包（由 DSH 提供），无需额外安装。
 *The browser side relies on official DSH client packages — nothing extra to install.*
 
-## 设置项 Settings（namespace `asr-voice`）
+## 设置项 Settings（namespace `dsh-asr-voice`）
 
 | 分组 | 字段 | 默认 | 说明 |
 |---|---|---|---|
@@ -266,7 +266,7 @@ qwen3-asr-flash-realtime，凭据复用 `DASHSCOPE_API_KEY`），保持默认 `b
 | 麦克风 | 高 | 浏览器 `getUserMedia` 需要用户授权；采集只由点击/快捷键发起。整段模式在点击停止或静音判定时结束；**实时对话会持续占用麦克风**，直到你结束会话，或 `realtime.maxSessionMs` 到点自动结束 |
 | 网络 | 中 | 云端 ASR/LLM 时，本机 host 向**你配置的** baseUrl 发起 HTTPS 请求；`realtime.provider = dashscope-realtime` 或 `realtime.tts = cloud` 时另向阿里云百炼发起 WSS（WebSocket）连接 |
 | 音频输出 | 低 | 实时对话把 agent 回复经**系统默认输出设备外放**：`realtime.tts = browser`（默认）走浏览器 `speechSynthesis`，`= cloud` 走云端 TTS 返回的 PCM；两种情况周围人都听得到，且没有单独的音量/静音路由（止声用打断入口） |
-| 设置读写 | 中 | 读写自有 namespace `asr-voice`（**不含密钥**：两个 `apiKey` 字段标了 `role('secret')`，过线即被脱敏） |
+| 设置读写 | 中 | 读写自有 namespace `dsh-asr-voice`（**不含密钥**：两个 `apiKey` 字段标了 `role('secret')`，过线即被脱敏） |
 | 凭据读写 | 中 | 只按**自己派生的引用名**读写：`OPENAI_API_KEY` / `GROQ_API_KEY` / `SILICONFLOW_API_KEY` / `MIMO_API_KEY` / `DASHSCOPE_API_KEY` / `ASR_VOICE_*_API_KEY`。预置引用名与官方 LLM 凭据**同名**（刻意复用，代价是共用同一把 key 与配额）。页面上输入的 key 仅在保存那一次经 connection RPC 送到 host 落库；**已存的值永不回传浏览器**，设置页只看得到「已配置 / 未配置」 |
 | 文件（诊断落盘） | 中 | **默认不落盘**：仅当显式设置 `DSH_ASR_DEBUG_KEEP_WAVS=1`（或 `true`/`yes`）时，才把原始录音写入 `~/.dsh/asr-voice-debug/`（可用 `DSH_ASR_DEBUG_DIR` 重定向，按**文件数 100 + 总字节 200MB** 双约束自动裁剪）用于排查采集/转码问题；未开启时连 `?capture=1` 显式抓取也一律拒绝。不执行命令、不读取其他凭据 |
 

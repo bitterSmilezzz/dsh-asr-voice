@@ -218,7 +218,7 @@ export const CSS = `
   /* 整条 pointer-events: none，这里必须单独打开，否则 × 点不动。 */
   pointer-events: auto;
 }
-.dshav-hint-dismiss:hover { background: var(--dsw-alias-fill-2, rgba(128,128,128,.18)); }
+.dshav-hint-dismiss:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.18)); }
 .dshav-hotkey-hint .dshav-dot {
   flex: none;
   width: 8px;

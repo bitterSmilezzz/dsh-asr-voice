@@ -6,6 +6,38 @@
 
 本 CHANGELOG 自 0.2.11 起建立并回填：更早的历史以 GitHub Release 与 git tag 为准。
 
+## [0.4.2] - 2026-09-24
+
+### 变更
+
+- **`@deepseek-ai/*` 依赖对齐到 DSH `0.1.7-rc.2`**：peerDependencies 与 devDependencies
+  双列同步升级（`dsh-agent` / `dsh-api-remotes` / `dsh-client-locale` /
+  `dsh-client-ui-conversation` / `dsh-client-ui-input-trigger` / `dsh-client-ui-plugin-manager` /
+  `dsh-client-ui-primitives` / `dsh-client-ui-renderer` / `dsh-client-ui-settings` /
+  `dsh-client-ui-settings-plugins` / `dsh-client-ui-slots` / `dsh-client-ui-theme` /
+  `dsh-host-webserver` / `dsh-llm` / `dsh-settings`）。
+- **未做源码适配**：已核对 rc.1→rc.2 的破坏性变更面——`plugins.bundle.config` 设置座位契约
+  未变；`conversation.input.right` 槽未变（`ComposerBarInjected` 仅新增可选
+  `hooks.stopShortcut` 成员，本插件不读 `hooks`）；`ui-conversation` 的输入框改动
+  （Enter 行为、stop shortcut）不触及本插件注册面。
+- 验证：332 用例全绿 + host/client 双 program typecheck + `pnpm build`。
+- 归档判断：上游 rc.2 未新增语音/ASR 能力，`packages/experimental/speech-to-text-sensevoice`
+  与 `client-ui-voice-input` 仍是 09-23/09-24 两轮已结论的「功能子集重叠、插件有独立价值」，
+  维持**不归档**。
+
+### 修复
+
+- **补齐 `@deepseek-ai/*` 依赖的 devDependencies 双列**（AGENTS.md 书面约定）：`dsh-agent` /
+  `dsh-api-remotes` / `dsh-llm` 此前只在 peerDependencies 里，靠 pnpm 的 `autoInstallPeers`
+  兜底才装得上——本地解析与宿主 peer 校验两侧不对称，且只列 peer 的那一侧一旦失效不会抛错。
+  新增 `test/deps-double-listing.test.mjs` 两条钉子（双列齐全 + 同依赖两侧范围一致，
+  `cordis` / `schemastery` 按宽松策略豁免范围比对）。
+- **去掉一个未在官方 design token 里定义的 CSS 变量**：`src/client/styles.ts:221` 的
+  `.dshav-hint-dismiss:hover` 用了 `--dsw-alias-fill-2`（rc.1 / rc.2 的 ui-theme 均无此 token，
+  一直靠 fallback 中性灰渲染），改用已确认存在的 `--dsw-alias-interactive-bg-hover`。
+- **README 的 namespace 描述与源码对齐**：`ad28120` 起真实 namespace 已是 `dsh-asr-voice`
+  （entry id 三方一致），README 两处仍写 `asr-voice`，已订正。
+
 ## [0.4.1] - 2026-09-24
 
 ### 修复
