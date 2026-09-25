@@ -118,7 +118,6 @@ test('src/test 零引用的 @deepseek-ai/* peer 必须标 optional（口径守�
   // 引用——deps-double-listing.test.mjs 自身就在注释里逐个点名这些包名。判据见文件
   // 顶部的 referencesPackage：先削块注释 / 引号外行注释，再匹配 import 子句形态。若这里退回
   // 裸 includes(name)，「防止再漏标」的键子会被自己的注释喂成恒真。
-  const root3 = fileURLToPath(import.meta.url).replace(/[^/]+$/, '')
   const walk = (dir, sink) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name)
@@ -131,8 +130,8 @@ test('src/test 零引用的 @deepseek-ai/* peer 必须标 optional（口径守�
     }
   }
   const files = []
-  walk(join(root3, '..', 'src'), files)
-  walk(join(root3, '..', 'test'), files)
+  walk(join(root, 'src'), files)
+  walk(join(root, 'test'), files)
 
   const meta = pkg.peerDependenciesMeta ?? {}
   const unmarked = findUnmarkedOptionalPeers(
